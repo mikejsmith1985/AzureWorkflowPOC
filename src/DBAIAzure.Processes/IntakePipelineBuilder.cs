@@ -29,7 +29,7 @@ public static class IntakePipelineBuilder
         // IExternalKernelProcessMessageChannel — the runner's HitlExternalChannel.
         // Interview talking point: this is the SK Process Framework equivalent of
         // LangGraph's interrupt() — one line to cross the process boundary.
-        var hitlProxy = builder.AddProxyStep("hitl-proxy", [Events.AwaitHuman], []);
+        var hitlProxy = builder.AddProxyStep("hitl_proxy", [Events.AwaitHuman], []);
 
         // Entry: new ticket arrives
         builder
