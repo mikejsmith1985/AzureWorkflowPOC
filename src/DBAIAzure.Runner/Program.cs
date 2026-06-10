@@ -10,6 +10,9 @@ using OpenTelemetry;
 using OpenTelemetry.Trace;
 using Spectre.Console;
 
+// Suppress SKEXP0080 solution-wide: SK Process Framework is experimental in 1.77.0
+#pragma warning disable SKEXP0080
+
 // ── Configuration ─────────────────────────────────────────────────────────────
 var config = new ConfigurationBuilder()
     .AddJsonFile("appsettings.json", optional: false)
@@ -95,13 +98,13 @@ static async Task RunTicketAsync(Kernel kernel, TicketState ticket)
 
     var process = IntakePipelineBuilder.Build();
 
-#pragma warning disable SKEXP0080
-    var runningProcess = await process.StartAsync(kernel, new KernelProcessEvent
+    // RunToEndAsync blocks until the process terminates — all steps complete before returning.
+    // Explicit 60s timeout so hangs surface as errors rather than silently blocking the demo.
+    await LocalKernelProcessFactory.RunToEndAsync(process, kernel, new KernelProcessEvent
     {
         Id = Events.TicketReceived,
         Data = ticket,
-    });
-#pragma warning restore SKEXP0080
+    }, TimeSpan.FromSeconds(60));
 
     AnsiConsole.MarkupLine("[green]✓ Pipeline complete.[/]");
 }

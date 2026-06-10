@@ -1,5 +1,6 @@
 using DBAIAzure.Core.Models;
 using Microsoft.SemanticKernel;
+using Spectre.Console;
 using System.Text.Json;
 
 namespace DBAIAzure.Processes.Steps;
@@ -36,6 +37,8 @@ public class IntakeStep : KernelProcessStep
             Title = normalized?.Title ?? ticket.Title,
             Description = normalized?.Description ?? ticket.Description,
         };
+
+        AnsiConsole.MarkupLine($"  [dim]↳ Intake:[/] {Markup.Escape(updated.Title)}");
 
         await ctx.EmitEventAsync(new() { Id = Events.IntakeComplete, Data = updated });
     }

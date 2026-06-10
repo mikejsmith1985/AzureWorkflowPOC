@@ -1,5 +1,6 @@
 using DBAIAzure.Core.Models;
 using Microsoft.SemanticKernel;
+using Spectre.Console;
 using System.Text.Json;
 
 namespace DBAIAzure.Processes.Steps;
@@ -34,6 +35,13 @@ public class GapAnalysisStep : KernelProcessStep
         var questions = JsonSerializer.Deserialize<List<string>>(json) ?? [];
 
         var updated = ticket with { ClarifyingQuestions = questions };
+
+        AnsiConsole.MarkupLine("  [yellow]Gap analysis — clarifying questions for the PO:[/]");
+        for (int questionIndex = 0; questionIndex < questions.Count; questionIndex++)
+        {
+            AnsiConsole.MarkupLine($"    [dim]{questionIndex + 1}.[/] {Markup.Escape(questions[questionIndex])}");
+        }
+
         await ctx.EmitEventAsync(new() { Id = Events.QuestionsReady, Data = updated });
     }
 }
