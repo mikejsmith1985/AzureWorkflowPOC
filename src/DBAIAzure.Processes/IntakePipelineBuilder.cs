@@ -25,13 +25,20 @@ public static class IntakePipelineBuilder
         var estimation = builder.AddStepFromType<EstimationStep>();
         var action = builder.AddStepFromType<ActionStep>();
 
+        // Proxy step: routes AwaitHuman events out of the process boundary to
+        // IExternalKernelProcessMessageChannel — the runner's HitlExternalChannel.
+        // Interview talking point: this is the SK Process Framework equivalent of
+        // LangGraph's interrupt() — one line to cross the process boundary.
+        var hitlProxy = builder.AddProxyStep("hitl-proxy", [Events.AwaitHuman], []);
+
         // Entry: new ticket arrives
         builder
             .OnInputEvent(Events.TicketReceived)
             .SendEventTo(new ProcessFunctionTargetBuilder(intake));
 
-        // HITL resume: external event from runner after human answers
-        // This routes HumanResponded (injected by the runner) directly to ValidationStep.
+        // HITL resume: external event injected by the runner after the human answers.
+        // The runner starts a fresh process with this event, routing directly to
+        // ValidationStep — skipping intake so the ticket is not re-normalized.
         builder
             .OnInputEvent(Events.HumanResponded)
             .SendEventTo(new ProcessFunctionTargetBuilder(validation));
@@ -51,10 +58,17 @@ public static class IntakePipelineBuilder
             .OnEvent(Events.NotReadyPath)
             .SendEventTo(new ProcessFunctionTargetBuilder(gapAnalysis));
 
-        // GapAnalysisStep → HitlPauseStep (emits public event, process suspends)
+        // GapAnalysisStep → HitlPauseStep
         gapAnalysis
             .OnEvent(Events.QuestionsReady)
             .SendEventTo(new ProcessFunctionTargetBuilder(hitlPause));
+
+        // HitlPauseStep → proxy → IExternalKernelProcessMessageChannel
+        // After this edge fires, the process has no further internal events and terminates.
+        // RunToEndAsync unblocks; the runner reads the channel and collects PO input.
+        hitlPause
+            .OnEvent(Events.AwaitHuman)
+            .EmitExternalEvent(hitlProxy, Events.AwaitHuman);
 
         // EstimationStep → ActionStep (terminal)
         estimation
