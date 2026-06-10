@@ -1,0 +1,24 @@
+# Build outputs
+bin/
+obj/
+
+# User-specific files
+*.user
+*.suo
+.vs/
+
+# Rider
+.idea/
+
+# Secrets — NEVER commit these
+appsettings.Development.json
+appsettings.*.json
+!appsettings.json
+
+# NuGet packages
+*.nupkg
+.nuget/
+
+# Coverage
+TestResults/
+coverage/

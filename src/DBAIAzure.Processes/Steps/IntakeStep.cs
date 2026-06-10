@@ -1,0 +1,44 @@
+using DBAIAzure.Core.Models;
+using Microsoft.SemanticKernel;
+using System.Text.Json;
+
+namespace DBAIAzure.Processes.Steps;
+
+public class IntakeStep : KernelProcessStep
+{
+    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
+
+    [KernelFunction]
+    public async Task NormalizeAsync(KernelProcessStepContext ctx, TicketState ticket, Kernel kernel)
+    {
+        // $$"""...""" — two $ means single { is a literal brace; {{expr}} is the interpolation hole
+        var prompt = $$"""
+            Normalize the following support ticket for Definition of Ready validation.
+            Return ONLY a raw JSON object with these keys (no markdown, no code fences):
+            {"title": "concise active-voice title up to 10 words", "description": "technical detail preserved, filler removed"}
+
+            Original title: {{ticket.Title}}
+            Original description: {{ticket.Description}}
+            """;
+
+        var resultText = (await kernel.InvokePromptAsync(prompt)).ToString().Trim();
+
+        var json = resultText.StartsWith("```")
+            ? string.Join('\n', resultText.Split('\n').Skip(1).TakeWhile(l => !l.StartsWith("```")))
+            : resultText;
+
+        NormalizedTicket? normalized = null;
+        try { normalized = JsonSerializer.Deserialize<NormalizedTicket>(json, JsonOpts); }
+        catch { /* keep original values on parse failure */ }
+
+        var updated = ticket with
+        {
+            Title = normalized?.Title ?? ticket.Title,
+            Description = normalized?.Description ?? ticket.Description,
+        };
+
+        await ctx.EmitEventAsync(new() { Id = Events.IntakeComplete, Data = updated });
+    }
+
+    private record NormalizedTicket(string? Title, string? Description);
+}
