@@ -1,25 +1,81 @@
+@* LangGraph-parity thread list: search, status/source filter, source badges, pagination. *@
 @page "/"
 @implements IDisposable
 @inject PipelineOrchestrator Orchestrator
 @inject NavigationManager Nav
 
-<h1 class="text-xl font-semibold text-gray-100 mb-6">Pipeline Dashboard</h1>
-
-<div class="flex justify-end mb-4">
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-semibold text-gray-100">Threads</h1>
     <a href="/new-ticket"
        class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-sm rounded transition-colors">
-        + New Ticket
+        + New Thread
     </a>
 </div>
 
-@{
-    var runs = Orchestrator.GetAllRuns();
-}
+<!-- ── Search + filter bar ──────────────────────────────────────────────── -->
+<div class="flex flex-wrap gap-3 mb-4">
+    <input type="search"
+           placeholder="Search ticket ID or title…"
+           value="@_searchQuery"
+           @oninput="OnSearchChangedAsync"
+           class="flex-1 min-w-48 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm
+                  text-gray-100 placeholder-gray-600 focus:outline-none focus:border-cyan-500" />
 
-@if (!runs.Any())
+    <select @bind="_statusFilter" @bind:after="OnFilterChangedAsync"
+            class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300
+                   focus:outline-none focus:border-cyan-500">
+        <option value="">All Statuses</option>
+        <option value="Running">Running</option>
+        <option value="AwaitingHuman">Awaiting PO</option>
+        <option value="Complete">Complete</option>
+        <option value="Blocked">Blocked</option>
+        <option value="Failed">Failed</option>
+    </select>
+
+    <select @bind="_sourceFilter" @bind:after="OnFilterChangedAsync"
+            class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300
+                   focus:outline-none focus:border-cyan-500">
+        <option value="">All Sources</option>
+        <option value="manual">Manual</option>
+        <option value="servicenow">ServiceNow</option>
+        <option value="replay">Replay</option>
+    </select>
+
+    <div class="flex items-center gap-2">
+        <button @onclick="PrevPageAsync" disabled="@(_currentPage == 0)"
+                class="px-3 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 text-gray-300
+                       text-sm rounded transition-colors">
+            ‹
+        </button>
+        <span class="text-gray-500 text-sm min-w-16 text-center">
+            @if (_isLoading)
+            {
+                <span>Loading…</span>
+            }
+            else
+            {
+                <span>Page @(_currentPage + 1)</span>
+            }
+        </span>
+        <button @onclick="NextPageAsync" disabled="@(_runs.Count < PageSize)"
+                class="px-3 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 text-gray-300
+                       text-sm rounded transition-colors">
+            ›
+        </button>
+    </div>
+</div>
+
+<!-- ── Thread table ─────────────────────────────────────────────────────── -->
+@if (_isLoading)
+{
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-8 text-center text-gray-600">
+        Loading runs…
+    </div>
+}
+else if (!_runs.Any())
 {
     <div class="bg-gray-900 border border-gray-800 rounded-lg p-8 text-center text-gray-500">
-        No runs yet. Submit a ticket to get started.
+        No threads found. Submit a ticket or push one from ServiceNow to get started.
     </div>
 }
 else
@@ -30,29 +86,41 @@ else
                 <tr>
                     <th class="px-4 py-3">Run ID</th>
                     <th class="px-4 py-3">Ticket</th>
+                    <th class="px-4 py-3">Source</th>
                     <th class="px-4 py-3">Status</th>
                     <th class="px-4 py-3">Points</th>
                     <th class="px-4 py-3">Started</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-800">
-                @foreach (var run in runs)
+                @foreach (var run in _runs)
                 {
-                    <tr class="hover:bg-gray-850 cursor-pointer transition-colors"
+                    <tr class="hover:bg-gray-800 cursor-pointer transition-colors"
                         @onclick="() => GoToRun(run.RunId)">
-                        <td class="px-4 py-3 font-mono text-cyan-400">@run.RunId</td>
+                        <td class="px-4 py-3 font-mono text-cyan-400 text-xs">@run.RunId</td>
                         <td class="px-4 py-3">
-                            <div class="font-medium text-gray-200">@run.InitialTicket.TicketId</div>
-                            <div class="text-gray-500 text-xs truncate max-w-xs">@run.InitialTicket.Title</div>
+                            <div class="font-medium text-gray-200 text-xs truncate max-w-xs">
+                                @run.TicketId
+                            </div>
+                            <div class="text-gray-500 text-xs truncate max-w-xs mt-0.5">
+                                @run.Title
+                            </div>
+                            @if (!string.IsNullOrEmpty(run.SnowNumber))
+                            {
+                                <div class="text-xs text-sky-400 mt-0.5">@run.SnowNumber</div>
+                            }
+                        </td>
+                        <td class="px-4 py-3">
+                            <SourceBadge Source="@run.Source" />
                         </td>
                         <td class="px-4 py-3">
                             <StatusBadge Status="@run.Status" />
                         </td>
                         <td class="px-4 py-3 text-gray-300">
-                            @(run.CurrentTicket?.StoryPoints?.ToString() ?? "—")
+                            @(run.StoryPoints?.ToString() ?? "—")
                         </td>
                         <td class="px-4 py-3 text-gray-500 text-xs">
-                            @run.StartedAt.ToLocalTime().ToString("HH:mm:ss")
+                            @run.StartedAt.ToLocalTime().ToString("MM/dd HH:mm")
                         </td>
                     </tr>
                 }
@@ -62,14 +130,81 @@ else
 }
 
 @code {
-    protected override void OnInitialized()
+    private const int PageSize = 20;
+
+    private string _searchQuery = string.Empty;
+    private string _statusFilter = string.Empty;
+    private string _sourceFilter = string.Empty;
+    private int _currentPage;
+    private IReadOnlyList<PersistedRunSummary> _runs = [];
+    private bool _isLoading;
+
+    protected override async Task OnInitializedAsync()
     {
         Orchestrator.RunUpdated += OnRunUpdated;
+        await LoadRunsAsync();
+    }
+
+    private async Task LoadRunsAsync()
+    {
+        _isLoading = true;
+
+        var parsedStatus = Enum.TryParse<PipelineRunStatus>(_statusFilter, out var s)
+            ? (PipelineRunStatus?)s
+            : null;
+
+        var search = string.IsNullOrWhiteSpace(_searchQuery) ? null : _searchQuery.Trim();
+
+        var allRuns = await Orchestrator.ListRunsAsync(search, parsedStatus, _currentPage * PageSize, PageSize);
+
+        // Source filter applied in-memory (not yet wired to repository query)
+        _runs = string.IsNullOrEmpty(_sourceFilter)
+            ? allRuns
+            : allRuns.Where(r => r.Source == _sourceFilter).ToList();
+
+        _isLoading = false;
+    }
+
+    private async Task OnSearchChangedAsync(ChangeEventArgs args)
+    {
+        _searchQuery = args.Value?.ToString() ?? string.Empty;
+        _currentPage = 0;
+        await LoadRunsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnFilterChangedAsync()
+    {
+        _currentPage = 0;
+        await LoadRunsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task PrevPageAsync()
+    {
+        if (_currentPage > 0)
+        {
+            _currentPage--;
+            await LoadRunsAsync();
+        }
+    }
+
+    private async Task NextPageAsync()
+    {
+        if (_runs.Count >= PageSize)
+        {
+            _currentPage++;
+            await LoadRunsAsync();
+        }
     }
 
     private void GoToRun(string runId) => Nav.NavigateTo("/run/" + runId);
 
-    private void OnRunUpdated(string _) => InvokeAsync(StateHasChanged);
+    private void OnRunUpdated(string _) => InvokeAsync(async () =>
+    {
+        await LoadRunsAsync();
+        StateHasChanged();
+    });
 
     public void Dispose() => Orchestrator.RunUpdated -= OnRunUpdated;
 }

@@ -10,12 +10,15 @@
     <PackageReference Include="Microsoft.SemanticKernel" Version="1.77.0" />
     <PackageReference Include="Microsoft.SemanticKernel.Process.Core" Version="1.77.0-alpha" />
     <PackageReference Include="Microsoft.SemanticKernel.Process.LocalRuntime" Version="1.77.0-alpha" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design"  Version="8.0.11" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\DBAIAzure.Core\DBAIAzure.Core.csproj" />
     <ProjectReference Include="..\DBAIAzure.Processes\DBAIAzure.Processes.csproj" />
     <ProjectReference Include="..\DBAIAzure.Connectors\DBAIAzure.Connectors.csproj" />
+    <ProjectReference Include="..\DBAIAzure.Storage\DBAIAzure.Storage.csproj" />
   </ItemGroup>
 
   <ItemGroup>

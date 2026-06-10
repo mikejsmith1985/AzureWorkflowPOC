@@ -11,29 +11,27 @@ public class ActionStep : KernelProcessStep
     public async Task CreateJiraAsync(KernelProcessStepContext ctx, TicketState ticket, Kernel kernel)
     {
         var reporter = kernel.Services.GetService<IProgressReporter>();
-        reporter?.ReportStep("Action", "Creating Jira issue…");
+        reporter?.ReportStep("Action", "Creating Jira issue...");
 
-        // Mock Jira creation — in production this would call IActionConnector
+        // Mock Jira creation - replace with IActionConnector in Phase 3
         var issueKey = $"SBRO-{Math.Abs(ticket.TicketId.GetHashCode()) % 900 + 100}";
-        var url = $"https://jira.example.com/browse/{issueKey}";
+        var url      = $"https://jira.example.com/browse/{issueKey}";
+        var updated  = ticket with { JiraIssueUrl = url };
 
-        var updated = ticket with { JiraIssueUrl = url };
+        reporter?.ReportSnapshot("Action", ticket, updated);
+        reporter?.ReportComplete(updated);
 
-        // Summary panel — the key demo output for the happy path
         var table = new Table()
             .Border(TableBorder.Rounded)
             .AddColumn("[dim]Field[/]")
             .AddColumn("[bold]Value[/]")
-            .AddRow("Ticket ID", Markup.Escape(updated.TicketId))
-            .AddRow("Title", Markup.Escape(updated.Title))
-            .AddRow("Story Points", updated.StoryPoints?.ToString() ?? "[dim]—[/]")
-            .AddRow("Reasoning", Markup.Escape(updated.EstimationReasoning ?? "—"))
-            .AddRow("Jira URL", $"[link={Markup.Escape(url)}]{Markup.Escape(url)}[/]");
-
-        reporter?.ReportComplete(updated);
+            .AddRow("Ticket ID",    Markup.Escape(updated.TicketId))
+            .AddRow("Title",        Markup.Escape(updated.Title))
+            .AddRow("Story Points", updated.StoryPoints?.ToString() ?? "[dim]-[/]")
+            .AddRow("Reasoning",    Markup.Escape(updated.EstimationReasoning ?? "-"))
+            .AddRow("Jira URL",     $"[link={Markup.Escape(url)}]{Markup.Escape(url)}[/]");
         AnsiConsole.Write(table);
 
-        // No further routing — action is the terminal node on the ready path
         await ctx.EmitEventAsync(new() { Id = "ProcessComplete", Data = updated });
     }
 }

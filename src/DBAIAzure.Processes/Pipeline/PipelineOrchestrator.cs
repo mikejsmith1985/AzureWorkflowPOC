@@ -1,3 +1,4 @@
+using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
 using Microsoft.SemanticKernel;
 using System.Collections.Concurrent;
@@ -18,14 +19,24 @@ public sealed class PipelineOrchestrator
     private const int MaxClarificationRounds = 3;
 
     private readonly Func<IProgressReporter, Kernel> _kernelFactory;
+    private readonly IRunRepository _repository;
+    private readonly IHitlNotifier? _hitlNotifier;
+    private readonly string _portalBaseUrl;
     private readonly ConcurrentDictionary<string, PipelineRun> _runs = new();
 
     /// <summary>Fired on a background thread whenever a run's state or events change.</summary>
     public event Action<string>? RunUpdated;
 
-    public PipelineOrchestrator(Func<IProgressReporter, Kernel> kernelFactory)
+    public PipelineOrchestrator(
+        Func<IProgressReporter, Kernel> kernelFactory,
+        IRunRepository? repository = null,
+        IHitlNotifier? hitlNotifier = null,
+        string portalBaseUrl = "http://localhost:5000")
     {
-        _kernelFactory = kernelFactory;
+        _kernelFactory  = kernelFactory;
+        _repository     = repository ?? NullRunRepository.Instance;
+        _hitlNotifier   = hitlNotifier;
+        _portalBaseUrl  = portalBaseUrl.TrimEnd('/');
     }
 
     // ── Public API ─────────────────────────────────────────────────────────────
@@ -34,23 +45,71 @@ public sealed class PipelineOrchestrator
     public string StartRun(TicketState ticket)
     {
         var runId = Guid.NewGuid().ToString("N")[..8];
-        var run = new PipelineRun(runId, ticket);
+        var run   = new PipelineRun(runId, ticket);
         _runs[runId] = run;
+
+        _ = _repository.UpsertRunAsync(runId, ticket, PipelineRunStatus.Running);
         _ = Task.Run(() => ExecuteRunAsync(run, ticket));
         return runId;
     }
 
-    public PipelineRun? GetRun(string runId) =>
-        _runs.GetValueOrDefault(runId);
+    public PipelineRun? GetRun(string runId) => _runs.GetValueOrDefault(runId);
 
     public IReadOnlyList<PipelineRun> GetAllRuns() =>
         [.. _runs.Values.OrderByDescending(r => r.StartedAt)];
+
+    /// <summary>
+    /// Returns persisted run summaries — survives server restarts.
+    /// Falls back to in-memory list if the repository is not configured.
+    /// </summary>
+    public async Task<IReadOnlyList<PersistedRunSummary>> ListRunsAsync(
+        string? search = null,
+        PipelineRunStatus? status = null,
+        int skip = 0,
+        int take = 50,
+        CancellationToken ct = default)
+    {
+        var persisted = await _repository.ListRunsAsync(search, status, skip, take, ct);
+        if (persisted.Count > 0) return persisted;
+
+        // Fallback to in-memory when storage is not configured
+        return _runs.Values
+            .OrderByDescending(r => r.StartedAt)
+            .Skip(skip).Take(take)
+            .Select(r => new PersistedRunSummary(
+                r.RunId,
+                r.InitialTicket.TicketId,
+                r.InitialTicket.Title,
+                r.InitialTicket.Source,
+                r.InitialTicket.SnowNumber,
+                r.InitialTicket.SnowPriority,
+                r.Status,
+                r.CurrentTicket?.StoryPoints,
+                r.CurrentTicket?.JiraIssueUrl,
+                r.StartedAt,
+                null))
+            .ToList();
+    }
 
     /// <summary>Submit the PO's answer and unblock the waiting background task.</summary>
     public void SubmitHitlAnswer(string runId, string answer)
     {
         if (_runs.TryGetValue(runId, out var run))
             run.ProvideHitlInput(answer);
+    }
+
+    /// <summary>
+    /// Replay a run from a specific step snapshot — creates a new run starting
+    /// from the captured TicketState, equivalent to LangGraph time-travel.
+    /// </summary>
+    public string ReplayFromSnapshot(string stepName, TicketState snapshotState)
+    {
+        var replayTicket = snapshotState with
+        {
+            TicketId = $"{snapshotState.TicketId}-replay-{DateTime.UtcNow:HHmmss}",
+            Source   = "replay",
+        };
+        return StartRun(replayTicket);
     }
 
     // ── Background execution loop ──────────────────────────────────────────────
@@ -63,35 +122,51 @@ public sealed class PipelineOrchestrator
 
             for (int clarificationRound = 0; clarificationRound <= MaxClarificationRounds; clarificationRound++)
             {
-                var reporter = new BoundProgressReporter(run, () => RunUpdated?.Invoke(run.RunId));
-                var kernel = _kernelFactory(reporter);
+                void NotifyUpdated() => RunUpdated?.Invoke(run.RunId);
+
+                var reporter    = new BoundProgressReporter(run, NotifyUpdated, _repository);
+                var kernel      = _kernelFactory(reporter);
                 var hitlChannel = new HitlExternalChannel();
-                var process = IntakePipelineBuilder.Build();
+                var process     = IntakePipelineBuilder.Build();
 
                 var startEvent = clarificationRound == 0
-                    ? new KernelProcessEvent { Id = Events.TicketReceived, Data = currentTicket }
+                    ? new KernelProcessEvent { Id = Events.TicketReceived,  Data = currentTicket }
                     : new KernelProcessEvent { Id = Events.HumanResponded, Data = currentTicket };
 
                 await LocalKernelProcessFactory.RunToEndAsync(
-                    process, kernel, startEvent, TimeSpan.FromSeconds(120), hitlChannel);
+                    process, kernel, startEvent, TimeSpan.FromSeconds(180), hitlChannel);
 
                 if (!hitlChannel.WasPaused)
                 {
                     var finalTicket = reporter.FinalTicket ?? currentTicket;
                     run.SetComplete(finalTicket);
+                    await _repository.UpsertRunAsync(run.RunId, finalTicket, run.Status);
                     RunUpdated?.Invoke(run.RunId);
                     break;
                 }
 
-                var pausedTicket = ExtractTicketFromProxyMessage(hitlChannel.PausedMessage!, currentTicket);
+                var pausedTicket = ExtractTicket(hitlChannel.PausedMessage!, currentTicket);
                 run.SetAwaitingHuman(pausedTicket);
+                await _repository.UpsertRunAsync(run.RunId, pausedTicket, PipelineRunStatus.AwaitingHuman);
                 RunUpdated?.Invoke(run.RunId);
+
+                // Fire Teams / external notification — non-blocking
+                if (_hitlNotifier is not null)
+                {
+                    var portalUrl = $"{_portalBaseUrl}/run/{run.RunId}";
+                    _ = _hitlNotifier.NotifyAsync(
+                        run.RunId,
+                        pausedTicket.TicketId,
+                        pausedTicket.Title,
+                        pausedTicket.ClarifyingQuestions,
+                        portalUrl);
+                }
 
                 var answer = await run.WaitForHitlInputAsync();
 
                 currentTicket = pausedTicket with
                 {
-                    HumanAnswer = answer,
+                    HumanAnswer       = answer,
                     ClarificationRound = pausedTicket.ClarificationRound + 1,
                 };
 
@@ -101,21 +176,21 @@ public sealed class PipelineOrchestrator
                     $"PO answered (round {currentTicket.ClarificationRound}) — re-validating",
                     ReportLevel.Info,
                     DateTimeOffset.UtcNow));
+                await _repository.UpsertRunAsync(run.RunId, currentTicket, PipelineRunStatus.Running);
                 RunUpdated?.Invoke(run.RunId);
             }
         }
         catch (Exception ex)
         {
             run.SetFailed(ex.Message);
+            await _repository.UpsertRunAsync(run.RunId, run.CurrentTicket ?? run.InitialTicket, PipelineRunStatus.Failed);
             RunUpdated?.Invoke(run.RunId);
         }
     }
 
-    private static TicketState ExtractTicketFromProxyMessage(
-        KernelProcessProxyMessage message, TicketState fallback)
+    private static TicketState ExtractTicket(KernelProcessProxyMessage message, TicketState fallback)
     {
-        if (message.EventData?.ToObject() is TicketState ticket)
-            return ticket;
+        if (message.EventData?.ToObject() is TicketState ticket) return ticket;
         return fallback;
     }
 }

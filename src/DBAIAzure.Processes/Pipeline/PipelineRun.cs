@@ -4,24 +4,33 @@ using System.Collections.Concurrent;
 namespace DBAIAzure.Processes.Pipeline;
 
 /// <summary>
-/// Mutable state container for a single pipeline execution.
-/// Background task and UI thread access it concurrently — all mutations go through
-/// the dedicated setter methods to ensure consistent state transitions.
+/// Live mutable state container for a single pipeline execution.
+/// Background task and Blazor UI thread access it concurrently — all mutations
+/// go through the dedicated setter methods to keep state transitions consistent.
 /// </summary>
 public sealed class PipelineRun
 {
     private TaskCompletionSource<string>? _hitlInputSource;
+    private readonly List<StepStateSnapshot> _snapshots = [];
+    private readonly object _snapshotLock = new();
 
     public string RunId { get; }
     public TicketState InitialTicket { get; }
     public TicketState? CurrentTicket { get; private set; }
     public PipelineRunStatus Status { get; private set; } = PipelineRunStatus.Running;
     public ConcurrentQueue<PipelineEvent> Events { get; } = new();
+    public ConcurrentQueue<StreamToken>   TokenStream { get; } = new();
     public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
     public string? ErrorMessage { get; private set; }
 
-    /// <summary>Questions from GapAnalysisStep shown to the PO when status is AwaitingHuman.</summary>
+    /// <summary>Clarifying questions from GapAnalysisStep shown to the PO.</summary>
     public IReadOnlyList<string> HitlQuestions { get; private set; } = [];
+
+    /// <summary>TicketState snapshots captured before/after each LLM step — powers state inspector.</summary>
+    public IReadOnlyList<StepStateSnapshot> Snapshots
+    {
+        get { lock (_snapshotLock) { return [.. _snapshots]; } }
+    }
 
     public PipelineRun(string runId, TicketState initialTicket)
     {
@@ -31,15 +40,22 @@ public sealed class PipelineRun
     }
 
     public void AddEvent(PipelineEvent pipelineEvent) => Events.Enqueue(pipelineEvent);
+    public void AddToken(StreamToken token) => TokenStream.Enqueue(token);
+
+    public void AddSnapshot(StepStateSnapshot snapshot)
+    {
+        lock (_snapshotLock) { _snapshots.Add(snapshot); }
+    }
 
     public void SetRunning()
     {
         Status = PipelineRunStatus.Running;
+        CurrentTicket = CurrentTicket; // no-op; signals re-render
     }
 
     /// <summary>
-    /// Transitions to AwaitingHuman and exposes a Task the background loop awaits.
-    /// The UI calls ProvideHitlInput to unblock it.
+    /// Transitions to AwaitingHuman; exposes a Task the background loop awaits.
+    /// The UI calls ProvideHitlInput to complete that Task and resume execution.
     /// </summary>
     public void SetAwaitingHuman(TicketState pausedTicket)
     {
@@ -49,9 +65,7 @@ public sealed class PipelineRun
         _hitlInputSource = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
-    /// <summary>
-    /// Terminal state — Complete when story points assigned, Blocked when max rounds hit.
-    /// </summary>
+    /// <summary>Terminal state — Complete when story points assigned, Blocked when max rounds hit.</summary>
     public void SetComplete(TicketState finalTicket)
     {
         CurrentTicket = finalTicket;
@@ -65,8 +79,8 @@ public sealed class PipelineRun
     }
 
     /// <summary>Awaited by the background loop while the UI collects PO input.</summary>
-    // VSTHRD003: The TCS uses RunContinuationsAsynchronously, so continuations run on a
-    // thread-pool thread — not inline — which is the safe pattern for cross-context awaiting.
+    // VSTHRD003: TCS uses RunContinuationsAsynchronously — continuations run on a thread-pool
+    // thread, not inline, which is the safe pattern for cross-context awaiting.
 #pragma warning disable VSTHRD003
     public Task<string> WaitForHitlInputAsync()
     {

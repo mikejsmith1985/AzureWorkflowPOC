@@ -1,42 +1,88 @@
+@* LangGraph-parity run detail: events, state inspector, live stream, graph topology, HITL, time-travel replay. *@
 @page "/run/{RunId}"
 @implements IDisposable
 @inject PipelineOrchestrator Orchestrator
 @inject NavigationManager Nav
+@inject IJSRuntime JSRuntime
 
 @if (_run is null)
 {
-    <p class="text-gray-500 p-8">Run not found.</p>
+    <p class="text-gray-500 p-8">Run @RunId not found.</p>
 }
 else
 {
+    <!-- ── Breadcrumb ─────────────────────────────────────────────────── -->
     <div class="flex items-center gap-3 mb-6">
-        <a href="/" class="text-gray-500 hover:text-cyan-400 text-sm transition-colors">← Dashboard</a>
+        <a href="/" class="text-gray-500 hover:text-cyan-400 text-sm transition-colors">← Threads</a>
         <span class="text-gray-700">/</span>
         <span class="font-mono text-cyan-400 text-sm">@RunId</span>
         <StatusBadge Status="@_run.Status" />
+        <SourceBadge Source="@_run.InitialTicket.Source" />
+        <a href="/graph"
+           class="ml-auto text-xs text-gray-600 hover:text-cyan-400 transition-colors">
+            Topology →
+        </a>
     </div>
 
-    <!-- Ticket summary ────────────────────────────────────────── -->
-    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 mb-6">
-        <div class="text-xs text-gray-500 mb-1">@_run.InitialTicket.TicketId</div>
-        <div class="font-semibold text-gray-100">@_run.InitialTicket.Title</div>
-        <div class="text-sm text-gray-400 mt-1 whitespace-pre-wrap">@_run.InitialTicket.Description</div>
+    <!-- ── Ticket header ─────────────────────────────────────────────── -->
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 mb-4">
+        <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-xs text-gray-500">@_run.InitialTicket.TicketId</span>
+                    @if (!string.IsNullOrEmpty(_run.InitialTicket.SnowNumber))
+                    {
+                        <span class="text-xs text-sky-400">@_run.InitialTicket.SnowNumber</span>
+                    }
+                    @if (!string.IsNullOrEmpty(_run.InitialTicket.SnowPriority))
+                    {
+                        <span class="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">
+                            P@(_run.InitialTicket.SnowPriority)
+                        </span>
+                    }
+                </div>
+                <div class="font-semibold text-gray-100">@_run.InitialTicket.Title</div>
+                <div class="text-sm text-gray-400 mt-1 whitespace-pre-wrap line-clamp-3">
+                    @_run.InitialTicket.Description
+                </div>
+            </div>
+            <div class="text-xs text-gray-600 shrink-0">
+                @_run.StartedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+            </div>
+        </div>
     </div>
 
-    <!-- Event log ─────────────────────────────────────────────── -->
-    <div class="mb-6">
-        <h2 class="text-sm font-medium text-gray-400 mb-3">Pipeline Events</h2>
-        <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-y-auto max-h-96 divide-y divide-gray-800">
-            @foreach (var evt in _run.Events)
+    <!-- ── Tab bar ───────────────────────────────────────────────────── -->
+    <div class="flex gap-1 mb-4 border-b border-gray-800">
+        @foreach (var tabName in new[] { "Events", "State", "Stream", "Graph" })
+        {
+            <button @onclick="() => SetTab(tabName)"
+                    class="px-4 py-2 text-sm transition-colors @TabClass(tabName)">
+                @tabName
+                @if (tabName == "Stream" && _run.TokenStream.Any())
+                {
+                    <span class="ml-1.5 inline-flex items-center justify-center w-1.5 h-1.5
+                                 rounded-full bg-cyan-400 animate-pulse"></span>
+                }
+            </button>
+        }
+    </div>
+
+    <!-- ── Tab: Events ───────────────────────────────────────────────── -->
+    @if (_activeTab == "Events")
+    {
+        <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-y-auto max-h-96
+                    divide-y divide-gray-800 mb-4">
+            @foreach (var pipelineEvent in _run.Events)
             {
                 <div class="px-4 py-2.5 flex items-start gap-3">
                     <span class="text-xs font-mono text-gray-600 mt-0.5 shrink-0">
-                        @evt.Timestamp.ToLocalTime().ToString("HH:mm:ss")
+                        @pipelineEvent.Timestamp.ToLocalTime().ToString("HH:mm:ss")
                     </span>
-                    <span class="text-xs font-medium w-24 shrink-0 @StepColor(evt.StepName)">
-                        @evt.StepName
+                    <span class="text-xs font-medium w-24 shrink-0 @StepColor(pipelineEvent.StepName)">
+                        @pipelineEvent.StepName
                     </span>
-                    <span class="text-sm @LevelColor(evt.Level)">@evt.Message</span>
+                    <span class="text-sm @LevelColor(pipelineEvent.Level)">@pipelineEvent.Message</span>
                 </div>
             }
             @if (!_run.Events.Any())
@@ -44,13 +90,136 @@ else
                 <div class="px-4 py-3 text-sm text-gray-600">Pipeline starting…</div>
             }
         </div>
-    </div>
+    }
 
-    <!-- HITL input panel ──────────────────────────────────────── -->
+    <!-- ── Tab: State Inspector ──────────────────────────────────────── -->
+    @if (_activeTab == "State")
+    {
+        var snapshots = _run.Snapshots;
+        @if (!snapshots.Any())
+        {
+            <div class="bg-gray-900 border border-gray-800 rounded-lg p-6 text-gray-600 text-sm mb-4">
+                No state snapshots yet. Snapshots are captured after each LLM step completes.
+            </div>
+        }
+        else
+        {
+            <div class="flex gap-4 mb-4">
+                <!-- Step list -->
+                <div class="w-44 shrink-0 space-y-1">
+                    @foreach (var snapshot in snapshots)
+                    {
+                        <button @onclick="() => _selectedSnapshot = snapshot"
+                                class="w-full text-left px-3 py-2 rounded text-xs transition-colors
+                                       @SnapshotButtonClass(snapshot)">
+                            <div class="font-medium @StepColor(snapshot.StepName)">@snapshot.StepName</div>
+                            <div class="text-gray-600 mt-0.5">
+                                @snapshot.Timestamp.ToLocalTime().ToString("HH:mm:ss")
+                            </div>
+                        </button>
+                    }
+                </div>
+
+                <!-- Before/after JSON panels -->
+                @if (_selectedSnapshot is { } selected)
+                {
+                    <div class="flex-1 min-w-0 space-y-3">
+                        <!-- Replay button -->
+                        <div class="flex items-center gap-3">
+                            <span class="text-xs text-gray-500">
+                                Snapshot after <strong class="@StepColor(selected.StepName)">
+                                    @selected.StepName
+                                </strong> — @selected.Timestamp.ToLocalTime().ToString("HH:mm:ss")
+                            </span>
+                            <button @onclick="() => ReplayFromSnapshot(selected)"
+                                    class="ml-auto px-3 py-1.5 bg-purple-900 hover:bg-purple-800
+                                           text-purple-200 text-xs rounded transition-colors">
+                                ↩ Replay from here
+                            </button>
+                        </div>
+
+                        <!-- Side-by-side JSON diff -->
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <div class="text-xs text-gray-500 mb-1">Before</div>
+                                <pre class="bg-gray-950 border border-gray-800 rounded p-3 text-xs
+                                            text-gray-300 overflow-x-auto max-h-72 overflow-y-auto
+                                            whitespace-pre-wrap break-all font-mono">@selected.InputJson</pre>
+                            </div>
+                            <div>
+                                <div class="text-xs text-gray-500 mb-1">After</div>
+                                <pre class="bg-gray-950 border border-gray-800 rounded p-3 text-xs
+                                            text-emerald-300 overflow-x-auto max-h-72 overflow-y-auto
+                                            whitespace-pre-wrap break-all font-mono">@selected.OutputJson</pre>
+                            </div>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="flex-1 flex items-center justify-center text-gray-700 text-sm">
+                        Select a step to inspect its state
+                    </div>
+                }
+            </div>
+        }
+    }
+
+    <!-- ── Tab: Live Stream ──────────────────────────────────────────── -->
+    @if (_activeTab == "Stream")
+    {
+        var streamTokens = _run.TokenStream.ToList();
+        @if (!streamTokens.Any())
+        {
+            <div class="bg-gray-900 border border-gray-800 rounded-lg p-6 text-gray-600 text-sm mb-4">
+                No streaming output yet. Token stream appears here as each LLM step generates its response.
+            </div>
+        }
+        else
+        {
+            <div id="stream-panel"
+                 class="bg-gray-950 border border-gray-800 rounded-lg p-4 mb-4 max-h-96
+                        overflow-y-auto font-mono text-xs leading-relaxed">
+                @{
+                    var currentStreamStep = string.Empty;
+                    foreach (var streamToken in streamTokens)
+                    {
+                        if (streamToken.StepName != currentStreamStep)
+                        {
+                            if (!string.IsNullOrEmpty(currentStreamStep))
+                            {
+                                <br /><br />
+                            }
+                            currentStreamStep = streamToken.StepName;
+                            <span class="@StepColor(streamToken.StepName) font-semibold">
+                                [@streamToken.StepName]
+                            </span>
+                            <br />
+                        }
+                        <span class="text-gray-300">@streamToken.Token</span>
+                    }
+                }
+            </div>
+        }
+    }
+
+    <!-- ── Tab: Graph ────────────────────────────────────────────────── -->
+    @if (_activeTab == "Graph")
+    {
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 mb-4">
+            <div class="text-xs text-gray-500 mb-3">
+                Pipeline topology — active step highlighted.
+                <a href="/graph" class="text-cyan-600 hover:text-cyan-400 ml-2">Full page →</a>
+            </div>
+            <div id="@RunGraphContainerId" class="text-center overflow-x-auto"></div>
+        </div>
+    }
+
+    <!-- ── HITL input panel ──────────────────────────────────────────── -->
     @if (_run.Status == PipelineRunStatus.AwaitingHuman)
     {
-        <div class="bg-amber-950 border border-amber-800 rounded-lg p-5 mb-6">
-            <h2 class="text-amber-300 font-medium mb-3">⏸ Awaiting PO Input</h2>
+        <div class="bg-amber-950 border border-amber-800 rounded-lg p-5 mb-4">
+            <h2 class="text-amber-300 font-medium mb-3">Awaiting PO Input</h2>
             @if (_run.HitlQuestions.Any())
             {
                 <p class="text-sm text-amber-200 mb-3">Please answer the following questions:</p>
@@ -61,7 +230,7 @@ else
                     }
                 </ol>
             }
-            <textarea @bind="_hitlAnswer" rows="4"
+            <textarea @bind="_hitlAnswer" @bind:event="oninput" rows="4"
                       class="w-full bg-gray-900 border border-amber-700 rounded px-3 py-2 text-gray-100
                              focus:outline-none focus:border-amber-400 text-sm resize-none mb-3"
                       placeholder="Type your answers here…"></textarea>
@@ -73,24 +242,28 @@ else
         </div>
     }
 
-    <!-- Final result ──────────────────────────────────────────── -->
-    @if (_run.Status == PipelineRunStatus.Complete && _run.CurrentTicket is { } final)
+    <!-- ── Final result ──────────────────────────────────────────────── -->
+    @if (_run.Status == PipelineRunStatus.Complete && _run.CurrentTicket is { } finalTicket)
     {
         <div class="bg-emerald-950 border border-emerald-800 rounded-lg p-5">
-            <h2 class="text-emerald-300 font-medium mb-3">✓ Complete</h2>
+            <h2 class="text-emerald-300 font-medium mb-3">Complete</h2>
             <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
                 <dt class="text-gray-500">Story Points</dt>
-                <dd class="text-emerald-300 font-bold">@final.StoryPoints</dd>
+                <dd class="text-emerald-300 font-bold">@finalTicket.StoryPoints</dd>
                 <dt class="text-gray-500">Reasoning</dt>
-                <dd class="text-gray-200">@final.EstimationReasoning</dd>
+                <dd class="text-gray-200">@finalTicket.EstimationReasoning</dd>
                 <dt class="text-gray-500">Jira</dt>
                 <dd>
-                    @if (final.JiraIssueUrl is not null)
+                    @if (finalTicket.JiraIssueUrl is not null)
                     {
-                        <a href="@final.JiraIssueUrl" target="_blank"
+                        <a href="@finalTicket.JiraIssueUrl" target="_blank"
                            class="text-cyan-400 hover:underline break-all">
-                            @final.JiraIssueUrl
+                            @finalTicket.JiraIssueUrl
                         </a>
+                    }
+                    else
+                    {
+                        <span class="text-gray-600">—</span>
                     }
                 </dd>
             </dl>
@@ -100,7 +273,7 @@ else
     @if (_run.Status == PipelineRunStatus.Blocked)
     {
         <div class="bg-rose-950 border border-rose-800 rounded-lg p-5">
-            <h2 class="text-rose-300 font-medium">✗ Blocked</h2>
+            <h2 class="text-rose-300 font-medium">Blocked</h2>
             <p class="text-sm text-rose-200 mt-1">
                 Maximum clarification rounds reached. The ticket needs manual review.
             </p>
@@ -122,6 +295,10 @@ else
     private PipelineRun? _run;
     private string _hitlAnswer = string.Empty;
     private bool _isSubmittingHitl;
+    private string _activeTab = "Events";
+    private StepStateSnapshot? _selectedSnapshot;
+
+    private string RunGraphContainerId => $"run-graph-{RunId}";
 
     protected override void OnInitialized()
     {
@@ -129,10 +306,32 @@ else
         Orchestrator.RunUpdated += OnRunUpdated;
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Render the Mermaid topology whenever the Graph tab is active.
+        if (_activeTab == "Graph")
+            await RenderPipelineGraphAsync();
+    }
+
+    private async Task RenderPipelineGraphAsync()
+    {
+        var currentStep = _run?.Events.LastOrDefault(e => _run.Status == PipelineRunStatus.Running)?.StepName;
+        var definition = BuildMermaidDefinition(currentStep);
+        await JSRuntime.InvokeVoidAsync("mermaidRender", RunGraphContainerId, definition);
+    }
+
+    private void SetTab(string tabName)
+    {
+        _activeTab = tabName;
+        // Auto-select first snapshot when switching to State tab
+        if (tabName == "State" && _selectedSnapshot is null && _run?.Snapshots.Any() == true)
+            _selectedSnapshot = _run.Snapshots[^1];
+    }
+
     private void OnRunUpdated(string updatedRunId)
     {
-        if (updatedRunId == RunId)
-            InvokeAsync(StateHasChanged);
+        if (updatedRunId != RunId) return;
+        InvokeAsync(StateHasChanged);
     }
 
     private async Task SubmitHitlAnswerAsync()
@@ -145,6 +344,65 @@ else
         await Task.Delay(50);
         _isSubmittingHitl = false;
     }
+
+    private void ReplayFromSnapshot(StepStateSnapshot snapshot)
+    {
+        TicketState? snapshotState;
+        try
+        {
+            snapshotState = JsonSerializer.Deserialize<TicketState>(
+                snapshot.InputJson,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch
+        {
+            return;
+        }
+
+        if (snapshotState is null) return;
+
+        var replayRunId = Orchestrator.ReplayFromSnapshot(snapshot.StepName, snapshotState);
+        Nav.NavigateTo("/run/" + replayRunId);
+    }
+
+    // ── Mermaid diagram builder ────────────────────────────────────────
+
+    private static string BuildMermaidDefinition(string? activeStep)
+    {
+        var lines = new System.Text.StringBuilder();
+        lines.AppendLine("flowchart LR");
+        lines.AppendLine("    SNow([SNow]) -->|TicketReceived| Intake");
+        lines.AppendLine("    Manual([Manual]) -->|TicketReceived| Intake");
+        lines.AppendLine("    Intake -->|IntakeComplete| Validation");
+        lines.AppendLine("    Validation -->|ReadyPath| Estimation");
+        lines.AppendLine("    Validation -->|NotReadyPath| GapAnalysis");
+        lines.AppendLine("    GapAnalysis -->|QuestionsReady| HitlPause");
+        lines.AppendLine("    HitlPause -->|AwaitHuman| PO([PO])");
+        lines.AppendLine("    PO -->|HumanResponded| Validation");
+        lines.AppendLine("    Estimation -->|EstimationComplete| Action");
+        lines.AppendLine("    Action --> Done([Done])");
+        lines.AppendLine("    style SNow fill:#164e63,stroke:#22d3ee,color:#cffafe");
+        lines.AppendLine("    style Manual fill:#164e63,stroke:#22d3ee,color:#cffafe");
+        lines.AppendLine("    style PO fill:#451a03,stroke:#f59e0b,color:#fef3c7");
+        lines.AppendLine("    style Done fill:#064e3b,stroke:#10b981,color:#d1fae5");
+
+        // Highlight the currently executing step in amber
+        if (!string.IsNullOrEmpty(activeStep))
+            lines.AppendLine($"    style {activeStep} fill:#78350f,stroke:#f59e0b,color:#fef3c7");
+
+        return lines.ToString();
+    }
+
+    // ── Style helpers ──────────────────────────────────────────────────
+
+    private string TabClass(string tabName) => tabName == _activeTab
+        ? "text-cyan-400 border-b-2 border-cyan-400 pb-2"
+        : "text-gray-500 hover:text-gray-300 pb-2";
+
+    private string SnapshotButtonClass(StepStateSnapshot snapshot) =>
+        ReferenceEquals(snapshot, _selectedSnapshot)
+            ? "bg-gray-800 border border-gray-700"
+            : "hover:bg-gray-900 border border-transparent";
 
     private static string StepColor(string stepName) => stepName switch
     {

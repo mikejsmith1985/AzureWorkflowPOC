@@ -15,10 +15,12 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.SemanticKernel" Version="1.77.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.11" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DBAIAzure.Core\DBAIAzure.Core.csproj" />
     <ProjectReference Include="..\..\src\DBAIAzure.Processes\DBAIAzure.Processes.csproj" />
+    <ProjectReference Include="..\..\src\DBAIAzure.Storage\DBAIAzure.Storage.csproj" />
   </ItemGroup>
 </Project>
