@@ -10,6 +10,9 @@ using OpenTelemetry;
 using OpenTelemetry.Trace;
 using Spectre.Console;
 
+// Suppress SKEXP0080 solution-wide: SK Process Framework is experimental in 1.77.0
+#pragma warning disable SKEXP0080
+
 // ── Configuration ─────────────────────────────────────────────────────────────
 var config = new ConfigurationBuilder()
     .AddJsonFile("appsettings.json", optional: false)
@@ -89,19 +92,73 @@ foreach (var ticket in demoTickets)
 tracerProvider?.Dispose();
 
 // ── Per-ticket runner ──────────────────────────────────────────────────────────
+// HITL loop: run the process, check if it paused for human input, collect
+// Console.ReadLine(), then restart with HumanResponded. Loops up to 3 rounds,
+// matching the cap in ValidationStep (ClarificationRound >= 3 → Blocked).
 static async Task RunTicketAsync(Kernel kernel, TicketState ticket)
 {
+    const int MaxClarificationRounds = 3;
+
     AnsiConsole.Write(new Rule($"[yellow]{ticket.TicketId}[/] {Markup.Escape(ticket.Title)}"));
 
-    var process = IntakePipelineBuilder.Build();
+    var currentTicket = ticket;
 
-#pragma warning disable SKEXP0080
-    var runningProcess = await process.StartAsync(kernel, new KernelProcessEvent
+    for (int clarificationRound = 0; clarificationRound <= MaxClarificationRounds; clarificationRound++)
     {
-        Id = Events.TicketReceived,
-        Data = ticket,
-    });
-#pragma warning restore SKEXP0080
+        var hitlChannel = new HitlExternalChannel();
+        var process = IntakePipelineBuilder.Build();
+
+        // Round 0: start from the beginning with TicketReceived.
+        // Rounds 1+: skip intake and start at ValidationStep with the PO's answer.
+        var initialEvent = clarificationRound == 0
+            ? new KernelProcessEvent { Id = Events.TicketReceived, Data = currentTicket }
+            : new KernelProcessEvent { Id = Events.HumanResponded, Data = currentTicket };
+
+        // RunToEndAsync blocks until the process terminates or times out.
+        // The 5th argument wires the HitlExternalChannel so the proxy step can
+        // call channel.EmitExternalEventAsync when HitlPauseStep fires.
+        await LocalKernelProcessFactory.RunToEndAsync(
+            process, kernel, initialEvent, TimeSpan.FromSeconds(60), hitlChannel);
+
+        if (!hitlChannel.WasPaused)
+        {
+            // Process reached a terminal state (Ready → Estimation → Action, or Blocked).
+            break;
+        }
+
+        // Extract the TicketState carried by the proxy message.
+        // In the local runtime the data stays typed; defensively fall back to current state.
+        var pausedTicket = ExtractTicketFromProxyMessage(hitlChannel.PausedMessage!, currentTicket);
+
+        // Present the PO prompt and collect their answer.
+        AnsiConsole.MarkupLine("\n  [bold yellow]⏸ Awaiting PO input[/] — please answer the clarifying questions above.");
+        AnsiConsole.Markup("  [bold]Your answer:[/] ");
+        var humanAnswer = Console.ReadLine() ?? string.Empty;
+        AnsiConsole.WriteLine();
+
+        currentTicket = pausedTicket with
+        {
+            HumanAnswer = humanAnswer,
+            ClarificationRound = pausedTicket.ClarificationRound + 1,
+        };
+
+        AnsiConsole.MarkupLine(
+            $"  [dim]↳ Clarification round {currentTicket.ClarificationRound} — re-validating with PO input.[/]");
+        AnsiConsole.WriteLine();
+    }
 
     AnsiConsole.MarkupLine("[green]✓ Pipeline complete.[/]");
+}
+
+/// <summary>
+/// Extracts the TicketState from a KernelProcessProxyMessage.
+/// KernelProcessEventData.ToObject() deserializes the JSON-serialized payload back
+/// to its original type; we cast the result to TicketState.
+/// </summary>
+static TicketState ExtractTicketFromProxyMessage(KernelProcessProxyMessage message, TicketState fallback)
+{
+    if (message.EventData?.ToObject() is TicketState deserializedTicket)
+        return deserializedTicket;
+
+    return fallback;
 }

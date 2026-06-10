@@ -1,5 +1,6 @@
 using DBAIAzure.Core.Models;
 using Microsoft.SemanticKernel;
+using Spectre.Console;
 using System.Text.Json;
 
 namespace DBAIAzure.Processes.Steps;
@@ -61,6 +62,8 @@ public class EstimationStep : KernelProcessStep
             StoryPoints = points,
             EstimationReasoning = result.Reasoning,
         };
+
+        AnsiConsole.MarkupLine($"  [cyan]Estimate:[/] [bold]{points}[/] story points — {Markup.Escape(result.Reasoning ?? string.Empty)}");
 
         await ctx.EmitEventAsync(new() { Id = Events.EstimationComplete, Data = updated });
     }

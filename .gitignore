@@ -22,3 +22,8 @@ appsettings.*.json
 # Coverage
 TestResults/
 coverage/
+
+# Local tooling — not part of the project
+.forge/
+.github/
+CLAUDE.md

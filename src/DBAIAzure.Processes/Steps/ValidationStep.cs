@@ -1,5 +1,6 @@
 using DBAIAzure.Core.Models;
 using Microsoft.SemanticKernel;
+using Spectre.Console;
 using System.Text.Json;
 
 namespace DBAIAzure.Processes.Steps;
@@ -41,14 +42,20 @@ public class ValidationStep : KernelProcessStep
 
         if (verdict.IsReady)
         {
+            AnsiConsole.MarkupLine($"  [green]✓ DoR: Ready[/] — {Markup.Escape(verdict.Reasoning ?? string.Empty)}");
             await ctx.EmitEventAsync(new() { Id = Events.ReadyPath, Data = ticket });
         }
         else if (ticket.ClarificationRound >= 3)
         {
+            AnsiConsole.MarkupLine($"  [red]✗ DoR: Blocked[/] — max clarification rounds reached");
             await ctx.EmitEventAsync(new() { Id = Events.Blocked, Data = ticket });
         }
         else
         {
+            var missingList = verdict.MissingFields?.Count > 0
+                ? string.Join(", ", verdict.MissingFields)
+                : "unspecified gaps";
+            AnsiConsole.MarkupLine($"  [yellow]⚠ DoR: Not Ready[/] — missing: {Markup.Escape(missingList)}");
             await ctx.EmitEventAsync(new() { Id = Events.NotReadyPath, Data = ticket });
         }
     }
