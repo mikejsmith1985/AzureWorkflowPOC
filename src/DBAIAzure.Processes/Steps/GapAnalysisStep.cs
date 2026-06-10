@@ -1,4 +1,5 @@
 using DBAIAzure.Core.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
 using Spectre.Console;
 using System.Text.Json;
@@ -10,6 +11,9 @@ public class GapAnalysisStep : KernelProcessStep
     [KernelFunction]
     public async Task GenerateQuestionsAsync(KernelProcessStepContext ctx, TicketState ticket, Kernel kernel)
     {
+        var reporter = kernel.Services.GetService<IProgressReporter>();
+        reporter?.ReportStep("GapAnalysis", "Generating clarifying questions…");
+
         var prompt = $"""
             You are a scrum master. A ticket has failed the Definition of Ready check.
             Generate exactly 2-3 short, specific clarifying questions that a Product Owner
@@ -35,6 +39,9 @@ public class GapAnalysisStep : KernelProcessStep
         var questions = JsonSerializer.Deserialize<List<string>>(json) ?? [];
 
         var updated = ticket with { ClarifyingQuestions = questions };
+
+        foreach (var question in questions)
+            reporter?.ReportStep("GapAnalysis", question, ReportLevel.Warning);
 
         AnsiConsole.MarkupLine("  [yellow]Gap analysis — clarifying questions for the PO:[/]");
         for (int questionIndex = 0; questionIndex < questions.Count; questionIndex++)

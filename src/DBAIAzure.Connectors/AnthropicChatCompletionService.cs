@@ -6,7 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace DBAIAzure.Runner;
+namespace DBAIAzure.Connectors;
 
 /// <summary>
 /// Thin IChatCompletionService implementation backed by a direct HTTPS call to

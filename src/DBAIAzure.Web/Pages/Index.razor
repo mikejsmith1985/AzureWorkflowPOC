@@ -1,0 +1,75 @@
+@page "/"
+@implements IDisposable
+@inject PipelineOrchestrator Orchestrator
+@inject NavigationManager Nav
+
+<h1 class="text-xl font-semibold text-gray-100 mb-6">Pipeline Dashboard</h1>
+
+<div class="flex justify-end mb-4">
+    <a href="/new-ticket"
+       class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-sm rounded transition-colors">
+        + New Ticket
+    </a>
+</div>
+
+@{
+    var runs = Orchestrator.GetAllRuns();
+}
+
+@if (!runs.Any())
+{
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-8 text-center text-gray-500">
+        No runs yet. Submit a ticket to get started.
+    </div>
+}
+else
+{
+    <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead class="bg-gray-800 text-gray-400 text-left">
+                <tr>
+                    <th class="px-4 py-3">Run ID</th>
+                    <th class="px-4 py-3">Ticket</th>
+                    <th class="px-4 py-3">Status</th>
+                    <th class="px-4 py-3">Points</th>
+                    <th class="px-4 py-3">Started</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-800">
+                @foreach (var run in runs)
+                {
+                    <tr class="hover:bg-gray-850 cursor-pointer transition-colors"
+                        @onclick="() => GoToRun(run.RunId)">
+                        <td class="px-4 py-3 font-mono text-cyan-400">@run.RunId</td>
+                        <td class="px-4 py-3">
+                            <div class="font-medium text-gray-200">@run.InitialTicket.TicketId</div>
+                            <div class="text-gray-500 text-xs truncate max-w-xs">@run.InitialTicket.Title</div>
+                        </td>
+                        <td class="px-4 py-3">
+                            <StatusBadge Status="@run.Status" />
+                        </td>
+                        <td class="px-4 py-3 text-gray-300">
+                            @(run.CurrentTicket?.StoryPoints?.ToString() ?? "—")
+                        </td>
+                        <td class="px-4 py-3 text-gray-500 text-xs">
+                            @run.StartedAt.ToLocalTime().ToString("HH:mm:ss")
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    protected override void OnInitialized()
+    {
+        Orchestrator.RunUpdated += OnRunUpdated;
+    }
+
+    private void GoToRun(string runId) => Nav.NavigateTo("/run/" + runId);
+
+    private void OnRunUpdated(string _) => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Orchestrator.RunUpdated -= OnRunUpdated;
+}

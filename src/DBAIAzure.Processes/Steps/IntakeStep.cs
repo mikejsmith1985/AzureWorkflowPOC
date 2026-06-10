@@ -1,4 +1,5 @@
 using DBAIAzure.Core.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
 using Spectre.Console;
 using System.Text.Json;
@@ -12,6 +13,9 @@ public class IntakeStep : KernelProcessStep
     [KernelFunction]
     public async Task NormalizeAsync(KernelProcessStepContext ctx, TicketState ticket, Kernel kernel)
     {
+        var reporter = kernel.Services.GetService<IProgressReporter>();
+        reporter?.ReportStep("Intake", $"Normalizing: {ticket.Title}");
+
         // $$"""...""" — two $ means single { is a literal brace; {{expr}} is the interpolation hole
         var prompt = $$"""
             Normalize the following support ticket for Definition of Ready validation.
@@ -38,6 +42,7 @@ public class IntakeStep : KernelProcessStep
             Description = normalized?.Description ?? ticket.Description,
         };
 
+        reporter?.ReportStep("Intake", $"Normalized: {updated.Title}", ReportLevel.Success);
         AnsiConsole.MarkupLine($"  [dim]↳ Intake:[/] {Markup.Escape(updated.Title)}");
 
         await ctx.EmitEventAsync(new() { Id = Events.IntakeComplete, Data = updated });

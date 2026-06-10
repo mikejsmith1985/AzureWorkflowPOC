@@ -1,4 +1,5 @@
 using DBAIAzure.Core.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
 using Spectre.Console;
 using System.Text.Json;
@@ -26,6 +27,9 @@ public class EstimationStep : KernelProcessStep
     [KernelFunction]
     public async Task EstimateAsync(KernelProcessStepContext ctx, TicketState ticket, Kernel kernel)
     {
+        var reporter = kernel.Services.GetService<IProgressReporter>();
+        reporter?.ReportStep("Estimation", "Estimating effort via Fibonacci anchors…");
+
         var clarification = ticket.HumanAnswer is not null
             ? $"\nPO clarification: {ticket.HumanAnswer}"
             : string.Empty;
@@ -63,6 +67,7 @@ public class EstimationStep : KernelProcessStep
             EstimationReasoning = result.Reasoning,
         };
 
+        reporter?.ReportStep("Estimation", $"{points} story points — {result.Reasoning}", ReportLevel.Success);
         AnsiConsole.MarkupLine($"  [cyan]Estimate:[/] [bold]{points}[/] story points — {Markup.Escape(result.Reasoning ?? string.Empty)}");
 
         await ctx.EmitEventAsync(new() { Id = Events.EstimationComplete, Data = updated });

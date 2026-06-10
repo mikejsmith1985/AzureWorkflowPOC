@@ -1,4 +1,5 @@
 using DBAIAzure.Core.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
 using Spectre.Console;
 using System.Text.Json;
@@ -12,6 +13,9 @@ public class ValidationStep : KernelProcessStep
     [KernelFunction]
     public async Task ValidateAsync(KernelProcessStepContext ctx, TicketState ticket, Kernel kernel)
     {
+        var reporter = kernel.Services.GetService<IProgressReporter>();
+        reporter?.ReportStep("Validation", "Running DoR check…");
+
         var clarification = ticket.HumanAnswer is not null
             ? $"\nPO clarification (round {ticket.ClarificationRound}): {ticket.HumanAnswer}"
             : string.Empty;
@@ -42,11 +46,13 @@ public class ValidationStep : KernelProcessStep
 
         if (verdict.IsReady)
         {
+            reporter?.ReportStep("Validation", $"Ready — {verdict.Reasoning}", ReportLevel.Success);
             AnsiConsole.MarkupLine($"  [green]✓ DoR: Ready[/] — {Markup.Escape(verdict.Reasoning ?? string.Empty)}");
             await ctx.EmitEventAsync(new() { Id = Events.ReadyPath, Data = ticket });
         }
         else if (ticket.ClarificationRound >= 3)
         {
+            reporter?.ReportStep("Validation", "Blocked — max clarification rounds reached", ReportLevel.Error);
             AnsiConsole.MarkupLine($"  [red]✗ DoR: Blocked[/] — max clarification rounds reached");
             await ctx.EmitEventAsync(new() { Id = Events.Blocked, Data = ticket });
         }
@@ -55,6 +61,7 @@ public class ValidationStep : KernelProcessStep
             var missingList = verdict.MissingFields?.Count > 0
                 ? string.Join(", ", verdict.MissingFields)
                 : "unspecified gaps";
+            reporter?.ReportStep("Validation", $"Not Ready — missing: {missingList}", ReportLevel.Warning);
             AnsiConsole.MarkupLine($"  [yellow]⚠ DoR: Not Ready[/] — missing: {Markup.Escape(missingList)}");
             await ctx.EmitEventAsync(new() { Id = Events.NotReadyPath, Data = ticket });
         }

@@ -1,7 +1,7 @@
 using Azure.Monitor.OpenTelemetry.Exporter;
+using DBAIAzure.Connectors;
 using DBAIAzure.Core.Models;
 using DBAIAzure.Processes;
-using DBAIAzure.Runner;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;

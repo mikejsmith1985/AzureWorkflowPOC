@@ -1,4 +1,5 @@
 using DBAIAzure.Core.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
 using Spectre.Console;
 
@@ -7,8 +8,11 @@ namespace DBAIAzure.Processes.Steps;
 public class ActionStep : KernelProcessStep
 {
     [KernelFunction]
-    public async Task CreateJiraAsync(KernelProcessStepContext ctx, TicketState ticket, Kernel _)
+    public async Task CreateJiraAsync(KernelProcessStepContext ctx, TicketState ticket, Kernel kernel)
     {
+        var reporter = kernel.Services.GetService<IProgressReporter>();
+        reporter?.ReportStep("Action", "Creating Jira issue…");
+
         // Mock Jira creation — in production this would call IActionConnector
         var issueKey = $"SBRO-{Math.Abs(ticket.TicketId.GetHashCode()) % 900 + 100}";
         var url = $"https://jira.example.com/browse/{issueKey}";
@@ -26,6 +30,7 @@ public class ActionStep : KernelProcessStep
             .AddRow("Reasoning", Markup.Escape(updated.EstimationReasoning ?? "—"))
             .AddRow("Jira URL", $"[link={Markup.Escape(url)}]{Markup.Escape(url)}[/]");
 
+        reporter?.ReportComplete(updated);
         AnsiConsole.Write(table);
 
         // No further routing — action is the terminal node on the ready path
