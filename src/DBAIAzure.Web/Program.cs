@@ -33,7 +33,9 @@ builder.Services.AddControllers();
 var dbFolder = Path.IsPathRooted(dbPath) ? dbPath : Path.Combine(builder.Environment.ContentRootPath, dbPath);
 builder.Services.AddDbContextFactory<PipelineDbContext>(options =>
     options.UseSqlite($"Data Source={dbFolder}"));
-builder.Services.AddScoped<IRunRepository, SqliteRunRepository>();
+// SqliteRunRepository depends only on IDbContextFactory (singleton) and creates its own
+// short-lived DbContext per call, so singleton lifetime is safe and avoids captive-dependency errors.
+builder.Services.AddSingleton<IRunRepository, SqliteRunRepository>();
 
 // ── Teams HITL notifier ────────────────────────────────────────────────────────
 builder.Services.AddHttpClient(nameof(TeamsHitlNotifier), client =>
