@@ -87,8 +87,13 @@ public sealed class FileSystemArtifactReader : IArtifactReader
 
         var fullPath = Path.GetFullPath(combined);
 
-        // Reject anything that escapes the specs root.
-        return fullPath.StartsWith(specsRootFull, StringComparison.OrdinalIgnoreCase) ? fullPath : null;
+        // Reject anything that escapes the specs root. Append a separator before comparing so a
+        // sibling directory (e.g. "specs-evil") cannot satisfy a bare StartsWith on "specs".
+        var specsRootBoundary = specsRootFull.TrimEnd(Path.DirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        var isInsideSpecsRoot = (fullPath + Path.DirectorySeparatorChar)
+            .StartsWith(specsRootBoundary, StringComparison.OrdinalIgnoreCase);
+        return isInsideSpecsRoot ? fullPath : null;
     }
 
     /// <summary>Reads at most <c>MaxArtifactBytes</c> of UTF-8 text from a file.</summary>

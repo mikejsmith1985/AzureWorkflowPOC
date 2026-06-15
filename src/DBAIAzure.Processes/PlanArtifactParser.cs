@@ -7,15 +7,24 @@ namespace DBAIAzure.Processes;
 
 /// <summary>
 /// Parses Plan-phase artifacts into <see cref="PlannedWorkItem"/>s (one per planned unit of work,
-/// FR-008). When the feature has a <c>tasks.md</c>, every checkbox task line becomes one item; when
-/// it does not (tasks.md is produced by a later Spec Kit phase), the items are derived from the
-/// structural <c>##</c>/<c>###</c> headings of <c>plan.md</c>. This is pure — it takes artifact text
-/// in and returns items out, so it is fast and trivially unit-testable (no file or network I/O).
+/// FR-008). When the feature has a <c>tasks.md</c> with a manageable number of items, those become
+/// the ADO Tasks; when <c>tasks.md</c> has more items than <see cref="MaxPlanTasksFromTasksMd"/>
+/// (it was produced by the later <c>/speckit.tasks</c> phase and is too granular for Plan-level
+/// board items), the parser falls back to structural <c>##</c>/<c>###</c> headings of <c>plan.md</c>.
+/// When neither yields any item, an empty list is returned. This is pure — text in, items out.
 /// </summary>
 public static class PlanArtifactParser
 {
     private const string TasksFileName = "tasks.md";
     private const string PlanFileName = "plan.md";
+
+    /// <summary>
+    /// Maximum checkbox tasks from tasks.md before we fall back to plan.md section headings.
+    /// tasks.md is produced by /speckit.tasks (a downstream phase) and can have 50+ implementation
+    /// tasks — far too granular for Plan-phase ADO work items. plan.md sections are the right
+    /// granularity for a board that tracks deliverables, not implementation steps.
+    /// </summary>
+    private const int MaxPlanTasksFromTasksMd = 20;
 
     /// <summary>
     /// Matches a markdown task line such as <c>- [ ] T001 [P] Do the thing</c>, capturing the
@@ -45,7 +54,10 @@ public static class PlanArtifactParser
         if (tasksArtifact is not null)
         {
             var fromTasks = ParseTaskLines(tasksArtifact.Content);
-            if (fromTasks.Count > 0) return fromTasks;
+            // Only use tasks.md when it is at plan-level granularity; a large tasks.md (e.g. produced
+            // by /speckit.tasks) would flood the board with implementation-level items. Fall through to
+            // plan.md sections — those are the right granularity for ADO Plan deliverables.
+            if (fromTasks.Count > 0 && fromTasks.Count <= MaxPlanTasksFromTasksMd) return fromTasks;
         }
 
         var planArtifact = FindArtifact(artifacts, PlanFileName);

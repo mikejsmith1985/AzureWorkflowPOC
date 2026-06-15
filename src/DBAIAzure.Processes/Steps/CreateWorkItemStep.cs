@@ -141,6 +141,21 @@ public sealed class CreateWorkItemStep : KernelProcessStep
         var epicTitle = $"[{PhaseWorkItemMap.EpicType}] {state.FeatureKey}";
         var epic = await boardsClient.CreateWorkItemAsync(
             PhaseWorkItemMap.EpicType, epicTitle, BuildDescription(state), parentId: null);
+
+        // Persist the auto-created Epic under a synthetic Specify run so a subsequent Specify signal
+        // finds it and upserts rather than creating a duplicate Epic (FR-013 idempotency).
+        var syntheticSpecifyState = state with
+        {
+            RunId           = $"auto-{Guid.NewGuid():N}"[..16],
+            Phase           = SpecKitPhase.Specify,
+            Status          = PhaseRunStatus.Completed,
+            Validation      = null,
+            Decision        = null,
+            FailureReason   = null,
+            CreatedWorkItems = [epic],
+        };
+        await repository.UpsertRunAsync(syntheticSpecifyState);
+
         return epic.WorkItemId;
     }
 

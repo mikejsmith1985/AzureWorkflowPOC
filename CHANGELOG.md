@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — Code-review bugs (self-review, PR #2)
+- **PlanArtifactParser task flood** — `ParseTaskLines` previously created one ADO Task per checkbox line in `tasks.md` regardless of count; a mature feature's 52-task implementation backlog now correctly falls through to `plan.md` section headings (plan-level granularity) when the count exceeds `MaxPlanTasksFromTasksMd = 20`. Two new tests verify both the happy path and the fallthrough.
+- **Path-traversal guard in `FileSystemArtifactReader`** — bare `StartsWith(specsRootFull)` would allow a sibling directory named `specs-evil` to pass; fixed by appending a separator so `(fullPath + sep).StartsWith(specsRoot + sep)` is the comparison.
+- **Auto-created Epic not persisted** — `ResolveOrCreateEpicIdAsync` created a fallback Epic but never wrote it to the repository, causing a duplicate Epic on any subsequent Specify signal; fixed by upserting a synthetic Specify `PhaseHandlerState` immediately after the Epic write.
+- **RunId mismatch on repeat signal** — a repeat `(feature, phase)` signal wrote a new run but the DB row kept the old RunId (primary key), so `GET /run/{newRunId}` returned 404; fixed by deleting the stale row and reinserting with the new RunId, carrying prior work-item ids forward so the idempotency anchor survives. New test covers resolvability by new RunId.
+- **`WaitForApprovalAsync` no timeout** — background task leaked indefinitely when a reviewer never responded; fixed with a 72-hour `CancellationTokenSource` and `.WaitAsync(token)` that transitions the run to `Failed` on expiry.
+- **`ValidateSecret` duplication** — identical secret-header validation logic lived independently in both webhook controllers; extracted to `WebhookSecretValidator` static helper used by both.
+
 ### Added — Spec Kit Phase Handler (`specs/001-speckit-phase-handler`)
 - **Second SK Process Framework pipeline** that turns Spec-Driven Development phase completions into human-approved Azure DevOps Boards work items; runs alongside the existing ticket pipeline without modifying it
 - **Inbound signals** — `POST /api/webhook/speckit-phase` (phase complete) and `POST /api/webhook/speckit-approval` (decision-card callback) on `SpecKitWebhookController`, guarded by an `X-SpecKit-Secret` shared secret

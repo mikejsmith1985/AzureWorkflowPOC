@@ -85,22 +85,6 @@ public sealed class SpecKitWebhookController : ControllerBase
     }
 
     /// <summary>Validates the shared secret header; rejects when missing/mismatched or unconfigured.</summary>
-    private bool ValidateSecret()
-    {
-        var expectedSecret = _config[SecretConfigKey];
-        if (string.IsNullOrWhiteSpace(expectedSecret))
-        {
-            _logger.LogWarning("Spec Kit webhook secret not configured — rejecting all requests");
-            return false;
-        }
-
-        if (!Request.Headers.TryGetValue(SecretHeaderName, out var providedSecret) ||
-            !string.Equals(expectedSecret, providedSecret.ToString(), StringComparison.Ordinal))
-        {
-            _logger.LogWarning("Invalid or missing {HeaderName} header", SecretHeaderName);
-            return false;
-        }
-
-        return true;
-    }
+    private bool ValidateSecret() =>
+        WebhookSecretValidator.Validate(_config, Request.Headers, _logger, SecretConfigKey, SecretHeaderName);
 }

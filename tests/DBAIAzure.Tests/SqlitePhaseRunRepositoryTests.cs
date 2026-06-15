@@ -113,4 +113,19 @@ public sealed class SqlitePhaseRunRepositoryTests : IDisposable
         Assert.Single(view!.CreatedWorkItems);
         Assert.Equal(7, view.CreatedWorkItems[0].WorkItemId);
     }
+
+    [Fact]
+    public async Task RepeatSignal_DifferentRunId_IsResolvableByNewRunId()
+    {
+        // First signal runs under run-A and completes.
+        await _repository.UpsertRunAsync(State("run-A", PhaseRunStatus.Completed));
+
+        // Repeat signal arrives under run-B — the portal URL uses run-B, so GetByRunIdAsync("run-B")
+        // must resolve. If only the old RunId row survives, the detail page returns 404.
+        await _repository.UpsertRunAsync(State("run-B", PhaseRunStatus.AwaitingApproval));
+
+        var viewByNewId = await _repository.GetByRunIdAsync("run-B");
+        Assert.NotNull(viewByNewId);
+        Assert.Equal(PhaseRunStatus.AwaitingApproval, viewByNewId!.Status);
+    }
 }

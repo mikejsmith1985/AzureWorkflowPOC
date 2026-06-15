@@ -111,4 +111,25 @@ public class PlanArtifactParserTests
         Assert.Single(items);
         Assert.Equal("T001 The only real task", items[0].Title);
     }
+
+    [Fact]
+    public void Parse_TasksMdWithMoreThanCapItems_FallsBackToPlanMdSections()
+    {
+        // tasks.md produced by /speckit.tasks can have 50+ implementation-level tasks; using all of
+        // them as Plan-phase ADO board items floods the board. When the count exceeds the cap the
+        // parser must fall through to plan.md section headings (plan-level granularity).
+        var manyTasks = string.Join("\n", Enumerable.Range(1, 25)
+            .Select(i => $"- [ ] T{i:D3} Implementation task number {i}"));
+        var artifacts = new List<PhaseArtifact>
+        {
+            new() { FileName = "tasks.md", Content = manyTasks },
+            new() { FileName = "plan.md", Content = "## Architecture\n\n## Data Layer" },
+        };
+
+        var items = PlanArtifactParser.Parse(artifacts);
+
+        Assert.Equal(2, items.Count);
+        Assert.Equal("Architecture", items[0].Title);
+        Assert.Equal("Data Layer", items[1].Title);
+    }
 }

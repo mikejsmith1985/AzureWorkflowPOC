@@ -45,11 +45,28 @@ public sealed class SqlitePhaseRunRepository : IPhaseRunRepository
                 r => r.FeatureKey == state.FeatureKey && r.Phase == phaseName, cancellationToken)
             ?? await db.PhaseRuns.FindAsync([state.RunId], cancellationToken);
 
+        // When found by FeatureKey+Phase with a stale RunId (repeat signal), replace the row so the
+        // new RunId is the durable anchor — GetByRunIdAsync(newRunId) must resolve for the portal URL.
+        // Capture the prior work-item ids first; they survive into the new row while this repeat run
+        // is still in progress and has not yet emitted its own items (FR-013 idempotency anchor).
+        string? inheritedWorkItemsJson = null;
+        if (existing is not null && existing.RunId != state.RunId)
+        {
+            inheritedWorkItemsJson = existing.WorkItemIdsJson;
+            db.PhaseRuns.Remove(existing);
+            await db.SaveChangesAsync(cancellationToken);
+            existing = null;
+        }
+
         var gapsJson      = JsonSerializer.Serialize(state.Validation?.Gaps ?? [], SerializerOpts);
         var decisionJson  = state.Decision is null ? null : JsonSerializer.Serialize(state.Decision, SerializerOpts);
         var workItemsJson = JsonSerializer.Serialize(state.CreatedWorkItems, SerializerOpts);
         var hasWorkItems  = state.CreatedWorkItems.Count > 0;
         var isTerminal    = TerminalStatuses.Contains(state.Status);
+
+        // Effective work-item ids: the new run's items when present; otherwise any ids carried over
+        // from the prior row (the repeat signal's in-progress writes will update this later).
+        var effectiveWorkItemsJson = hasWorkItems ? workItemsJson : (inheritedWorkItemsJson ?? workItemsJson);
 
         if (existing is null)
         {
@@ -62,7 +79,7 @@ public sealed class SqlitePhaseRunRepository : IPhaseRunRepository
                 Summary         = state.Validation?.Summary,
                 GapsJson        = gapsJson,
                 DecisionJson    = decisionJson,
-                WorkItemIdsJson = workItemsJson,
+                WorkItemIdsJson = effectiveWorkItemsJson,
                 FailureReason   = state.FailureReason,
                 StartedAt       = DateTimeOffset.UtcNow,
                 CompletedAt     = isTerminal ? DateTimeOffset.UtcNow : null,
@@ -79,9 +96,9 @@ public sealed class SqlitePhaseRunRepository : IPhaseRunRepository
             existing.Summary         = state.Validation?.Summary;
             existing.GapsJson        = gapsJson;
             existing.DecisionJson    = decisionJson;
-            // Preserve the prior work item ids while a repeat run is still in progress (no items yet),
-            // so the idempotency anchor survives until the create step reads it (FR-013).
-            if (hasWorkItems) existing.WorkItemIdsJson = workItemsJson;
+            // Use the same effective-ids logic as the insert path: new items when present, otherwise
+            // preserve the prior ids so the idempotency anchor survives until the create step (FR-013).
+            existing.WorkItemIdsJson = effectiveWorkItemsJson;
             existing.FailureReason   = state.FailureReason;
             if (isTerminal) existing.CompletedAt = DateTimeOffset.UtcNow;
         }

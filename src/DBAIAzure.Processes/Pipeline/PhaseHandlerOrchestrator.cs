@@ -19,6 +19,13 @@ public sealed class PhaseHandlerOrchestrator
 {
     private const int ProcessTimeoutSeconds = 180;
 
+    /// <summary>
+    /// Hours a run may wait for human approval before it is automatically expired as Failed.
+    /// Prevents the background task leaking indefinitely when a reviewer never responds (e.g. the
+    /// decision card link was lost or the feature was abandoned). 72 hours ≈ 3 business days.
+    /// </summary>
+    private const int ApprovalTimeoutHours = 72;
+
     private readonly Func<IPhaseProgressSink, Kernel> _kernelFactory;
     private readonly IPhaseRunRepository _repository;
     private readonly IPhaseApprovalNotifier? _approvalNotifier;
@@ -130,8 +137,26 @@ public sealed class PhaseHandlerOrchestrator
             RunUpdated?.Invoke(run.RunId);
             PushApprovalCard(run, pausedState);
 
-            // Wait for the reviewer's decision (delivered via SubmitApproval).
-            var decision = await run.WaitForApprovalAsync();
+            // Wait for the reviewer's decision (delivered via SubmitApproval), bounded by the
+            // configured timeout so the background task does not leak if approval never arrives.
+            ApprovalDecision decision;
+            using var approvalTimeoutCts = new CancellationTokenSource(
+                TimeSpan.FromHours(ApprovalTimeoutHours));
+            try
+            {
+                decision = await run.WaitForApprovalAsync().WaitAsync(approvalTimeoutCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                var expired = pausedState with
+                {
+                    Status = PhaseRunStatus.Failed,
+                    FailureReason = $"No approval received within {ApprovalTimeoutHours} hours — run expired.",
+                };
+                await PersistAndNotifyAsync(run, expired);
+                return;
+            }
+
             await ResumeWithDecisionAsync(run, pausedState, decision);
         }
         catch (Exception ex)
