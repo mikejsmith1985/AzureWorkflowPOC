@@ -57,22 +57,6 @@ public sealed class WebhookController : ControllerBase
         return Accepted(new { runId, ticketId = ticket.TicketId });
     }
 
-    private bool ValidateSecret(string configKey, string headerName)
-    {
-        var expectedSecret = _config[configKey];
-        if (string.IsNullOrWhiteSpace(expectedSecret))
-        {
-            _logger.LogWarning("Webhook secret not configured at {ConfigKey} — rejecting all requests", configKey);
-            return false;
-        }
-
-        if (!Request.Headers.TryGetValue(headerName, out var providedSecret) ||
-            !string.Equals(expectedSecret, providedSecret.ToString(), StringComparison.Ordinal))
-        {
-            _logger.LogWarning("Invalid or missing {HeaderName} header", headerName);
-            return false;
-        }
-
-        return true;
-    }
+    private bool ValidateSecret(string configKey, string headerName) =>
+        WebhookSecretValidator.Validate(_config, Request.Headers, _logger, configKey, headerName);
 }

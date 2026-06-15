@@ -4,7 +4,10 @@ using DBAIAzure.Core.Models;
 using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Storage;
 using DBAIAzure.Storage.Repositories;
+using DBAIAzure.Web.Integrations.AzureDevOps;
+using DBAIAzure.Web.Integrations.SpecKit;
 using DBAIAzure.Web.Integrations.Teams;
+using DBAIAzure.Web.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
@@ -64,6 +67,54 @@ builder.Services.AddSingleton<PipelineOrchestrator>(sp =>
     var notifier = sp.GetService<IHitlNotifier>();
 
     return new PipelineOrchestrator(kernelFactory, repo, notifier, portalBaseUrl);
+});
+
+// ── Spec Kit phase handler (parallel track — does not touch the ticket pipeline) ───────────────
+builder.Services.Configure<SpecKitOptions>(builder.Configuration.GetSection(SpecKitOptions.SectionName));
+builder.Services.Configure<AzureDevOpsOptions>(builder.Configuration.GetSection(AzureDevOpsOptions.SectionName));
+
+// Phase-run persistence — same singleton-safe DbContextFactory pattern as the ticket repository.
+builder.Services.AddSingleton<IPhaseRunRepository, SqlitePhaseRunRepository>();
+
+// Seams resolved as app-level singletons; the kernel factory injects them per run.
+builder.Services.AddSingleton<IArtifactReader, FileSystemArtifactReader>();
+builder.Services.AddSingleton<IBoardsClient, AzureDevOpsBoardsClient>();
+
+// Decision-card notifier — named HttpClient, fire-and-forget (mirrors the Teams notifier).
+var decisionCardUrl = builder.Configuration["SpecKit:DecisionCardUrl"] ?? string.Empty;
+builder.Services.AddHttpClient(nameof(ForgeApprovalNotifier), client =>
+{
+    if (!string.IsNullOrWhiteSpace(decisionCardUrl))
+        client.BaseAddress = new Uri(decisionCardUrl);
+});
+builder.Services.AddSingleton<IPhaseApprovalNotifier>(sp =>
+    new ForgeApprovalNotifier(sp.GetRequiredService<IHttpClientFactory>(),
+                              sp.GetRequiredService<ILogger<ForgeApprovalNotifier>>()));
+
+builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
+{
+    // Each run gets a kernel wired with the structured chat service and the seam services; the
+    // orchestrator supplies the per-run progress sink.
+    var artifactReader = sp.GetRequiredService<IArtifactReader>();
+    var boardsClient   = sp.GetRequiredService<IBoardsClient>();
+    var phaseRepo      = sp.GetRequiredService<IPhaseRunRepository>();
+
+    Func<IPhaseProgressSink, Kernel> kernelFactory = sink =>
+    {
+        var kernelBuilder = Kernel.CreateBuilder();
+        kernelBuilder.Services.AddSingleton<IStructuredCompletionService>(
+            new AnthropicChatCompletionService(anthropicKey, anthropicModel));
+        kernelBuilder.Services.AddSingleton(artifactReader);
+        kernelBuilder.Services.AddSingleton(boardsClient);
+        // The create step resolves the phase-run repository for hierarchy linking + idempotent
+        // upsert (FR-012 / FR-013); mirror how IBoardsClient is provided to the kernel.
+        kernelBuilder.Services.AddSingleton(phaseRepo);
+        kernelBuilder.Services.AddSingleton(sink);
+        return kernelBuilder.Build();
+    };
+    var notifier  = sp.GetService<IPhaseApprovalNotifier>();
+
+    return new PhaseHandlerOrchestrator(kernelFactory, phaseRepo, notifier, portalBaseUrl);
 });
 
 var app = builder.Build();
