@@ -7,10 +7,12 @@ using Microsoft.Extensions.Options;
 namespace DBAIAzure.Web.Services;
 
 /// <summary>
-/// Reads phase artifact files from disk under the configured specs root. Reads are bounded by the
-/// configured per-file byte limit and maximum file count so a large or malicious directory cannot
-/// blow up the validation LLM call. Returns an empty list when the directory is missing or has no
-/// readable artifacts, so the caller records a "missing artifacts" failure rather than inventing content.
+/// Reads phase artifact files from disk under the configured specs root, recursively (including
+/// subdirectories such as contracts/ and checklists/) so the validation sees the whole feature.
+/// Reads are bounded by the configured per-file byte limit and maximum file count so a large or
+/// malicious directory cannot blow up the validation LLM call. Returns an empty list when the
+/// directory is missing or has no readable artifacts, so the caller records a "missing artifacts"
+/// failure rather than inventing content.
 /// </summary>
 public sealed class FileSystemArtifactReader : IArtifactReader
 {
@@ -41,10 +43,12 @@ public sealed class FileSystemArtifactReader : IArtifactReader
             return [];
         }
 
+        // Recurse into subdirectories (e.g. contracts/, checklists/) so validation sees the whole
+        // feature, not just top-level files. The file-count cap still bounds the total read.
         var files = Directory
-            .EnumerateFiles(resolvedDirectory, "*.*", SearchOption.TopDirectoryOnly)
+            .EnumerateFiles(resolvedDirectory, "*.*", SearchOption.AllDirectories)
             .Where(path => ArtifactExtensions.Contains(Path.GetExtension(path).ToLowerInvariant()))
-            .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => Path.GetRelativePath(resolvedDirectory, path), StringComparer.OrdinalIgnoreCase)
             .Take(_options.MaxArtifactFiles)
             .ToList();
 
@@ -52,8 +56,15 @@ public sealed class FileSystemArtifactReader : IArtifactReader
         foreach (var path in files)
         {
             var content = await ReadBoundedAsync(path, cancellationToken);
-            artifacts.Add(new PhaseArtifact { FileName = Path.GetFileName(path), Content = content });
+            // Use the path relative to the feature dir (forward-slashed) so subdirectory files are
+            // distinguishable (e.g. "contracts/http-endpoints.md") and never collide on bare names.
+            var relativeName = Path.GetRelativePath(resolvedDirectory, path).Replace('\\', '/');
+            artifacts.Add(new PhaseArtifact { FileName = relativeName, Content = content });
         }
+
+        _logger.LogInformation(
+            "Read {Count} artifact(s) for '{FeatureDirectory}': {Names}",
+            artifacts.Count, featureDirectory, string.Join(", ", artifacts.Select(artifact => artifact.FileName)));
 
         return artifacts;
     }
