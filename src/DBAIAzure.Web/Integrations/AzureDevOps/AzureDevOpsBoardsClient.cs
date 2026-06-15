@@ -29,15 +29,25 @@ public sealed class AzureDevOpsBoardsClient : IBoardsClient, IDisposable
     private const string ParentRelation = "System.LinkTypes.Hierarchy-Reverse";
 
     private readonly AzureDevOpsOptions _options;
-    private readonly VssConnection _connection;
-    private readonly WorkItemTrackingHttpClient _client;
+    private VssConnection? _connection;
+
+    // Connect LAZILY: GetClient performs a network handshake, so building the connection in the
+    // constructor would couple signal intake (and the whole orchestrator) to Azure DevOps being
+    // reachable — even though a board write only happens after approval. Defer it to first use.
+    private readonly Lazy<WorkItemTrackingHttpClient> _client;
 
     public AzureDevOpsBoardsClient(IOptions<AzureDevOpsOptions> options)
     {
         _options = options.Value;
+        _client = new Lazy<WorkItemTrackingHttpClient>(CreateClient);
+    }
+
+    /// <summary>Builds the authenticated work item client on first use (this performs the connection).</summary>
+    private WorkItemTrackingHttpClient CreateClient()
+    {
         var credentials = new VssBasicCredential(string.Empty, _options.Pat);
         _connection = new VssConnection(new Uri(_options.OrganizationUrl), credentials);
-        _client = _connection.GetClient<WorkItemTrackingHttpClient>();
+        return _connection.GetClient<WorkItemTrackingHttpClient>();
     }
 
     public async Task<CreatedWorkItemRef> CreateWorkItemAsync(
@@ -57,7 +67,7 @@ public sealed class AzureDevOpsBoardsClient : IBoardsClient, IDisposable
             patch.Add(BuildParentRelation(parent));
 
         // The work item TYPE is the string parameter — never a System.WorkItemType field patch.
-        var created = await _client.CreateWorkItemAsync(
+        var created = await _client.Value.CreateWorkItemAsync(
             patch, _options.Project, workItemType, cancellationToken: cancellationToken);
 
         return ToRef(created, workItemType, wasUpdated: false);
@@ -76,7 +86,7 @@ public sealed class AzureDevOpsBoardsClient : IBoardsClient, IDisposable
             AddField(HistoryField, appendComment),
         };
 
-        var updated = await _client.UpdateWorkItemAsync(
+        var updated = await _client.Value.UpdateWorkItemAsync(
             patch, workItemId, cancellationToken: cancellationToken);
 
         var type = updated.Fields.TryGetValue("System.WorkItemType", out var value)
@@ -90,7 +100,7 @@ public sealed class AzureDevOpsBoardsClient : IBoardsClient, IDisposable
         int workItemId, string comment, CancellationToken cancellationToken = default)
     {
         var patch = new JsonPatchDocument { AddField(HistoryField, comment) };
-        await _client.UpdateWorkItemAsync(patch, workItemId, cancellationToken: cancellationToken);
+        await _client.Value.UpdateWorkItemAsync(patch, workItemId, cancellationToken: cancellationToken);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -133,5 +143,5 @@ public sealed class AzureDevOpsBoardsClient : IBoardsClient, IDisposable
         WasUpdated = wasUpdated,
     };
 
-    public void Dispose() => _connection.Dispose();
+    public void Dispose() => _connection?.Dispose();
 }
