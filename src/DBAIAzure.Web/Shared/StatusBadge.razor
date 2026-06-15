@@ -1,0 +1,29 @@
+@* Shared status badge used on the dashboard and run detail page. *@
+
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium @BadgeClass">
+    @BadgeText
+</span>
+
+@code {
+    [Parameter, EditorRequired] public PipelineRunStatus Status { get; set; }
+
+    private string BadgeText => Status switch
+    {
+        PipelineRunStatus.Running       => "Running",
+        PipelineRunStatus.AwaitingHuman => "Awaiting PO",
+        PipelineRunStatus.Complete      => "Complete",
+        PipelineRunStatus.Blocked       => "Blocked",
+        PipelineRunStatus.Failed        => "Failed",
+        _                               => "Unknown",
+    };
+
+    private string BadgeClass => Status switch
+    {
+        PipelineRunStatus.Running       => "bg-cyan-900 text-cyan-300",
+        PipelineRunStatus.AwaitingHuman => "bg-amber-900 text-amber-300",
+        PipelineRunStatus.Complete      => "bg-emerald-900 text-emerald-300",
+        PipelineRunStatus.Blocked       => "bg-rose-900 text-rose-300",
+        PipelineRunStatus.Failed        => "bg-red-900 text-red-300",
+        _                               => "bg-gray-800 text-gray-400",
+    };
+}

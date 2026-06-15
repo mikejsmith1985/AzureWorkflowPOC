@@ -1,6 +1,9 @@
 using DBAIAzure.Core.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.ChatCompletion;
 using Spectre.Console;
+using System.Text;
 using System.Text.Json;
 
 namespace DBAIAzure.Processes.Steps;
@@ -12,6 +15,10 @@ public class ValidationStep : KernelProcessStep
     [KernelFunction]
     public async Task ValidateAsync(KernelProcessStepContext ctx, TicketState ticket, Kernel kernel)
     {
+        var reporter    = kernel.Services.GetService<IProgressReporter>();
+        var chatService = kernel.GetRequiredService<IChatCompletionService>();
+        reporter?.ReportStep("Validation", "Running DoR check...");
+
         var clarification = ticket.HumanAnswer is not null
             ? $"\nPO clarification (round {ticket.ClarificationRound}): {ticket.HumanAnswer}"
             : string.Empty;
@@ -31,7 +38,17 @@ public class ValidationStep : KernelProcessStep
             Ticket description: {{ticket.Description}}{{clarification}}
             """;
 
-        var resultText = (await kernel.InvokePromptAsync(prompt)).ToString().Trim();
+        var history = new ChatHistory();
+        history.AddUserMessage(prompt);
+
+        var fullText = new StringBuilder();
+        await foreach (var chunk in chatService.GetStreamingChatMessageContentsAsync(history, kernel: kernel))
+        {
+            var token = chunk.Content ?? string.Empty;
+            fullText.Append(token);
+            reporter?.ReportToken("Validation", token);
+        }
+        var resultText = fullText.ToString().Trim();
 
         var json = resultText.StartsWith("```")
             ? string.Join('\n', resultText.Split('\n').Skip(1).TakeWhile(l => !l.StartsWith("```")))
@@ -42,12 +59,15 @@ public class ValidationStep : KernelProcessStep
 
         if (verdict.IsReady)
         {
-            AnsiConsole.MarkupLine($"  [green]✓ DoR: Ready[/] — {Markup.Escape(verdict.Reasoning ?? string.Empty)}");
+            reporter?.ReportSnapshot("Validation", ticket, ticket);
+            reporter?.ReportStep("Validation", $"Ready - {verdict.Reasoning}", ReportLevel.Success);
+            AnsiConsole.MarkupLine($"  [green]DoR: Ready[/] - {Markup.Escape(verdict.Reasoning ?? string.Empty)}");
             await ctx.EmitEventAsync(new() { Id = Events.ReadyPath, Data = ticket });
         }
         else if (ticket.ClarificationRound >= 3)
         {
-            AnsiConsole.MarkupLine($"  [red]✗ DoR: Blocked[/] — max clarification rounds reached");
+            reporter?.ReportStep("Validation", "Blocked - max clarification rounds reached", ReportLevel.Error);
+            AnsiConsole.MarkupLine("  [red]DoR: Blocked[/] - max clarification rounds reached");
             await ctx.EmitEventAsync(new() { Id = Events.Blocked, Data = ticket });
         }
         else
@@ -55,7 +75,10 @@ public class ValidationStep : KernelProcessStep
             var missingList = verdict.MissingFields?.Count > 0
                 ? string.Join(", ", verdict.MissingFields)
                 : "unspecified gaps";
-            AnsiConsole.MarkupLine($"  [yellow]⚠ DoR: Not Ready[/] — missing: {Markup.Escape(missingList)}");
+            var withQuestions = ticket with { ClarifyingQuestions = verdict.MissingFields ?? [] };
+            reporter?.ReportSnapshot("Validation", ticket, withQuestions);
+            reporter?.ReportStep("Validation", $"Not Ready - missing: {missingList}", ReportLevel.Warning);
+            AnsiConsole.MarkupLine($"  [yellow]DoR: Not Ready[/] - missing: {Markup.Escape(missingList)}");
             await ctx.EmitEventAsync(new() { Id = Events.NotReadyPath, Data = ticket });
         }
     }

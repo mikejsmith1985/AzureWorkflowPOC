@@ -4,7 +4,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
-    <NoWarn>SKEXP0080</NoWarn>
+    <!-- SKEXP0080: SK Process Framework is experimental. VSTHRD200: xUnit test methods follow the
+         project convention of NOT using an "Async" suffix; suppress the analyzer noise project-wide. -->
+    <NoWarn>SKEXP0080;VSTHRD200</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,10 +17,17 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.SemanticKernel" Version="1.77.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.11" />
+    <!-- Azure DevOps client for the live Boards integration test (skipped without a PAT). -->
+    <PackageReference Include="Microsoft.TeamFoundationServer.Client" Version="20.256.2" />
+    <!-- Pin to avoid the NU1605 downgrade pulled transitively by the TFS client. -->
+    <PackageReference Include="System.Configuration.ConfigurationManager" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DBAIAzure.Core\DBAIAzure.Core.csproj" />
     <ProjectReference Include="..\..\src\DBAIAzure.Processes\DBAIAzure.Processes.csproj" />
+    <ProjectReference Include="..\..\src\DBAIAzure.Storage\DBAIAzure.Storage.csproj" />
+    <ProjectReference Include="..\..\src\DBAIAzure.Connectors\DBAIAzure.Connectors.csproj" />
   </ItemGroup>
 </Project>

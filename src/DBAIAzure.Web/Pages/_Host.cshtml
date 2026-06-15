@@ -1,0 +1,38 @@
+@page "/{**catchall}"
+@namespace DBAIAzure.Web.Pages
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DBAIAzure — Pipeline Dashboard</title>
+    <base href="~/" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Mermaid.js — pipeline graph topology visualizer -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+        // Called from Blazor via IJSRuntime to render a Mermaid diagram into a container element.
+        window.mermaidRender = async function (containerId, definition) {
+            try {
+                const uniqueId = 'mermaid-svg-' + containerId;
+                const { svg } = await mermaid.render(uniqueId, definition);
+                const el = document.getElementById(containerId);
+                if (el) el.innerHTML = svg;
+            } catch (e) {
+                console.error('mermaidRender error for container ' + containerId + ':', e);
+            }
+        };
+        // Scrolls an element to its bottom — used to keep the streaming panel pinned to latest output.
+        window.scrollToBottom = function (elementId) {
+            const el = document.getElementById(elementId);
+            if (el) el.scrollTop = el.scrollHeight;
+        };
+    </script>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen antialiased">
+    <component type="typeof(App)" render-mode="ServerPrerendered" />
+    <script src="_framework/blazor.server.js"></script>
+</body>
+</html>

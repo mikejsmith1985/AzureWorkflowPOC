@@ -1,0 +1,23 @@
+@* Source badge indicating the intake origin of a pipeline run. *@
+
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium @BadgeClass">
+    @BadgeText
+</span>
+
+@code {
+    [Parameter, EditorRequired] public string Source { get; set; } = "manual";
+
+    private string BadgeText => Source switch
+    {
+        "servicenow" => "SNow",
+        "replay"     => "Replay",
+        _            => "Manual",
+    };
+
+    private string BadgeClass => Source switch
+    {
+        "servicenow" => "bg-sky-900 text-sky-300",
+        "replay"     => "bg-purple-900 text-purple-300",
+        _            => "bg-gray-800 text-gray-400",
+    };
+}

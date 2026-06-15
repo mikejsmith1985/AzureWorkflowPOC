@@ -1,4 +1,5 @@
 using DBAIAzure.Core.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
 using Spectre.Console;
 
@@ -14,13 +15,12 @@ namespace DBAIAzure.Processes.Steps;
 public class HitlPauseStep : KernelProcessStep
 {
     [KernelFunction]
-    public async Task PauseForHumanAsync(KernelProcessStepContext ctx, TicketState ticket, Kernel _)
+    public async Task PauseForHumanAsync(KernelProcessStepContext ctx, TicketState ticket, Kernel kernel)
     {
-        // Print questions so the PO knows what to answer when the runner resumes the process.
-        // The HITL resume path (Day 2) will collect Console.ReadLine() here and call
-        // process.SendMessageAsync(Events.HumanResponded, updatedTicket).
+        var reporter = kernel.Services.GetService<IProgressReporter>();
+        reporter?.ReportStep("HitlPause", "Awaiting PO input", ReportLevel.Warning);
+
         AnsiConsole.MarkupLine("  [bold yellow]⏸ HITL pause — awaiting PO input[/]");
-        AnsiConsole.MarkupLine("  [dim]Resume path (Day 2): runner will inject HumanResponded → ValidationStep re-runs[/]");
 
         // Emit a PUBLIC event so the outer runner can subscribe to it.
         // The process suspends here; the runner reads Console.ReadLine() and then

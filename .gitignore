@@ -23,6 +23,14 @@ appsettings.*.json
 TestResults/
 coverage/
 
+# Local SQLite database — runtime data, never commit
+*.db
+*.db-wal
+*.db-shm
+
+# Machine-specific SDK resolution (hardcoded user-local dotnet path)
+global.json
+
 # Local tooling — not part of the project
 .forge/
 .github/
