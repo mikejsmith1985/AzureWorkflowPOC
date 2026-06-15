@@ -1,0 +1,35 @@
+{
+  "_comment": "Anthropic forced tool-use input_schema for the phase validation step. The model is forced via tool_choice {type:'tool', name:'report_phase_validation'}; the returned tool_use block's 'input' binds to PhaseValidationResult. Non-streaming call.",
+  "name": "report_phase_validation",
+  "description": "Report a plain-language summary of the spec-kit phase artifacts and any flagged gaps, risks, or omissions a reviewer should see before approving a tracking work item.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "summary": {
+        "type": "string",
+        "description": "One-paragraph plain-language summary of what this phase's artifacts contain."
+      },
+      "gaps": {
+        "type": "array",
+        "description": "Flagged gaps, risks, or omissions. Empty array if none were found.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "Short label for the gap (a few words)."
+            },
+            "description": {
+              "type": "string",
+              "description": "What is missing or risky, and why it matters for the next phase."
+            }
+          },
+          "required": ["label", "description"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["summary", "gaps"],
+    "additionalProperties": false
+  }
+}
