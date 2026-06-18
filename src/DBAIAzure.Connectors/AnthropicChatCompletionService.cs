@@ -1,4 +1,5 @@
 using DBAIAzure.Core.Interfaces;
+using DBAIAzure.Core.Models;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using System.Net.Http.Headers;
@@ -162,6 +163,67 @@ public sealed class AnthropicChatCompletionService : IChatCompletionService, ISt
     }
 
     public void Dispose() => _http.Dispose();
+
+    // ── Functional connectivity test (FR-010) ────────────────────────────────
+
+    /// <summary>
+    /// Sends a minimal inference request to confirm the stored API key and model are functional.
+    /// Uses the same <c>HttpClient</c> and model as the live pipeline — not just a ping (FR-010).
+    /// </summary>
+    public async Task<ConnectorTestResult> TestConnectionAsync(CancellationToken ct = default)
+    {
+        ConnectorTestResult Fail(string message) =>
+            new(ConnectorType.LLM, false, message, DateTimeOffset.UtcNow);
+
+        if (string.IsNullOrEmpty(_model))
+            return Fail("Connector is not configured — no model name stored.");
+
+        try
+        {
+            // Smallest valid inference request: one user turn, 5 tokens max.
+            var probe = new AnthropicRequest(
+                _model, MaxTokens: 5,
+                [new("user", "Respond with the word READY.")],
+                System: null);
+
+            var json = JsonSerializer.Serialize(probe, JsonOpts);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+            var response = await _http.PostAsync("/v1/messages", content, ct);
+            var body = await response.Content.ReadAsStringAsync(ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return (int)response.StatusCode switch
+                {
+                    401 => Fail("Authentication failed — the API key was rejected by the provider (401 Unauthorized). Check the key value and try again."),
+                    403 => Fail("Access denied — the API key lacks permission to use this model (403 Forbidden)."),
+                    404 => Fail($"Model '{_model}' not found or not available on this account (404)."),
+                    429 => Fail("Request rate limit or quota exceeded (429). Check your Anthropic account quota."),
+                    _   => Fail($"Unexpected response from Anthropic: {(int)response.StatusCode} {response.StatusCode}."),
+                };
+            }
+
+            var apiResponse = JsonSerializer.Deserialize<AnthropicResponse>(body, JsonOpts);
+            var text = apiResponse?.Content?.FirstOrDefault()?.Text;
+
+            if (string.IsNullOrEmpty(text))
+                return Fail("Unexpected response shape — the model returned an empty content array. Check the model name.");
+
+            return new ConnectorTestResult(
+                ConnectorType.LLM, true,
+                $"Model '{_model}' responded to a test inference request.",
+                DateTimeOffset.UtcNow);
+        }
+        catch (TaskCanceledException)
+        {
+            return Fail("Test timed out — check network connectivity to the LLM provider.");
+        }
+        catch (HttpRequestException ex)
+        {
+            return Fail($"Service unreachable — {ex.Message}");
+        }
+    }
 
     // ── Wire models ───────────────────────────────────────────────────────────
 

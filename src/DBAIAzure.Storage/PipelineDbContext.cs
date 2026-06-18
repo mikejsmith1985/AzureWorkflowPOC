@@ -14,6 +14,9 @@ public class PipelineDbContext : DbContext
     /// <summary>Phase-handler run audit records — independent of the ticket pipeline (FR-017).</summary>
     public DbSet<PhaseRunRecord>     PhaseRuns { get; set; } = null!;
 
+    /// <summary>One configuration row per connector type; secrets stored encrypted (FR-019).</summary>
+    public DbSet<ConnectorConfigRecord> ConnectorConfigs { get; set; } = null!;
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<RunRecord>(entity =>
@@ -46,6 +49,14 @@ public class PipelineDbContext : DbContext
             // One record per (feature, phase) — enforces single-record-per-phase and backs
             // idempotent upsert (data-model.md / FR-013).
             entity.HasIndex(r => new { r.FeatureKey, r.Phase }).IsUnique();
+        });
+
+        modelBuilder.Entity<ConnectorConfigRecord>(entity =>
+        {
+            entity.HasKey(r => r.Id);
+            entity.Property(r => r.Id).ValueGeneratedOnAdd();
+            // One record per connector type — backs the concurrency-safe upsert in the repository.
+            entity.HasIndex(r => r.ConnectorType).IsUnique();
         });
     }
 }
