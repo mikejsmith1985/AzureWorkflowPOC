@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Pipeline Connector Configuration Modal (`specs/002-pipeline-connector-config`)
+- **Connector configuration modal** accessible from a gear icon on the Threads dashboard; configures all four pipeline connectors (ServiceNow, Azure DevOps, LLM/Anthropic, Microsoft Teams) without restarting the app
+- **Persisted settings** — connector non-secret configuration and encrypted credentials stored in `ConnectorConfigs` table (SQLite via EF Core); survives server restarts and is always editable
+- **Encrypted secrets at rest** — ASP.NET Core Data Protection (`IDataProtectionProvider`) encrypts every secret field via `SqliteConnectorConfigRepository`; plaintext never enters the database, a log, or this codebase (FR-019, Article IX)
+- **Per-connector functional tests** — each "Test Connection" button calls a genuine live check rather than a simple ping: ServiceNow reads `sys_properties`, Azure DevOps reads the project record, Anthropic sends a 5-token inference, Teams posts a labelled Adaptive Card; specific failure reasons are surfaced in the modal
+- **Hot-reload** — LLM model/endpoint and all connector credentials are resolved from the DB at the start of every pipeline run (not at server start-up), so reconfiguring a connector takes effect immediately
+- **Live parallel pre-flight gate** — both `PipelineOrchestrator` and `PhaseHandlerOrchestrator` run `IConnectorHealthChecker.CheckAllAsync()` (four tests in parallel) before any SK process step executes; failing connectors block the run and surface the specific diagnostic (FR-018, SC-008)
+- `ConnectorStatusBadge.razor` — four-state status chip (not configured / untested / pass / fail) shown per connector in the modal header row
+- `ConnectorSection.razor` — per-connector configuration panel with inline field validation and write-only secret semantics (unchanged masked field sends `null` to preserve the existing encrypted blob)
+- Unit tests: `SqliteConnectorConfigRepositoryTests` (CRUD, encryption round-trip, null-secret preservation, concurrent-write uniqueness), `ConnectorHealthCheckerTests` (all-pass, single-fail, pre-flight diagnostic, exception safety), `ConnectorStatusBadgeTests` (four display-state rules)
+- Integration test stubs in `tests/DBAIAzure.Tests/Integration/ConnectorFunctionalTests.cs` (skipped unless `Category=Integration` and real credentials supplied via environment variables)
+
 ### Fixed — Code-review bugs (self-review, PR #2)
 - **PlanArtifactParser task flood** — `ParseTaskLines` previously created one ADO Task per checkbox line in `tasks.md` regardless of count; a mature feature's 52-task implementation backlog now correctly falls through to `plan.md` section headings (plan-level granularity) when the count exceeds `MaxPlanTasksFromTasksMd = 20`. Two new tests verify both the happy path and the fallthrough.
 - **Path-traversal guard in `FileSystemArtifactReader`** — bare `StartsWith(specsRootFull)` would allow a sibling directory named `specs-evil` to pass; fixed by appending a separator so `(fullPath + sep).StartsWith(specsRoot + sep)` is the comparison.

@@ -1,31 +1,33 @@
+// Posts HITL notification cards to Teams. Webhook URL is resolved from DB at each send (FR-014).
 using DBAIAzure.Core.Interfaces;
+using DBAIAzure.Core.Models;
 using System.Text;
 using System.Text.Json;
 
 namespace DBAIAzure.Web.Integrations.Teams;
 
 /// <summary>
-/// Posts an Adaptive Card-style notification to a Microsoft Teams channel via a
-/// Power Automate HTTP trigger URL when the pipeline pauses for human input.
-///
-/// Setup (one-time, per user):
-///   1. In Power Automate, create a new Flow: Trigger = "When an HTTP request is received"
-///   2. Add action: "Post an Adaptive Card to a Teams chat or channel"
-///   3. In the Adaptive Card body, reference the JSON fields this notifier sends
-///   4. Save the Flow, copy the HTTP POST URL, add it to appsettings.Development.json
-///
-/// The card includes a "Respond in Portal" button deep-linking to the run detail page.
-/// The PO answers in the web UI — no bot registration or Graph API required.
+/// Posts an Adaptive Card-style notification to a Microsoft Teams channel via a webhook URL.
+/// The URL is resolved from <see cref="IConnectorConfigRepository"/> at each call (hot-reload,
+/// FR-014); falls back to the named <see cref="HttpClient"/> base address (IConfiguration) when
+/// no DB-stored URL is available, so the existing setup path continues to work.
 /// </summary>
 public sealed class TeamsHitlNotifier : IHitlNotifier
 {
-    private readonly HttpClient _http;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConnectorConfigRepository? _configRepo;
     private readonly ILogger<TeamsHitlNotifier> _logger;
 
-    public TeamsHitlNotifier(IHttpClientFactory httpClientFactory, ILogger<TeamsHitlNotifier> logger)
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    public TeamsHitlNotifier(
+        IHttpClientFactory httpClientFactory,
+        ILogger<TeamsHitlNotifier> logger,
+        IConnectorConfigRepository? configRepo = null)
     {
-        _http   = httpClientFactory.CreateClient(nameof(TeamsHitlNotifier));
-        _logger = logger;
+        _httpClientFactory = httpClientFactory;
+        _logger            = logger;
+        _configRepo        = configRepo;
     }
 
     public async Task NotifyAsync(
@@ -52,7 +54,33 @@ public sealed class TeamsHitlNotifier : IHitlNotifier
 
         try
         {
-            var response = await _http.PostAsync(string.Empty, content, cancellationToken);
+            string? dbWebhookUrl = null;
+
+            if (_configRepo is not null)
+            {
+                var secretsJson = await _configRepo.GetDecryptedSecretsAsync(ConnectorType.Teams, cancellationToken);
+                if (secretsJson is not null)
+                {
+                    var secrets = JsonSerializer.Deserialize<TeamsSecrets>(secretsJson, JsonOptions);
+                    dbWebhookUrl = secrets?.WebhookUrl;
+                }
+            }
+
+            HttpResponseMessage response;
+
+            if (!string.IsNullOrEmpty(dbWebhookUrl))
+            {
+                // Hot-reload path: use the DB-stored URL on a plain unnamed client (no base address).
+                var http = _httpClientFactory.CreateClient();
+                response = await http.PostAsync(dbWebhookUrl, content, cancellationToken);
+            }
+            else
+            {
+                // Legacy path: use the named client whose base address was set from IConfiguration.
+                var http = _httpClientFactory.CreateClient(nameof(TeamsHitlNotifier));
+                response = await http.PostAsync(string.Empty, content, cancellationToken);
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning(
@@ -66,8 +94,10 @@ public sealed class TeamsHitlNotifier : IHitlNotifier
         }
         catch (Exception ex)
         {
-            // Non-blocking: log and continue — pipeline must not fail because of a missed ping
+            // Non-blocking: log and continue — the pipeline must not fail because of a missed ping.
             _logger.LogError(ex, "Failed to send Teams HITL notification for run {RunId}", runId);
         }
     }
+
+    private sealed record TeamsSecrets(string? WebhookUrl);
 }
