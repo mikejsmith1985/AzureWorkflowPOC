@@ -21,6 +21,10 @@ public static class Events
     public const string AwaitHuman = "AwaitHuman";
     public const string HumanResponded = "HumanResponded";
 
+    // HumanApprovalStep inputs + output
+    public const string AwaitHumanApproval = "AwaitHumanApproval";
+    public const string HumanApprovalReceived = "HumanApprovalReceived";
+
     // EstimationStep inputs + output
     public const string Estimate = "Estimate";
     public const string EstimationComplete = "EstimationComplete";

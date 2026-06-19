@@ -1,0 +1,341 @@
+@* Node configuration panel — opens as a right-side inline sidebar when the user
+   double-clicks a workflow node. Shows fields for the selected node type.
+   Closes with IsConfigured = true once all required fields are filled.
+   Shows amber required-field badge if Goal is empty on close. *@
+
+@if (Node is null || !IsOpen)
+{
+    @* Panel is hidden — nothing rendered *@
+    return;
+}
+
+<aside class="workflow-config-panel flex flex-col bg-gray-900 border-l border-gray-800 w-72 min-w-[18rem] h-full"
+       aria-label="Node configuration panel">
+
+    @* Header *@
+    <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
+        <div class="flex items-center gap-2">
+            <span class="@GetHeaderAccentClass() w-2.5 h-2.5 rounded-full"></span>
+            <span class="text-sm font-semibold text-gray-200 truncate">@GetNodeTypeName()</span>
+        </div>
+        <button @onclick="OnCloseAsync"
+                class="text-gray-500 hover:text-gray-300 transition-colors"
+                aria-label="Close node configuration panel">✕</button>
+    </div>
+
+    @* Required-field warning banner (only on close attempt with empty required fields) *@
+    @if (_showRequiredBanner)
+    {
+        <div class="mx-3 mt-3 bg-amber-900/40 border border-amber-700/50 rounded-lg p-2.5 text-xs text-amber-300 shrink-0"
+             role="alert">
+            "Goal" is required before this step is fully configured.
+        </div>
+    }
+
+    @* Form fields — 3 visible without scrolling, no raw JSON *@
+    <div class="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4">
+
+        @if (Node.NodeType == WorkflowNodeType.Trigger)
+        {
+            @* Trigger: What starts this workflow? + What information is available at the start? *@
+            <p class="text-xs text-gray-400">
+                Describe the event that kicks off this workflow and what information is available when it fires.
+            </p>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-xs font-medium text-gray-400 flex items-center gap-1">
+                    What starts this workflow?
+                    <span class="text-amber-400" aria-label="required">*</span>
+                </label>
+                <textarea value="@_goalPrompt"
+                          @oninput="OnGoalInput"
+                          rows="3"
+                          placeholder="e.g. A support ticket arrives with a customer complaint…"
+                          class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                                 text-gray-100 placeholder-gray-500 resize-none
+                                 focus:outline-none focus:border-emerald-500"
+                          aria-label="What event starts this workflow?"></textarea>
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-xs font-medium text-gray-400">
+                    What information is available at the start?
+                </label>
+                <textarea value="@_initialDataDescription"
+                          @oninput="@((e) => _initialDataDescription = e.Value?.ToString() ?? string.Empty)"
+                          rows="3"
+                          placeholder="e.g. The ticket text, the customer name, and the priority level…"
+                          class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                                 text-gray-100 placeholder-gray-500 resize-none
+                                 focus:outline-none focus:border-emerald-500"
+                          aria-label="What information is available when this workflow starts?"></textarea>
+            </div>
+        }
+        else if (Node.NodeType == WorkflowNodeType.AgenticReason)
+        {
+            @* AgenticReason: Goal (required), Input label, Output label *@
+            <div class="flex flex-col gap-1">
+                <label class="text-xs font-medium text-gray-400 flex items-center gap-1">
+                    Goal
+                    <span class="text-amber-400" aria-label="required">*</span>
+                </label>
+                <textarea value="@_goalPrompt"
+                          @oninput="OnGoalInput"
+                          rows="3"
+                          placeholder="Describe what this step should do in plain language…"
+                          class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                                 text-gray-100 placeholder-gray-500 resize-none
+                                 focus:outline-none focus:border-cyan-500"
+                          aria-label="Goal — what should this step accomplish?"></textarea>
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-xs font-medium text-gray-400">Input label</label>
+                <input type="text"
+                       value="@_inputLabel"
+                       @oninput="@((e) => _inputLabel = e.Value?.ToString() ?? string.Empty)"
+                       placeholder="What does this step receive? (e.g. 'Support request text')"
+                       class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                              text-gray-100 placeholder-gray-500
+                              focus:outline-none focus:border-cyan-500"
+                       aria-label="Input label — describe what this step receives" />
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-xs font-medium text-gray-400">Output label</label>
+                <input type="text"
+                       value="@_outputLabel"
+                       @oninput="@((e) => _outputLabel = e.Value?.ToString() ?? string.Empty)"
+                       placeholder="What does this step produce? (e.g. '3-bullet summary')"
+                       class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                              text-gray-100 placeholder-gray-500
+                              focus:outline-none focus:border-cyan-500"
+                       aria-label="Output label — describe what this step produces" />
+            </div>
+        }
+        else if (Node.NodeType == WorkflowNodeType.HumanApproval)
+        {
+            @* HumanApproval: Input label, Output label *@
+            <p class="text-xs text-gray-400">
+                This step pauses the workflow and waits for a person to review and approve.
+            </p>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-xs font-medium text-gray-400">Input label</label>
+                <input type="text"
+                       value="@_inputLabel"
+                       @oninput="@((e) => _inputLabel = e.Value?.ToString() ?? string.Empty)"
+                       placeholder="What will the reviewer see? (e.g. 'Summary for approval')"
+                       class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                              text-gray-100 placeholder-gray-500
+                              focus:outline-none focus:border-cyan-500"
+                       aria-label="Input label — what does the reviewer see?" />
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-xs font-medium text-gray-400">Output label</label>
+                <input type="text"
+                       value="@_outputLabel"
+                       @oninput="@((e) => _outputLabel = e.Value?.ToString() ?? string.Empty)"
+                       placeholder="What decision does the reviewer provide? (e.g. 'Approved / Rejected')"
+                       class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                              text-gray-100 placeholder-gray-500
+                              focus:outline-none focus:border-cyan-500"
+                       aria-label="Output label — what does the reviewer decide?" />
+            </div>
+        }
+        else
+        {
+            @* Function nodes: type label + input/output labels *@
+            <p class="text-xs text-gray-400">@GetFunctionNodeDescription()</p>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-xs font-medium text-gray-400">Input label</label>
+                <input type="text"
+                       value="@_inputLabel"
+                       @oninput="@((e) => _inputLabel = e.Value?.ToString() ?? string.Empty)"
+                       placeholder="What does this step receive?"
+                       class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                              text-gray-100 placeholder-gray-500
+                              focus:outline-none focus:border-cyan-500"
+                       aria-label="Input label" />
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-xs font-medium text-gray-400">Output label</label>
+                <input type="text"
+                       value="@_outputLabel"
+                       @oninput="@((e) => _outputLabel = e.Value?.ToString() ?? string.Empty)"
+                       placeholder="What does this step produce?"
+                       class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                              text-gray-100 placeholder-gray-500
+                              focus:outline-none focus:border-cyan-500"
+                       aria-label="Output label" />
+            </div>
+        }
+    </div>
+
+    @* Save button *@
+    <div class="shrink-0 border-t border-gray-800 px-4 py-3">
+        <button @onclick="OnSaveAsync"
+                class="w-full bg-cyan-700 hover:bg-cyan-600 text-white rounded-lg py-2 text-sm font-medium transition-colors"
+                aria-label="Save node configuration">
+            Save
+        </button>
+    </div>
+</aside>
+
+@code {
+    // ── Parameters ──────────────────────────────────────────────────────────────
+
+    /// <summary>The node currently being configured; null = panel not applicable.</summary>
+    [Parameter] public WorkflowNode? Node { get; set; }
+
+    /// <summary>Whether the panel is currently open.</summary>
+    [Parameter] public bool IsOpen { get; set; }
+
+    /// <summary>
+    /// Raised when the user saves the panel. Returns the updated node so the canvas can
+    /// replace the old record in the workflow definition.
+    /// </summary>
+    [Parameter] public EventCallback<WorkflowNode> NodeUpdated { get; set; }
+
+    /// <summary>Raised when the user closes the panel without saving.</summary>
+    [Parameter] public EventCallback OnCloseRequested { get; set; }
+
+    // ── Local state ─────────────────────────────────────────────────────────────
+
+    private string _goalPrompt              = string.Empty;
+    private string _inputLabel              = string.Empty;
+    private string _outputLabel             = string.Empty;
+    private string _initialDataDescription  = string.Empty;
+    private bool   _showRequiredBanner;
+
+    // ── Lifecycle ────────────────────────────────────────────────────────────────
+
+    protected override void OnParametersSet()
+    {
+        if (Node is null) return;
+        _goalPrompt  = Node.GoalPrompt  ?? string.Empty;
+        _inputLabel  = Node.InputLabel  ?? string.Empty;
+        _outputLabel = Node.OutputLabel ?? string.Empty;
+        _showRequiredBanner = false;
+
+        // Populate the Trigger-specific field from the JSON config blob.
+        if (Node.NodeType == WorkflowNodeType.Trigger && !string.IsNullOrWhiteSpace(Node.FunctionConfig))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(Node.FunctionConfig);
+                if (doc.RootElement.TryGetProperty("initialDataDescription", out var prop))
+                    _initialDataDescription = prop.GetString() ?? string.Empty;
+            }
+            catch
+            {
+                _initialDataDescription = string.Empty;
+            }
+        }
+        else if (Node.NodeType != WorkflowNodeType.Trigger)
+        {
+            _initialDataDescription = string.Empty;
+        }
+    }
+
+    // ── Event handlers ───────────────────────────────────────────────────────────
+
+    private void OnGoalInput(ChangeEventArgs changeArgs)
+    {
+        _goalPrompt = changeArgs.Value?.ToString() ?? string.Empty;
+    }
+
+    private async Task OnSaveAsync()
+    {
+        if (Node is null) return;
+
+        // Goal is required for AgenticReason and Trigger — show amber banner and refuse to close if empty.
+        if ((Node.NodeType == WorkflowNodeType.AgenticReason || Node.NodeType == WorkflowNodeType.Trigger)
+            && string.IsNullOrWhiteSpace(_goalPrompt))
+        {
+            _showRequiredBanner = true;
+            return;
+        }
+
+        _showRequiredBanner = false;
+
+        WorkflowNode updatedNode;
+        if (Node.NodeType == WorkflowNodeType.Trigger)
+        {
+            // Serialize the Trigger-specific fields back into the FunctionConfig JSON blob.
+            var configJson = System.Text.Json.JsonSerializer.Serialize(
+                new { initialDataDescription = _initialDataDescription });
+
+            updatedNode = Node with
+            {
+                GoalPrompt     = string.IsNullOrWhiteSpace(_goalPrompt) ? null : _goalPrompt,
+                FunctionConfig = configJson,
+                IsConfigured   = !string.IsNullOrWhiteSpace(_goalPrompt),
+            };
+        }
+        else
+        {
+            var isConfigured = Node.NodeType switch
+            {
+                WorkflowNodeType.AgenticReason => !string.IsNullOrWhiteSpace(_goalPrompt),
+                _                              => true,  // function nodes are configured by their presence
+            };
+
+            // Label mirrors Goal for agentic nodes so the canvas chip stays readable.
+            var updatedLabel = Node.NodeType == WorkflowNodeType.AgenticReason && !string.IsNullOrWhiteSpace(_goalPrompt)
+                ? _goalPrompt
+                : Node.Label;
+
+            updatedNode = Node with
+            {
+                GoalPrompt   = string.IsNullOrWhiteSpace(_goalPrompt) ? null : _goalPrompt,
+                InputLabel   = string.IsNullOrWhiteSpace(_inputLabel) ? null : _inputLabel,
+                OutputLabel  = string.IsNullOrWhiteSpace(_outputLabel) ? null : _outputLabel,
+                Label        = updatedLabel,
+                IsConfigured = isConfigured,
+            };
+        }
+
+        await NodeUpdated.InvokeAsync(updatedNode);
+    }
+
+    private async Task OnCloseAsync()
+    {
+        _showRequiredBanner = false;
+        await OnCloseRequested.InvokeAsync();
+    }
+
+    // ── Display helpers ──────────────────────────────────────────────────────────
+
+    private string GetNodeTypeName() => Node?.NodeType switch
+    {
+        WorkflowNodeType.Trigger          => "Start / Trigger",
+        WorkflowNodeType.AgenticReason    => "Reason & Decide",
+        WorkflowNodeType.HumanApproval    => "Ask a Person",
+        WorkflowNodeType.FunctionRoute    => "Smart Branch",
+        WorkflowNodeType.FunctionTransform=> "Transform",
+        WorkflowNodeType.FunctionNotify   => "Notify",
+        WorkflowNodeType.FunctionData     => "Save / Load",
+        _                                 => "Step",
+    };
+
+    private string GetHeaderAccentClass() => Node?.NodeType switch
+    {
+        WorkflowNodeType.Trigger          => "bg-emerald-400",
+        WorkflowNodeType.AgenticReason    => "bg-amber-400",
+        WorkflowNodeType.HumanApproval    => "bg-purple-400",
+        _                                 => "bg-cyan-400",
+    };
+
+    private string GetFunctionNodeDescription() => Node?.NodeType switch
+    {
+        WorkflowNodeType.FunctionRoute    => "Reads the previous step's result and directs work to the next path.",
+        WorkflowNodeType.FunctionTransform=> "Converts information from one shape into another for the next step.",
+        WorkflowNodeType.FunctionNotify   => "Sends a message or alert to a person or system.",
+        WorkflowNodeType.FunctionData     => "Saves or retrieves information from storage.",
+        _                                 => "This step performs a specific function in the workflow.",
+    };
+}

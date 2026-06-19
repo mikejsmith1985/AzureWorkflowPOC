@@ -2,6 +2,7 @@ using System.Text.Json;
 using DBAIAzure.Connectors;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Validation;
 using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Storage;
 using DBAIAzure.Storage.Repositories;
@@ -46,6 +47,9 @@ builder.Services.AddSingleton<ISecretProtector, DataProtectorAdapter>();
 
 // ── Connector config repository (T013) ────────────────────────────────────────
 builder.Services.AddSingleton<IConnectorConfigRepository, SqliteConnectorConfigRepository>();
+
+// ── Workflow persistence ────────────────────────────────────────────────────
+builder.Services.AddSingleton<IWorkflowRepository, SqliteWorkflowRepository>();
 
 // ── ServiceNow outbound HTTP client — 35 s timeout, base URL set per-request (T002) ─
 builder.Services.AddHttpClient(nameof(ServiceNowClient), client =>
@@ -190,6 +194,61 @@ builder.Services.AddSingleton<LlmConnectorTester>();
 builder.Services.AddSingleton<TeamsConnectorTester>();
 builder.Services.AddSingleton<IConnectorHealthChecker, ConnectorHealthChecker>();
 
+// ── Workflow structural validator (spec 004) ───────────────────────────────────
+builder.Services.AddSingleton<IWorkflowValidator, WorkflowValidator>();
+
+// ── Visual Workflow Builder services (T046–T049) ───────────────────────────────
+// A singleton IChatCompletionService for the Visual Workflow Builder (separate from the
+// per-run kernel factory used by the pipeline orchestrator).
+builder.Services.AddSingleton<IChatCompletionService>(
+    new AnthropicChatCompletionService(anthropicKey, anthropicModel));
+
+builder.Services.AddSingleton<WorkflowTopologySerializer>();
+builder.Services.AddSingleton<ILlmAvailabilityMonitor, LlmAvailabilityMonitor>();
+builder.Services.AddSingleton<IWorkflowCodeGenerator, WorkflowCodeGenerator>();
+builder.Services.AddSingleton<WorkflowDesignSkillService>();
+builder.Services.AddSingleton<WorkflowThumbnailGenerator>();
+// WorkflowBuilderService is scoped (one instance per session / per page).
+builder.Services.AddScoped<WorkflowBuilderService>();
+
+// WorkflowExecutionOrchestrator: singleton that owns all visual-workflow run lifecycles.
+// Accepts a Func<Kernel> so it can re-read LLM credentials from the DB on each run (hot-reload).
+builder.Services.AddSingleton<IWorkflowExecutionOrchestrator>(sp =>
+{
+    var configRepo = sp.GetRequiredService<IConnectorConfigRepository>();
+
+    Func<Kernel> kernelFactory = () =>
+    {
+        var effectiveKey   = anthropicKey;
+        var effectiveModel = anthropicModel;
+        try
+        {
+            var configResult = configRepo.GetAsync(ConnectorType.LLM).GetAwaiter().GetResult();
+            if (configResult?.NonSecretConfig is { } nsJson)
+            {
+                using var nsDoc = JsonDocument.Parse(nsJson);
+                if (nsDoc.RootElement.TryGetProperty("modelName", out var mProp) && !string.IsNullOrEmpty(mProp.GetString()))
+                    effectiveModel = mProp.GetString()!;
+            }
+            var secretsJson = configRepo.GetDecryptedSecretsAsync(ConnectorType.LLM).GetAwaiter().GetResult();
+            if (secretsJson is not null)
+            {
+                using var sDoc = JsonDocument.Parse(secretsJson);
+                if (sDoc.RootElement.TryGetProperty("apiKey", out var kProp) && !string.IsNullOrEmpty(kProp.GetString()))
+                    effectiveKey = kProp.GetString()!;
+            }
+        }
+        catch { }
+
+        var kernelBuilder = Kernel.CreateBuilder();
+        kernelBuilder.Services.AddSingleton<IChatCompletionService>(
+            new AnthropicChatCompletionService(effectiveKey, effectiveModel));
+        return kernelBuilder.Build();
+    };
+
+    return new WorkflowExecutionOrchestrator(kernelFactory);
+});
+
 var app = builder.Build();
 
 // ── Ensure database is created on startup ─────────────────────────────────────
@@ -214,6 +273,28 @@ using (var scope = app.Services.CreateScope())
         );
         CREATE UNIQUE INDEX IF NOT EXISTS IX_ConnectorConfigs_ConnectorType
             ON ConnectorConfigs (ConnectorType);
+        """);
+
+    // Add WorkflowDefinitions table for databases created before the Visual Workflow Builder was added.
+    // CREATE TABLE IF NOT EXISTS is idempotent — safe to run on every startup.
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS WorkflowDefinitions (
+            Id             TEXT    NOT NULL PRIMARY KEY,
+            Name           TEXT    NOT NULL,
+            OwnerId        TEXT    NOT NULL,
+            NodesJson      TEXT    NOT NULL DEFAULT '[]',
+            EdgesJson      TEXT    NOT NULL DEFAULT '[]',
+            SettingsJson   TEXT    NOT NULL DEFAULT '{{}}',
+            ChatHistoryJson TEXT   NOT NULL DEFAULT '[]',
+            GeneratedCode  TEXT,
+            ThumbnailSvg   TEXT,
+            CreatedAt      TEXT    NOT NULL DEFAULT '0001-01-01T00:00:00+00:00',
+            LastModifiedAt TEXT    NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS IX_WorkflowDefinitions_OwnerId_Name
+            ON WorkflowDefinitions (OwnerId, Name);
+        CREATE INDEX IF NOT EXISTS IX_WorkflowDefinitions_OwnerId
+            ON WorkflowDefinitions (OwnerId);
         """);
 }
 

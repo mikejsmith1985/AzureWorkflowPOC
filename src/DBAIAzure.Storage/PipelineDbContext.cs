@@ -17,6 +17,9 @@ public class PipelineDbContext : DbContext
     /// <summary>One configuration row per connector type; secrets stored encrypted (FR-019).</summary>
     public DbSet<ConnectorConfigRecord> ConnectorConfigs { get; set; } = null!;
 
+    /// <summary>One row per saved workflow; nodes, edges, settings, and chat history stored as JSON blobs.</summary>
+    public DbSet<WorkflowDefinitionRecord> Workflows { get; set; } = null!;
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<RunRecord>(entity =>
@@ -57,6 +60,16 @@ public class PipelineDbContext : DbContext
             entity.Property(r => r.Id).ValueGeneratedOnAdd();
             // One record per connector type — backs the concurrency-safe upsert in the repository.
             entity.HasIndex(r => r.ConnectorType).IsUnique();
+        });
+
+        modelBuilder.Entity<WorkflowDefinitionRecord>(entity =>
+        {
+            entity.HasKey(r => r.Id);
+            entity.Property(r => r.Id).ValueGeneratedNever();
+            // Enforces the personal-gallery uniqueness rule: each user can have only one workflow with a given name.
+            entity.HasIndex(r => new { r.OwnerId, r.Name }).IsUnique();
+            // Covering index for the ListByOwner query — avoids a full table scan per user.
+            entity.HasIndex(r => r.OwnerId);
         });
     }
 }
