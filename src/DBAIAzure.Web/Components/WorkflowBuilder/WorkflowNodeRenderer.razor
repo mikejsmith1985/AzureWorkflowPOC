@@ -1,0 +1,143 @@
+@* Visual tile for a single workflow node on the canvas.
+   Z.Blazor.Diagrams passes the WorkflowNodeModel as a CascadingParameter.
+   Warm amber = AgenticReason; cool blue/teal = function nodes; purple = HumanApproval. *@
+
+<div class="workflow-node @GetBorderClass() @GetBackgroundClass() @GetExecutionRingClass() rounded-lg border-2 shadow-lg min-w-[140px] select-none relative transition-shadow"
+     @ondblclick="OnDoubleClick"
+     title="Double-click to configure"
+     aria-label="@Node.WorkflowNode.Label — double-click to configure">
+
+    @* Amber badge when the node has not been configured yet *@
+    @if (!Node.WorkflowNode.IsConfigured)
+    {
+        <div class="absolute -top-2 -right-2 w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center"
+             title="This node needs configuration"
+             aria-label="Node requires configuration">
+            <span class="text-white text-xs font-bold leading-none">!</span>
+        </div>
+    }
+
+    @* Node type icon + label header *@
+    <div class="@GetHeaderClass() rounded-t-md px-3 py-2 flex items-center gap-2">
+        <span class="text-lg" role="img" aria-label="@Node.WorkflowNode.NodeType.ToString()">@GetIcon()</span>
+        <span class="text-white text-sm font-semibold truncate max-w-[110px]">@Node.WorkflowNode.Label</span>
+    </div>
+
+    @* Port chips and goal preview *@
+    <div class="px-3 py-2 flex flex-col gap-1">
+        @if (!string.IsNullOrWhiteSpace(Node.WorkflowNode.InputLabel))
+        {
+            <span class="text-xs text-gray-400 truncate">← @Node.WorkflowNode.InputLabel</span>
+        }
+        @if (!string.IsNullOrWhiteSpace(Node.WorkflowNode.GoalPrompt))
+        {
+            <span class="text-xs text-gray-300 line-clamp-2 italic opacity-75">@TruncateGoal()</span>
+        }
+        @if (!string.IsNullOrWhiteSpace(Node.WorkflowNode.OutputLabel))
+        {
+            <span class="text-xs text-gray-400 truncate">→ @Node.WorkflowNode.OutputLabel</span>
+        }
+    </div>
+
+    @* Execution state badge — only shown during a run *@
+    @if (ExecutionState is not null)
+    {
+        <div class="px-3 pb-2 flex items-center gap-1">
+            <span class="@GetStatusBadgeClass() text-xs px-2 py-0.5 rounded-full font-medium">
+                @GetStatusLabel()
+            </span>
+            @if (!string.IsNullOrWhiteSpace(ExecutionState.OutputSummary))
+            {
+                <span class="text-xs text-gray-300 truncate">@ExecutionState.OutputSummary</span>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>The diagram node model; passed by Z.Blazor.Diagrams as a regular Parameter.</summary>
+    [Parameter]
+    public WorkflowNodeModel Node { get; set; } = null!;
+
+    /// <summary>
+    /// Optional live execution state injected by <see cref="WorkflowCanvas"/> during a run.
+    /// When null the execution badge row is hidden.
+    /// </summary>
+    [Parameter]
+    public NodeExecutionState? ExecutionState { get; set; }
+
+    private void OnDoubleClick(MouseEventArgs _) => Node.RaiseDoubleClicked();
+
+    private string GetBorderClass() => Node.WorkflowNode.NodeType switch
+    {
+        WorkflowNodeType.AgenticReason  => "border-amber-500",
+        WorkflowNodeType.HumanApproval  => "border-purple-500",
+        _                               => "border-cyan-600",
+    };
+
+    private string GetBackgroundClass() => Node.WorkflowNode.NodeType switch
+    {
+        WorkflowNodeType.AgenticReason  => "bg-gray-900",
+        WorkflowNodeType.HumanApproval  => "bg-gray-900",
+        _                               => "bg-gray-900",
+    };
+
+    private string GetHeaderClass() => Node.WorkflowNode.NodeType switch
+    {
+        WorkflowNodeType.AgenticReason  => "bg-amber-600",
+        WorkflowNodeType.HumanApproval  => "bg-purple-700",
+        WorkflowNodeType.FunctionRoute  => "bg-cyan-700",
+        WorkflowNodeType.FunctionTransform => "bg-teal-700",
+        WorkflowNodeType.FunctionNotify => "bg-sky-700",
+        WorkflowNodeType.FunctionData   => "bg-indigo-700",
+        _                               => "bg-cyan-700",
+    };
+
+    private string GetIcon() => Node.WorkflowNode.NodeType switch
+    {
+        WorkflowNodeType.AgenticReason    => "🧠",
+        WorkflowNodeType.HumanApproval    => "👤",
+        WorkflowNodeType.FunctionRoute    => "🔀",
+        WorkflowNodeType.FunctionTransform=> "⚙️",
+        WorkflowNodeType.FunctionNotify   => "🔔",
+        WorkflowNodeType.FunctionData     => "💾",
+        _                                 => "📦",
+    };
+
+    private string TruncateGoal()
+    {
+        const int maxLen = 60;
+        var goal = Node.WorkflowNode.GoalPrompt ?? string.Empty;
+        return goal.Length > maxLen ? goal[..maxLen] + "…" : goal;
+    }
+
+    private string GetExecutionRingClass() => ExecutionState?.Status switch
+    {
+        NodeStatus.Active    => "node-active ring-2 ring-cyan-500 ring-offset-1 ring-offset-gray-950",
+        NodeStatus.Completed => "ring-2 ring-green-500 ring-offset-1 ring-offset-gray-950",
+        NodeStatus.Failed    => "ring-2 ring-red-500 ring-offset-1 ring-offset-gray-950",
+        NodeStatus.Skipped   => "ring-1 ring-gray-600 ring-offset-1 ring-offset-gray-950",
+        _                    => string.Empty,
+    };
+
+    private string GetStatusBadgeClass() => ExecutionState?.Status switch
+    {
+        NodeStatus.Active    => "bg-cyan-600 animate-pulse text-white",
+        NodeStatus.Completed => "bg-green-600 text-white",
+        NodeStatus.Failed    => "bg-red-600 text-white",
+        NodeStatus.Skipped   => "bg-gray-600 text-gray-300",
+        NodeStatus.TimedOut  => "bg-orange-600 text-white",
+        _                    => "bg-gray-700 text-gray-400",
+    };
+
+    private string GetStatusLabel() => ExecutionState?.Status switch
+    {
+        NodeStatus.NotStarted => "Waiting",
+        NodeStatus.Active     => "Running…",
+        NodeStatus.Completed  => "Done",
+        NodeStatus.Failed     => "Failed",
+        NodeStatus.Skipped    => "Skipped",
+        NodeStatus.TimedOut   => "Timed out",
+        _                     => string.Empty,
+    };
+}

@@ -1,0 +1,117 @@
+@* Per-node execution status panel, shown alongside the canvas during a run.
+   Displays a status badge, output summary, and a "Did this work?" feedback shortcut. *@
+@using DBAIAzure.Core.Models
+@implements IDisposable
+
+@if (_nodeStates.Count > 0)
+{
+    <div class="workflow-run-output flex flex-col gap-2 overflow-y-auto max-h-full p-4" role="log"
+         aria-label="Workflow run output">
+
+        @foreach (var state in _nodeStates.Values.OrderBy(s => s.NodeId))
+        {
+            <div class="flex flex-col bg-gray-900 border border-gray-800 rounded-lg overflow-hidden"
+                 data-testid="node-output-row-@state.NodeId">
+
+                @* Header row *@
+                <div class="flex items-center justify-between px-3 py-2 gap-3 cursor-pointer select-none"
+                     @onclick="() => ToggleExpand(state.NodeId)"
+                     role="button"
+                     aria-expanded="@(_expandedNodeId == state.NodeId ? "true" : "false")"
+                     aria-controls="output-body-@state.NodeId">
+
+                    <span class="text-sm text-gray-200 font-medium truncate flex-1">@state.NodeId</span>
+                    <span class="@BadgeClass(state.Status) text-xs font-semibold px-2 py-0.5 rounded-full shrink-0"
+                          role="status">
+                        @FormatStatus(state.Status)
+                    </span>
+                </div>
+
+                @* Expandable output body *@
+                @if (_expandedNodeId == state.NodeId)
+                {
+                    <div id="output-body-@state.NodeId"
+                         class="border-t border-gray-800 px-3 py-2 flex flex-col gap-2">
+
+                        @if (!string.IsNullOrWhiteSpace(state.OutputSummary))
+                        {
+                            <p class="text-xs text-gray-400">@state.OutputSummary</p>
+                        }
+
+                        @if (state.Status == NodeStatus.TimedOut)
+                        {
+                            <p class="text-xs text-amber-400">
+                                Timed out after @TimeoutMinutes minutes.
+                                <button @onclick="OnSettingsClicked"
+                                        class="underline hover:text-amber-300"
+                                        aria-label="Open workflow settings">
+                                    Adjust timeout in Settings.
+                                </button>
+                            </p>
+                        }
+
+                        @if (state.Status is NodeStatus.Completed or NodeStatus.Failed)
+                        {
+                            <button @onclick="() => OpenFeedbackChat(state)"
+                                    class="text-xs text-cyan-400 hover:text-cyan-300 transition-colors text-left"
+                                    aria-label="Open feedback for @state.NodeId">
+                                Did this do what you expected?
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>The execution orchestrator pushes node state updates via this parameter.</summary>
+    [Parameter] public IReadOnlyDictionary<string, NodeExecutionState> NodeStates { get; set; } = new Dictionary<string, NodeExecutionState>();
+
+    /// <summary>Workflow execution timeout in minutes — shown on TimedOut nodes.</summary>
+    [Parameter] public int TimeoutMinutes { get; set; } = 5;
+
+    /// <summary>Raised when the user clicks "Did this do what you expected?" — opens the chat panel pre-populated.</summary>
+    [Parameter] public EventCallback<NodeExecutionState> OnFeedbackRequested { get; set; }
+
+    /// <summary>Raised when the user clicks "Adjust timeout in Settings".</summary>
+    [Parameter] public EventCallback OnSettingsClicked { get; set; }
+
+    private Dictionary<string, NodeExecutionState> _nodeStates = new();
+    private string? _expandedNodeId;
+
+    protected override void OnParametersSet()
+    {
+        _nodeStates = NodeStates.ToDictionary(kv => kv.Key, kv => kv.Value);
+    }
+
+    private void ToggleExpand(string nodeId) =>
+        _expandedNodeId = _expandedNodeId == nodeId ? null : nodeId;
+
+    private async Task OpenFeedbackChat(NodeExecutionState state) =>
+        await OnFeedbackRequested.InvokeAsync(state);
+
+    private static string BadgeClass(NodeStatus status) => status switch
+    {
+        NodeStatus.Active     => "bg-cyan-900/60 text-cyan-300 animate-pulse",
+        NodeStatus.Completed  => "bg-green-900/60 text-green-300",
+        NodeStatus.Failed     => "bg-red-900/60 text-red-300",
+        NodeStatus.Skipped    => "bg-gray-700 text-gray-400",
+        NodeStatus.TimedOut   => "bg-amber-900/60 text-amber-300",
+        _                     => "bg-gray-800 text-gray-500",
+    };
+
+    private static string FormatStatus(NodeStatus status) => status switch
+    {
+        NodeStatus.NotStarted => "Waiting",
+        NodeStatus.Active     => "Running",
+        NodeStatus.Completed  => "Done",
+        NodeStatus.Failed     => "Failed",
+        NodeStatus.Skipped    => "Skipped",
+        NodeStatus.TimedOut   => "Timed out",
+        _                     => status.ToString(),
+    };
+
+    public void Dispose() { }
+}

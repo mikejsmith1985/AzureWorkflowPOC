@@ -1,0 +1,115 @@
+@* Gallery card for a single saved workflow.
+   Shows the SVG thumbnail, workflow name, node count, and last-modified date.
+   One-click opens the builder; duplicate and delete buttons are in the footer. *@
+
+@using DBAIAzure.Core.Models
+
+<div class="workflow-gallery-card flex flex-col bg-gray-900 border border-gray-800 rounded-xl overflow-hidden
+            hover:border-cyan-700/60 transition-colors cursor-pointer group"
+     @onclick="OnOpenAsync"
+     role="article"
+     aria-label="Workflow: @Workflow.Name">
+
+    @* SVG thumbnail *@
+    <div class="h-28 bg-gray-950 border-b border-gray-800 flex items-center justify-center overflow-hidden">
+        @if (!string.IsNullOrWhiteSpace(Workflow.ThumbnailSvg))
+        {
+            <div class="w-full h-full flex items-center justify-center p-2">
+                @((MarkupString)Workflow.ThumbnailSvg)
+            </div>
+        }
+        else
+        {
+            <span class="text-gray-600 text-xs">No preview</span>
+        }
+    </div>
+
+    @* Card body *@
+    <div class="flex flex-col flex-1 px-4 py-3 gap-1">
+        <div class="font-semibold text-gray-100 text-sm truncate">@Workflow.Name</div>
+        <div class="text-xs text-gray-500 flex items-center gap-3">
+            <span>@Workflow.Nodes.Count step(s)</span>
+            <span>@FormatLastModified(Workflow.LastModifiedAt)</span>
+        </div>
+    </div>
+
+    @* Footer actions *@
+    <div class="flex items-center justify-end gap-1 px-4 py-2 border-t border-gray-800">
+        <button @onclick:stopPropagation="true"
+                @onclick="OnDuplicateAsync"
+                class="text-xs text-gray-500 hover:text-cyan-400 transition-colors px-2 py-1 rounded"
+                aria-label="Duplicate @Workflow.Name">
+            Duplicate
+        </button>
+        <button @onclick:stopPropagation="true"
+                @onclick="OnDeleteClicked"
+                class="text-xs text-gray-500 hover:text-red-400 transition-colors px-2 py-1 rounded"
+                aria-label="Delete @Workflow.Name">
+            Delete
+        </button>
+    </div>
+</div>
+
+@* Delete confirmation modal *@
+@if (_showDeleteConfirm)
+{
+    <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+         role="dialog" aria-modal="true" aria-labelledby="delete-confirm-title">
+        <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-80 flex flex-col gap-4 shadow-2xl">
+            <h2 id="delete-confirm-title" class="text-base font-semibold text-gray-100">Delete workflow?</h2>
+            <p class="text-sm text-gray-400">
+                Delete <strong class="text-gray-200">@Workflow.Name</strong>? This cannot be undone.
+            </p>
+            <div class="flex justify-end gap-3">
+                <button @onclick="CancelDelete"
+                        class="px-4 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors"
+                        aria-label="Cancel delete">
+                    Cancel
+                </button>
+                <button @onclick="ConfirmDeleteAsync"
+                        class="px-4 py-2 text-sm bg-red-700 hover:bg-red-600 text-white rounded-lg transition-colors"
+                        aria-label="Confirm delete @Workflow.Name">
+                    Delete
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>The workflow this card represents.</summary>
+    [Parameter, EditorRequired] public WorkflowDefinition Workflow { get; set; } = null!;
+
+    /// <summary>Raised when the user clicks the card body to open the workflow in the builder.</summary>
+    [Parameter] public EventCallback<Guid> OnOpenRequested { get; set; }
+
+    /// <summary>Raised when the user clicks the Duplicate button.</summary>
+    [Parameter] public EventCallback<Guid> OnDuplicateRequested { get; set; }
+
+    /// <summary>Raised when the user confirms deletion via the modal.</summary>
+    [Parameter] public EventCallback<Guid> OnDeleteConfirmed { get; set; }
+
+    private bool _showDeleteConfirm;
+
+    private async Task OnOpenAsync()      => await OnOpenRequested.InvokeAsync(Workflow.Id);
+    private async Task OnDuplicateAsync() => await OnDuplicateRequested.InvokeAsync(Workflow.Id);
+
+    private void OnDeleteClicked()         => _showDeleteConfirm = true;
+    private void CancelDelete()            => _showDeleteConfirm = false;
+
+    private async Task ConfirmDeleteAsync()
+    {
+        _showDeleteConfirm = false;
+        await OnDeleteConfirmed.InvokeAsync(Workflow.Id);
+    }
+
+    private static string FormatLastModified(DateTimeOffset lastModified)
+    {
+        var age = DateTimeOffset.UtcNow - lastModified;
+        return age.TotalDays >= 1
+            ? $"{(int)age.TotalDays}d ago"
+            : age.TotalHours >= 1
+                ? $"{(int)age.TotalHours}h ago"
+                : $"{(int)age.TotalMinutes}m ago";
+    }
+}

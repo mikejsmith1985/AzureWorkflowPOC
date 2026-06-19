@@ -1,0 +1,146 @@
+@* Top toolbar for the Visual Workflow Builder page.
+   Exposes Save, Undo, Redo, snap-to-grid toggle, Chat, Settings, and Run/Stop buttons. *@
+
+<div class="workflow-toolbar flex items-center gap-2 px-4 py-2 bg-gray-900 border-b border-gray-800">
+
+    @* Workflow name *@
+    <span class="text-sm font-semibold text-gray-200 mr-2 truncate max-w-[200px]"
+          title="@WorkflowName">
+        @(string.IsNullOrWhiteSpace(WorkflowName) ? "Untitled Workflow" : WorkflowName)
+    </span>
+
+    <div class="h-4 border-l border-gray-700 mx-1"></div>
+
+    @* Undo *@
+    <button @onclick="OnUndoClicked"
+            disabled="@(!CanUndo)"
+            class="toolbar-btn @(CanUndo ? "" : "opacity-40 cursor-not-allowed")"
+            aria-label="Undo last action (Ctrl+Z)"
+            title="Undo (Ctrl+Z)">
+        ↩
+    </button>
+
+    @* Redo *@
+    <button @onclick="OnRedoClicked"
+            disabled="@(!CanRedo)"
+            class="toolbar-btn @(CanRedo ? "" : "opacity-40 cursor-not-allowed")"
+            aria-label="Redo last undone action (Ctrl+Y)"
+            title="Redo (Ctrl+Y)">
+        ↪
+    </button>
+
+    <div class="h-4 border-l border-gray-700 mx-1"></div>
+
+    @* Snap/Free toggle *@
+    <button @onclick="OnSnapToggleClicked"
+            class="toolbar-btn @(IsSnapping ? "text-cyan-400" : "text-gray-400")"
+            aria-label="@(IsSnapping ? "Currently snapping to grid — click for free movement" : "Currently free movement — click to snap to grid")"
+            title="@(IsSnapping ? "Snap to grid (active)" : "Free move (active)")">
+        ⊞ @(IsSnapping ? "Snap to grid" : "Free move")
+    </button>
+
+    <div class="h-4 border-l border-gray-700 mx-1"></div>
+
+    @* Save button *@
+    <button @onclick="OnSaveClicked"
+            class="toolbar-btn text-cyan-400 hover:text-cyan-300"
+            aria-label="Save workflow (Ctrl+S)"
+            title="Save (Ctrl+S)">
+        💾 Save
+    </button>
+
+    @* Auto-saved timestamp *@
+    @if (LastSavedAt.HasValue)
+    {
+        <span class="text-xs text-gray-500" aria-live="polite">
+            Auto-saved @LastSavedAt.Value.ToString("HH:mm:ss")
+        </span>
+    }
+
+    @* Execution timeout display *@
+    @if (ExecutionTimeoutMinutes > 0)
+    {
+        <span class="text-xs text-gray-600" aria-label="Execution timeout">
+            ⏱ @ExecutionTimeoutMinutes min
+        </span>
+    }
+
+    <div class="flex-1"></div>
+
+    @* Chat toggle *@
+    <button @onclick="OnChatToggleClicked"
+            class="toolbar-btn @(IsChatOpen ? "text-purple-400" : "text-gray-400")"
+            aria-label="@(IsChatOpen ? "Close chat panel" : "Open chat panel")"
+            title="AI Chat">
+        💬 Chat
+    </button>
+
+    @* Settings *@
+    <button @onclick="OnSettingsClicked"
+            class="toolbar-btn text-gray-400 hover:text-gray-200"
+            aria-label="Workflow settings"
+            title="Settings">
+        ⚙️
+    </button>
+
+    <div class="h-4 border-l border-gray-700 mx-1"></div>
+
+    @* Run / Stop *@
+    @if (IsRunning)
+    {
+        <button @onclick="OnStopClicked"
+                class="toolbar-btn bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-md text-sm"
+                aria-label="Stop the running workflow"
+                title="Stop run">
+            ⏹ Stop
+        </button>
+    }
+    else
+    {
+        <button @onclick="OnRunClicked"
+                disabled="@(!CanRun)"
+                class="toolbar-btn @(CanRun ? "bg-green-600 hover:bg-green-500 text-white" : "bg-gray-700 text-gray-500 cursor-not-allowed") px-3 py-1 rounded-md text-sm"
+                aria-label="@(CanRun ? "Run this workflow" : "Configure all nodes before running")"
+                title="@(CanRun ? "Run workflow" : "All nodes must be configured before running")">
+            ▶ Run
+        </button>
+    }
+</div>
+
+<style>
+    .toolbar-btn {
+        @* Base styles shared by all toolbar buttons — Tailwind classes applied inline *@
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.875rem;
+        transition: all 0.15s;
+        cursor: pointer;
+    }
+    .toolbar-btn:not(:disabled):hover {
+        background-color: rgba(156, 163, 175, 0.1);
+    }
+</style>
+
+@code {
+    [Parameter] public string? WorkflowName           { get; set; }
+    [Parameter] public bool    CanUndo                { get; set; }
+    [Parameter] public bool    CanRedo                { get; set; }
+    [Parameter] public bool    IsSnapping             { get; set; }
+    [Parameter] public bool    IsRunning              { get; set; }
+    [Parameter] public bool    CanRun                 { get; set; }
+    [Parameter] public bool    IsChatOpen             { get; set; }
+    [Parameter] public DateTimeOffset? LastSavedAt    { get; set; }
+    [Parameter] public int     ExecutionTimeoutMinutes{ get; set; }
+
+    [Parameter] public EventCallback OnUndoClicked        { get; set; }
+    [Parameter] public EventCallback OnRedoClicked        { get; set; }
+    [Parameter] public EventCallback OnSnapToggleClicked  { get; set; }
+    [Parameter] public EventCallback OnSaveClicked        { get; set; }
+    [Parameter] public EventCallback OnChatToggleClicked  { get; set; }
+    [Parameter] public EventCallback OnSettingsClicked    { get; set; }
+    [Parameter] public EventCallback OnRunClicked         { get; set; }
+    [Parameter] public EventCallback OnStopClicked        { get; set; }
+}

@@ -1,0 +1,446 @@
+@* Main canvas wrapper around Z.Blazor.Diagrams DiagramCanvas.
+   Handles palette drops, port-direction enforcement, undo/redo stack (depth 50),
+   multi-select (built-in via AllowMultiSelection), and Delete-key edge removal. *@
+
+<div class="workflow-canvas-container relative flex-1 overflow-hidden bg-gray-950"
+     @ondrop="OnDropAsync"
+     @ondragover:preventDefault
+     @ondragover="OnDragOver"
+     id="workflow-canvas-drop-zone">
+    <CascadingValue Value="@_diagram">
+        <div style="width:100%;height:100%;display:block">
+            <DiagramCanvas @ref="_canvasRef" />
+        </div>
+    </CascadingValue>
+
+    @* Toast notification for rejected connections *@
+    @if (_toastMessage is not null)
+    {
+        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-amber-600 text-white text-sm
+                    px-4 py-2 rounded-lg shadow-lg pointer-events-none animate-pulse z-50"
+             role="alert" aria-live="polite">
+            @_toastMessage
+        </div>
+    }
+</div>
+
+@code {
+    // ── Parameters ──────────────────────────────────────────────────────────────
+
+    /// <summary>The workflow definition driving the canvas; kept in sync with diagram changes.</summary>
+    [Parameter] public WorkflowDefinition? Workflow { get; set; }
+
+    /// <summary>Raised when the canvas topology changes so the parent page can auto-save.</summary>
+    [Parameter] public EventCallback<WorkflowDefinition> WorkflowChanged { get; set; }
+
+    /// <summary>Raised when the user double-clicks a node; carries the domain node for the config panel.</summary>
+    [Parameter] public EventCallback<WorkflowNode> NodeDoubleClicked { get; set; }
+
+    /// <summary>The node type being dragged from the palette; set before the drop event fires.</summary>
+    [Parameter] public WorkflowNodeType? DraggedNodeType { get; set; }
+
+    /// <summary>Per-node execution state keyed by NodeId; null outside a run.</summary>
+    [Parameter] public IReadOnlyDictionary<string, NodeExecutionState>? NodeStates { get; set; }
+
+    // ── Diagram state ────────────────────────────────────────────────────────────
+
+    private BlazorDiagram _diagram = null!;
+    private DiagramCanvas _canvasRef = null!;
+    private string? _toastMessage;
+    private System.Threading.CancellationTokenSource? _toastCts;
+
+    // ── Undo / redo stack (no built-in in ZBD 3.0.x — custom implementation) ───
+
+    private readonly Stack<ICanvasAction> _undoStack = new(capacity: 50);
+    private readonly Stack<ICanvasAction> _redoStack = new(capacity: 50);
+    private const int UndoStackDepthLimit = 50;
+
+    /// <summary>True when the undo stack has at least one action to reverse.</summary>
+    public bool CanUndo => _undoStack.Count > 0;
+
+    /// <summary>True when the redo stack has at least one action to re-apply.</summary>
+    public bool CanRedo => _redoStack.Count > 0;
+
+    // ── Lifecycle ────────────────────────────────────────────────────────────────
+
+    protected override void OnInitialized()
+    {
+        _diagram = new BlazorDiagram();
+        _diagram.Options.AllowMultiSelection = true;
+        _diagram.Options.GridSize            = 20;  // enables snap-to-grid (null = free placement)
+
+        // Register the custom node renderer component.
+        _diagram.RegisterComponent<WorkflowNodeModel, WorkflowNodeRenderer>();
+
+        // Wire up port-direction validation and double-click for config panel.
+        _diagram.Links.Added   += OnLinkAdded;
+        _diagram.Nodes.Added   += OnNodeAdded;
+
+        // Use the built-in keyboard shortcuts for the Delete / Backspace keys.
+        var kbShortcuts = _diagram.GetBehavior<KeyboardShortcutsBehavior>()!;
+        kbShortcuts.SetShortcut("Delete",    false, false, false, KeyboardShortcutsDefaults.DeleteSelection);
+        kbShortcuts.SetShortcut("Backspace", false, false, false, KeyboardShortcutsDefaults.DeleteSelection);
+
+        // Sync keyboard undo/redo shortcuts.
+        kbShortcuts.SetShortcut("z", false, false, true, (diagram) => { Undo(); return ValueTask.CompletedTask; });
+        kbShortcuts.SetShortcut("y", false, false, true, (diagram) => { Redo(); return ValueTask.CompletedTask; });
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (Workflow is not null && _diagram.Nodes.Count == 0 && Workflow.Nodes.Count > 0)
+            LoadWorkflowIntoCanvas(Workflow);
+    }
+
+    // ── Port-direction guard ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called synchronously when the diagram library adds a new link.
+    /// Rejects any connection that is not output→input (e.g. input→input, output→output)
+    /// and shows an amber toast explaining why.
+    /// </summary>
+    private void OnLinkAdded(Blazor.Diagrams.Core.Models.Base.BaseLinkModel link)
+    {
+        if (link.Source is not SinglePortAnchor sourceAnchor ||
+            link.Target is not SinglePortAnchor targetAnchor)
+            return;
+
+        var sourcePort = sourceAnchor.Port as WorkflowPortModel;
+        var targetPort = targetAnchor.Port as WorkflowPortModel;
+
+        if (sourcePort is null || targetPort is null)
+            return;
+
+        var isValidDirection = sourcePort.WorkflowPort.Direction == PortDirection.Output
+                            && targetPort.WorkflowPort.Direction == PortDirection.Input;
+
+        if (!isValidDirection)
+        {
+            // Remove the invalid link and notify the user.
+            _diagram.Links.Remove(link);
+            ShowToast("Connections must run from an output port (→) to an input port (←).");
+            return;
+        }
+
+        // Valid connection — record it in undo history.
+        var edge = WorkflowEdge.CreateNew(
+            sourcePort.Parent!.Id,
+            sourcePort.WorkflowPort.Id,
+            targetPort.Parent!.Id,
+            targetPort.WorkflowPort.Id,
+            sourcePort.WorkflowPort.Label);
+
+        var action = new AddEdgeAction(link as WorkflowEdgeModel ?? throw new InvalidOperationException("Expected WorkflowEdgeModel"), this);
+        RecordAction(action);
+        _ = NotifyWorkflowChanged();
+    }
+
+    // ── Drop handling ─────────────────────────────────────────────────────────────
+
+    private void OnDragOver(DragEventArgs dragArgs)
+    {
+        dragArgs.DataTransfer.DropEffect = "copy";
+    }
+
+    /// <summary>
+    /// Places a node at the canvas position corresponding to the drop coordinates.
+    /// </summary>
+    private async Task OnDropAsync(DragEventArgs dropArgs)
+    {
+        var nodeType = DraggedNodeType ?? WorkflowNodeType.AgenticReason;
+        await PlaceNodeAtPositionAsync(nodeType, dropArgs.ClientX, dropArgs.ClientY);
+    }
+
+    /// <summary>
+    /// Adds a new node of the given type at the specified client-space coordinates.
+    /// Called both from drag-drop and from palette click-to-place.
+    /// </summary>
+    public async Task PlaceNodeAtPositionAsync(WorkflowNodeType nodeType, double clientX, double clientY)
+    {
+        // Convert client coordinates to diagram canvas space.
+        var relativePoint = _diagram.GetRelativeMousePoint(clientX, clientY);
+
+        var domainNode = WorkflowNode.CreateNew(nodeType, DefaultLabel(nodeType));
+        domainNode = domainNode with { PositionX = relativePoint.X, PositionY = relativePoint.Y };
+
+        var nodeModel = CreateNodeModel(domainNode);
+        _diagram.Nodes.Add(nodeModel);
+
+        var action = new AddNodeAction(nodeModel, this);
+        RecordAction(action);
+
+        await NotifyWorkflowChanged();
+    }
+
+    /// <summary>
+    /// Places a node at a smart default position (offset from the canvas center).
+    /// Called when the user clicks a palette entry without dragging.
+    /// </summary>
+    public async Task PlaceNodeDefaultPositionAsync(WorkflowNodeType nodeType)
+    {
+        var existingCount = _diagram.Nodes.Count;
+        var xOffset = 120 + (existingCount % 4) * 180.0;
+        var yOffset = 100 + (existingCount / 4) * 140.0;
+
+        var domainNode = WorkflowNode.CreateNew(nodeType, DefaultLabel(nodeType));
+        domainNode = domainNode with { PositionX = xOffset, PositionY = yOffset };
+
+        var nodeModel = CreateNodeModel(domainNode);
+        _diagram.Nodes.Add(nodeModel);
+
+        var action = new AddNodeAction(nodeModel, this);
+        RecordAction(action);
+
+        await NotifyWorkflowChanged();
+    }
+
+    // ── Undo / redo ───────────────────────────────────────────────────────────────
+
+    /// <summary>Reverses the most recent canvas action.</summary>
+    public void Undo()
+    {
+        if (!_undoStack.TryPop(out var action))
+            return;
+
+        action.Undo();
+        _redoStack.Push(action);
+        _ = NotifyWorkflowChanged();
+        StateHasChanged();
+    }
+
+    /// <summary>Re-applies the most recently undone canvas action.</summary>
+    public void Redo()
+    {
+        if (!_redoStack.TryPop(out var action))
+            return;
+
+        action.Do();
+        _undoStack.Push(action);
+        _ = NotifyWorkflowChanged();
+        StateHasChanged();
+    }
+
+    private void RecordAction(ICanvasAction action)
+    {
+        if (_undoStack.Count >= UndoStackDepthLimit)
+        {
+            // Drop the oldest entry by rebuilding the stack without it.
+            var entries = _undoStack.ToArray();
+            _undoStack.Clear();
+            foreach (var entry in entries.Take(entries.Length - 1).Reverse())
+                _undoStack.Push(entry);
+        }
+
+        _undoStack.Push(action);
+        _redoStack.Clear();         // any new action clears the redo future
+        StateHasChanged();
+    }
+
+    // ── Grid snapping toggle ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns the current snap-to-grid state.
+    /// True = GridSize of 20px is active; false = free movement (GridSize null).
+    /// </summary>
+    public bool IsSnappingToGrid => _diagram.Options.GridSize.HasValue;
+
+    /// <summary>Toggles between snap-to-grid (20px) and free placement.</summary>
+    public void ToggleSnap()
+    {
+        _diagram.Options.GridSize = _diagram.Options.GridSize.HasValue ? null : 20;
+        StateHasChanged();
+    }
+
+    // ── Canvas → WorkflowDefinition sync ─────────────────────────────────────────
+
+    private async Task NotifyWorkflowChanged()
+    {
+        if (Workflow is null)
+            return;
+
+        var updatedNodes = _diagram.Nodes
+            .OfType<WorkflowNodeModel>()
+            .Select(nm => nm.WorkflowNode with
+            {
+                PositionX = nm.Position?.X ?? nm.WorkflowNode.PositionX,
+                PositionY = nm.Position?.Y ?? nm.WorkflowNode.PositionY,
+            })
+            .ToList()
+            .AsReadOnly();
+
+        var updatedEdges = _diagram.Links
+            .OfType<WorkflowEdgeModel>()
+            .Select(lm => lm.WorkflowEdge)
+            .ToList()
+            .AsReadOnly();
+
+        var updatedDefinition = Workflow with { Nodes = updatedNodes, Edges = updatedEdges };
+        await WorkflowChanged.InvokeAsync(updatedDefinition);
+    }
+
+    // ── Load existing workflow ────────────────────────────────────────────────────
+
+    private void LoadWorkflowIntoCanvas(WorkflowDefinition workflow)
+    {
+        _diagram.SuspendRefresh = true;
+        try
+        {
+            foreach (var domainNode in workflow.Nodes)
+            {
+                var nodeModel = CreateNodeModel(domainNode);
+                _diagram.Nodes.Add(nodeModel);
+            }
+
+            // Wire edges after all nodes are added.
+            var nodeById = _diagram.Nodes
+                .OfType<WorkflowNodeModel>()
+                .ToDictionary(nm => nm.WorkflowNode.Id);
+
+            foreach (var edge in workflow.Edges)
+            {
+                if (!nodeById.TryGetValue(edge.SourceNodeId, out var sourceNode) ||
+                    !nodeById.TryGetValue(edge.TargetNodeId, out var targetNode))
+                    continue;
+
+                var sourcePort = sourceNode.Ports.OfType<WorkflowPortModel>()
+                    .FirstOrDefault(p => p.WorkflowPort.Id == edge.SourcePortId);
+                var targetPort = targetNode.Ports.OfType<WorkflowPortModel>()
+                    .FirstOrDefault(p => p.WorkflowPort.Id == edge.TargetPortId);
+
+                if (sourcePort is null || targetPort is null)
+                    continue;
+
+                _diagram.Links.Add(new WorkflowEdgeModel(edge, sourcePort, targetPort));
+            }
+        }
+        finally
+        {
+            _diagram.SuspendRefresh = false;
+            _diagram.Refresh();
+        }
+    }
+
+    private WorkflowNodeModel CreateNodeModel(WorkflowNode domainNode)
+    {
+        var position = new Point(domainNode.PositionX, domainNode.PositionY);
+        var nodeModel = new WorkflowNodeModel(domainNode, position);
+
+        foreach (var port in domainNode.InputPorts)
+            nodeModel.AddPort(new WorkflowPortModel(nodeModel, port, PortAlignment.Left));
+
+        foreach (var port in domainNode.OutputPorts)
+            nodeModel.AddPort(new WorkflowPortModel(nodeModel, port, PortAlignment.Right));
+
+        return nodeModel;
+    }
+
+    private static string DefaultLabel(WorkflowNodeType nodeType) => nodeType switch
+    {
+        WorkflowNodeType.AgenticReason    => "Reason & Decide",
+        WorkflowNodeType.FunctionRoute    => "Smart Branch",
+        WorkflowNodeType.FunctionTransform=> "Transform",
+        WorkflowNodeType.FunctionNotify   => "Notify",
+        WorkflowNodeType.FunctionData     => "Save / Load",
+        WorkflowNodeType.HumanApproval    => "Ask a Person",
+        _                                 => "Step",
+    };
+
+    // ── Toast ─────────────────────────────────────────────────────────────────────
+
+    private void ShowToast(string message)
+    {
+        _toastCts?.Cancel();
+        _toastMessage = message;
+        StateHasChanged();
+
+        _toastCts = new System.Threading.CancellationTokenSource();
+        var token = _toastCts.Token;
+        _ = Task.Delay(3000, token).ContinueWith(_ =>
+        {
+            if (!token.IsCancellationRequested)
+                InvokeAsync(() => { _toastMessage = null; StateHasChanged(); });
+        }, System.Threading.CancellationToken.None,
+           TaskContinuationOptions.OnlyOnRanToCompletion,
+           TaskScheduler.Default);
+    }
+
+    // ── Node double-click ─────────────────────────────────────────────────────────
+
+    private void OnNodeAdded(NodeModel node)
+    {
+        if (node is WorkflowNodeModel nodeModel)
+            nodeModel.DoubleClicked += OnNodeDoubleClicked;
+    }
+
+    private void OnNodeDoubleClicked(WorkflowNodeModel nodeModel)
+    {
+        _ = NodeDoubleClicked.InvokeAsync(nodeModel.WorkflowNode);
+    }
+
+    /// <summary>
+    /// Updates the on-canvas node model when the config panel saves changes.
+    /// Replaces the existing node model's domain record and redraws the badge state.
+    /// </summary>
+    public void UpdateNodeFromConfig(WorkflowNode updatedNode)
+    {
+        var nodeModel = _diagram.Nodes
+            .OfType<WorkflowNodeModel>()
+            .FirstOrDefault(nm => nm.WorkflowNode.Id == updatedNode.Id);
+
+        if (nodeModel is null)
+            return;
+
+        nodeModel.WorkflowNode = updatedNode;
+        _diagram.Refresh();
+        _ = NotifyWorkflowChanged();
+    }
+
+    public void Dispose()
+    {
+        _diagram.Links.Added -= OnLinkAdded;
+        _diagram.Nodes.Added -= OnNodeAdded;
+        foreach (var node in _diagram.Nodes.OfType<WorkflowNodeModel>())
+            node.DoubleClicked -= OnNodeDoubleClicked;
+        _toastCts?.Cancel();
+        _toastCts?.Dispose();
+    }
+
+    // ── ICanvasAction command pattern ─────────────────────────────────────────────
+
+    /// <summary>Contract for a reversible canvas action used by the undo/redo stack.</summary>
+    public interface ICanvasAction
+    {
+        void Do();
+        void Undo();
+    }
+
+    private sealed class AddNodeAction : ICanvasAction
+    {
+        private readonly WorkflowNodeModel _nodeModel;
+        private readonly WorkflowCanvas    _canvas;
+
+        public AddNodeAction(WorkflowNodeModel nodeModel, WorkflowCanvas canvas)
+        {
+            _nodeModel = nodeModel;
+            _canvas    = canvas;
+        }
+
+        public void Do()   => _canvas._diagram.Nodes.Add(_nodeModel);
+        public void Undo() => _canvas._diagram.Nodes.Remove(_nodeModel);
+    }
+
+    private sealed class AddEdgeAction : ICanvasAction
+    {
+        private readonly WorkflowEdgeModel _edgeModel;
+        private readonly WorkflowCanvas    _canvas;
+
+        public AddEdgeAction(WorkflowEdgeModel edgeModel, WorkflowCanvas canvas)
+        {
+            _edgeModel = edgeModel;
+            _canvas    = canvas;
+        }
+
+        public void Do()   => _canvas._diagram.Links.Add(_edgeModel);
+        public void Undo() => _canvas._diagram.Links.Remove(_edgeModel);
+    }
+}

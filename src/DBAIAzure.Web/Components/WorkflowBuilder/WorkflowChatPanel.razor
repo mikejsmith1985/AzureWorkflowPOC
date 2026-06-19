@@ -1,0 +1,365 @@
+@* Resizable chat sidebar for AI-assisted workflow code generation.
+   Streams tokens live, shows diff highlight on refinement, and degrades gracefully
+   when the LLM is unavailable — the canvas stays fully functional. *@
+
+@using DBAIAzure.Core.Interfaces
+@using DBAIAzure.Core.Models
+@using DBAIAzure.Web.Services
+@implements IDisposable
+
+@if (!IsOpen)
+{
+    @* Collapsed — nothing rendered; parent controls the toggle button *@
+    return;
+}
+
+<aside class="workflow-chat-panel flex flex-col bg-gray-900 border-l border-gray-800 w-80 min-w-[18rem] h-full"
+       aria-label="AI code assistant panel"
+       role="complementary">
+
+    @* Header *@
+    <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
+        <div class="flex items-center gap-2">
+            <span class="text-cyan-400 text-sm font-semibold">Code Assistant</span>
+            @if (!_isLlmAvailable)
+            {
+                <span class="text-xs bg-amber-700/60 text-amber-300 px-1.5 py-0.5 rounded"
+                      role="status" aria-live="polite">Unavailable</span>
+            }
+        </div>
+        <button @onclick="OnCloseClicked"
+                class="text-gray-500 hover:text-gray-300 transition-colors"
+                aria-label="Close code assistant panel">✕</button>
+    </div>
+
+    @* LLM unavailability banner *@
+    @if (!_isLlmAvailable)
+    {
+        <div class="mx-3 mt-3 bg-amber-900/40 border border-amber-700/50 rounded-lg p-3 text-sm text-amber-300 shrink-0"
+             role="alert">
+            The assistant is currently unavailable. You can keep editing your workflow —
+            code generation will be available once the connection is restored.
+        </div>
+    }
+
+    @* Workflow-changed banner *@
+    @if (_showWorkflowChangedBanner)
+    {
+        <div class="mx-3 mt-3 bg-sky-900/40 border border-sky-700/50 rounded-lg p-3 text-sm text-sky-300 shrink-0 flex items-start justify-between gap-2"
+             role="alert">
+            <span>Your workflow has changed — regenerate code to apply the latest layout.</span>
+            <button @onclick="DismissWorkflowChangedBanner"
+                    class="text-sky-500 hover:text-sky-300 text-xs ml-1 shrink-0"
+                    aria-label="Dismiss workflow changed notice">Dismiss</button>
+        </div>
+    }
+
+    @* Topology summary (shown when panel first opens with no messages) *@
+    @if (_messages.Count == 0 && Workflow is not null)
+    {
+        <div class="mx-3 mt-3 bg-gray-800/60 rounded-lg p-3 text-xs text-gray-400 shrink-0">
+            <div class="font-semibold text-gray-300 mb-1">Workflow overview</div>
+            <div>@Workflow.Nodes.Count step(s): @string.Join(", ", Workflow.Nodes.Select(n => n.Label))</div>
+        </div>
+    }
+
+    @* Message list *@
+    <div class="flex-1 overflow-y-auto px-3 py-2 flex flex-col gap-3 text-sm"
+         aria-label="Conversation history">
+        @foreach (var message in _messages)
+        {
+            if (message.Role == ChatRole.User)
+            {
+                <div class="bg-gray-800 rounded-lg px-3 py-2 self-end max-w-[90%] text-gray-100">
+                    @message.Content
+                </div>
+            }
+            else if (message.IsCodeBlock)
+            {
+                <div class="bg-gray-950 border border-gray-700 rounded-lg overflow-hidden self-start w-full">
+                    <div class="flex items-center justify-between px-3 py-1.5 border-b border-gray-700 bg-gray-900">
+                        <span class="text-xs text-gray-400 font-mono">C# — Generated Code</span>
+                        <div class="flex gap-2">
+                            <button @onclick="() => CopyCodeToClipboardAsync(message.Content)"
+                                    class="text-xs text-gray-400 hover:text-cyan-400 transition-colors"
+                                    aria-label="Copy generated code to clipboard">Copy</button>
+                            <button @onclick="() => SaveCodeToWorkflow(message.Content)"
+                                    class="text-xs text-gray-400 hover:text-green-400 transition-colors"
+                                    aria-label="Save generated code to workflow">Save</button>
+                        </div>
+                    </div>
+                    @* Render either diff-highlighted or plain code *@
+                    @if (_pendingDiff is not null && message == _messages.LastOrDefault(m => m.IsCodeBlock))
+                    {
+                        <div class="overflow-x-auto max-h-96 text-xs font-mono p-3 leading-5">
+                            @foreach (var diffLine in _pendingDiff.Lines)
+                            {
+                                <div class="@GetDiffLineClass(diffLine.Kind) px-1 rounded-sm">@diffLine.Content</div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <pre class="overflow-x-auto max-h-96 p-3 text-xs font-mono text-gray-100 leading-5"><code>@message.Content</code></pre>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="bg-gray-800/50 rounded-lg px-3 py-2 self-start max-w-[90%] text-gray-300">
+                    @message.Content
+                </div>
+            }
+        }
+
+        @* Streaming token output *@
+        @if (_streamingBuffer.Length > 0)
+        {
+            <div class="bg-gray-950 border border-gray-700 rounded-lg p-3 text-xs font-mono text-gray-100 self-start w-full leading-5"
+                 aria-live="polite" aria-label="Generating code…">
+                <pre class="overflow-x-auto max-h-96"><code>@_streamingBuffer.ToString()</code></pre>
+            </div>
+        }
+    </div>
+
+    @* Input area *@
+    <div class="shrink-0 border-t border-gray-800 px-3 py-3 flex flex-col gap-2">
+        @if (Workflow?.Nodes.Count > 0 && _messages.Count == 0)
+        {
+            <button @onclick="GenerateCodeAsync"
+                    disabled="@(!_isLlmAvailable || _isGenerating)"
+                    class="@GetGenerateButtonClass() w-full py-2 rounded-lg text-sm font-medium transition-colors"
+                    aria-label="Generate Semantic Kernel code for this workflow">
+                @(_isGenerating ? "Generating…" : "Generate SK Code")
+            </button>
+        }
+
+        <div class="flex gap-2">
+            <textarea @ref="_textareaRef"
+                      @bind="_inputText"
+                      @bind:event="oninput"
+                      @onkeydown="OnKeyDown"
+                      placeholder="@(_isLlmAvailable ? "Ask about your workflow or request a refinement…" : "Assistant unavailable")"
+                      rows="2"
+                      disabled="@(!_isLlmAvailable || _isGenerating)"
+                      class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-sm
+                             text-gray-100 placeholder-gray-500 resize-none focus:outline-none
+                             focus:border-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      aria-label="Chat input — type a message or refinement request"></textarea>
+            <button @onclick="SubmitMessageAsync"
+                    disabled="@(!_isLlmAvailable || _isGenerating || string.IsNullOrWhiteSpace(_inputText))"
+                    class="self-end bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed
+                           text-white rounded-lg px-3 py-1.5 text-sm transition-colors"
+                    aria-label="Submit message">Send</button>
+        </div>
+    </div>
+</aside>
+
+@code {
+    // ── Parameters ──────────────────────────────────────────────────────────────
+
+    /// <summary>Whether the panel is currently open. Controlled by the parent page.</summary>
+    [Parameter] public bool IsOpen { get; set; }
+
+    /// <summary>The workflow currently displayed on the canvas.</summary>
+    [Parameter] public WorkflowDefinition? Workflow { get; set; }
+
+    /// <summary>Injected code generator service.</summary>
+    [Parameter] public IWorkflowCodeGenerator CodeGenerator { get; set; } = null!;
+
+    /// <summary>Injected LLM availability monitor.</summary>
+    [Parameter] public ILlmAvailabilityMonitor AvailabilityMonitor { get; set; } = null!;
+
+    /// <summary>Injected design skill service.</summary>
+    [Parameter] public WorkflowDesignSkillService DesignSkillService { get; set; } = null!;
+
+    /// <summary>Raised when the user saves generated code back to the workflow definition.</summary>
+    [Parameter] public EventCallback<string> OnCodeSaved { get; set; }
+
+    /// <summary>Raised when the user clicks the close (✕) button.</summary>
+    [Parameter] public EventCallback OnCloseRequested { get; set; }
+
+    // ── Local state ─────────────────────────────────────────────────────────────
+
+    private readonly List<WorkflowChatMessage> _messages = new();
+    private readonly System.Text.StringBuilder _streamingBuffer = new();
+    private string _inputText = string.Empty;
+    private bool _isGenerating;
+    private bool _isLlmAvailable = true;
+    private bool _showWorkflowChangedBanner;
+    private CodeDiff? _pendingDiff;
+    private ElementReference _textareaRef;
+
+    // ── Lifecycle ────────────────────────────────────────────────────────────────
+
+    protected override void OnInitialized()
+    {
+        if (AvailabilityMonitor is not null)
+        {
+            _isLlmAvailable = AvailabilityMonitor.IsAvailable;
+            AvailabilityMonitor.StateChanged += OnLlmAvailabilityChanged;
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        // When the workflow changes after code has already been generated, show the banner.
+        if (_messages.Any(m => m.IsCodeBlock) && Workflow is not null)
+            _showWorkflowChangedBanner = true;
+    }
+
+    // ── LLM availability ─────────────────────────────────────────────────────────
+
+    private void OnLlmAvailabilityChanged(bool isAvailable)
+    {
+        _isLlmAvailable = isAvailable;
+        InvokeAsync(StateHasChanged);
+    }
+
+    // ── Code generation ──────────────────────────────────────────────────────────
+
+    private async Task GenerateCodeAsync()
+    {
+        if (Workflow is null || _isGenerating || !_isLlmAvailable)
+            return;
+
+        _isGenerating = true;
+        _streamingBuffer.Clear();
+        _pendingDiff = null;
+        _showWorkflowChangedBanner = false;
+        StateHasChanged();
+
+        try
+        {
+            var chatHistory = _messages
+                .Select(m => m)
+                .ToList()
+                .AsReadOnly();
+
+            var code = await CodeGenerator.GenerateAsync(
+                Workflow,
+                chatHistory,
+                token => { _streamingBuffer.Append(token); InvokeAsync(StateHasChanged); });
+
+            _messages.Add(new WorkflowChatMessage(ChatRole.Assistant, code, true, DateTimeOffset.UtcNow));
+        }
+        catch (LlmUnavailableException)
+        {
+            _messages.Add(new WorkflowChatMessage(
+                ChatRole.Assistant,
+                "The assistant couldn't be reached. Please try again in a moment.",
+                false,
+                DateTimeOffset.UtcNow));
+        }
+        finally
+        {
+            _streamingBuffer.Clear();
+            _isGenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SubmitMessageAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_inputText) || _isGenerating || !_isLlmAvailable)
+            return;
+
+        var userMessage = _inputText.Trim();
+        _inputText = string.Empty;
+        _messages.Add(new WorkflowChatMessage(ChatRole.User, userMessage, false, DateTimeOffset.UtcNow));
+        _isGenerating = true;
+        _streamingBuffer.Clear();
+        _pendingDiff = null;
+        StateHasChanged();
+
+        try
+        {
+            var lastCode = _messages.LastOrDefault(m => m.IsCodeBlock && m.Role == ChatRole.Assistant)?.Content;
+
+            if (lastCode is not null && Workflow is not null)
+            {
+                // Refinement mode — diff the result.
+                var (updatedCode, diff) = await CodeGenerator.RefineAsync(
+                    lastCode,
+                    userMessage,
+                    Workflow,
+                    token => { _streamingBuffer.Append(token); InvokeAsync(StateHasChanged); });
+
+                _pendingDiff = diff;
+                _messages.Add(new WorkflowChatMessage(ChatRole.Assistant, updatedCode, true, DateTimeOffset.UtcNow));
+            }
+            else
+            {
+                // No prior code — trigger a fresh generation.
+                await GenerateCodeAsync();
+            }
+        }
+        catch (LlmUnavailableException)
+        {
+            _messages.Add(new WorkflowChatMessage(
+                ChatRole.Assistant,
+                "The assistant couldn't be reached. Please try again.",
+                false,
+                DateTimeOffset.UtcNow));
+        }
+        finally
+        {
+            _streamingBuffer.Clear();
+            _isGenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs keyArgs)
+    {
+        if (keyArgs.Key == "Enter" && !keyArgs.ShiftKey)
+            await SubmitMessageAsync();
+    }
+
+    // ── UI helpers ───────────────────────────────────────────────────────────────
+
+    private async Task CopyCodeToClipboardAsync(string code)
+    {
+        // Clipboard access requires JS interop; emit a data attribute for the JS handler.
+        // The actual clipboard write is handled by the existing clipboard.js helper.
+        await Task.CompletedTask;
+    }
+
+    private async Task SaveCodeToWorkflow(string code)
+    {
+        await OnCodeSaved.InvokeAsync(code);
+    }
+
+    private async Task OnCloseClicked() => await OnCloseRequested.InvokeAsync();
+
+    private void DismissWorkflowChangedBanner() => _showWorkflowChangedBanner = false;
+
+    private string GetGenerateButtonClass() =>
+        _isLlmAvailable && !_isGenerating
+            ? "bg-cyan-700 hover:bg-cyan-600 text-white"
+            : "bg-gray-700 text-gray-500 cursor-not-allowed";
+
+    private static string GetDiffLineClass(DiffLineKind kind) => kind switch
+    {
+        DiffLineKind.Added   => "bg-green-950/80 text-green-300",
+        DiffLineKind.Removed => "bg-red-950/80 text-red-300 line-through",
+        _                    => "text-gray-300",
+    };
+
+    /// <summary>
+    /// Called by the parent page when the canvas topology changes after code has been generated.
+    /// Shows the "workflow changed — regenerate?" banner.
+    /// </summary>
+    public void NotifyWorkflowChanged()
+    {
+        if (_messages.Any(m => m.IsCodeBlock))
+            _showWorkflowChangedBanner = true;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        if (AvailabilityMonitor is not null)
+            AvailabilityMonitor.StateChanged -= OnLlmAvailabilityChanged;
+    }
+}

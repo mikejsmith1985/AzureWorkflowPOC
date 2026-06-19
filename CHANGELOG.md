@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Visual Workflow Builder (`specs/003-visual-workflow-builder`)
+- **Drag-and-drop canvas** — Z.Blazor.Diagrams 3.0.4.1 canvas at `/workflow-builder`; supports six node types (AgenticReason, HumanApproval, FunctionRoute/Transform/Notify/Data); port-direction enforcement (output→input only); snap-to-grid toggle; 50-entry undo/redo command stack
+- **Node palette** — left sidebar with grouped node types, debounced search filter (<100 ms), hover tooltips (plain language, no jargon), and click-to-reveal animated detail panel with I/O example
+- **Node configuration panel** — right sidebar opens on double-click; GoalPrompt field for agentic nodes; input/output label fields; amber unconfigured badge cleared on save; label mirrors goal for readability
+- **Chat + code generation** — resizable chat sidebar backed by `IWorkflowCodeGenerator` (Semantic Kernel + Anthropic); streaming token display; code diff overlay (Myers algorithm); Copy and Save code buttons; "Your workflow changed — regenerate?" banner; LLM unavailability banner with `ILlmAvailabilityMonitor` 30 s polling
+- **Persistence & gallery** — `WorkflowBuilderService`: upsert save with SVG thumbnail (`WorkflowThumbnailGenerator`), duplicate with "(copy)" suffix, delete with existence guard, 60 s auto-save debounce; gallery page at `/workflow-gallery` with card grid (thumbnail, node count, last-modified, delete confirmation modal)
+- **Execution UI** — Run button opens `WorkflowRunInputModal` (plain-English scenario input, LLM translation); `WorkflowRunOutputPanel` shows per-node status badge (Active/Completed/Failed/Skipped/TimedOut); node animation rings on canvas (`node-active`, green/red/grey ring); `WorkflowSettingsPanel` for execution timeout (1–60 min)
+- **Keyboard shortcuts** — Ctrl+S saves; Ctrl+Z/Y undo/redo (wired via WorkflowCanvas command stack)
+- **WCAG AA** — all controls carry `aria-label`; `focus:outline-none` only used with a replacement border/ring indicator; all panel text meets ≥4.5:1 contrast ratio
+- **New services** — `WorkflowTopologySerializer`, `LlmAvailabilityMonitor`, `WorkflowCodeGenerator` (Myers diff), `WorkflowDesignSkillService` (SK plugin), `WorkflowBuilderService`, `WorkflowThumbnailGenerator`
+- **New models** — `WorkflowRunInput`
+- **Test coverage** — 232 unit tests (all passing); covers canvas, undo/redo, LLM monitor, serializer, code generator, design skill service, node config panel, builder service, runtime builder, execution orchestrator, run output panel, palette tooltip quality
+
 ### Added — Pipeline Connector Configuration Modal (`specs/002-pipeline-connector-config`)
 - **Connector configuration modal** accessible from a gear icon on the Threads dashboard; configures all four pipeline connectors (ServiceNow, Azure DevOps, LLM/Anthropic, Microsoft Teams) without restarting the app
 - **Persisted settings** — connector non-secret configuration and encrypted credentials stored in `ConnectorConfigs` table (SQLite via EF Core); survives server restarts and is always editable

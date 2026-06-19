@@ -1,0 +1,340 @@
+@* Visual Workflow Builder page.
+   Layout: palette (left) | canvas (center, flex-1) | optional chat (right).
+   Toolbar runs across the top. Pre-loads a 3-node example when no {id} is supplied. *@
+@page "/workflow-builder"
+@page "/workflow-builder/{Id}"
+@implements IDisposable
+@inject NavigationManager Nav
+@inject IWorkflowCodeGenerator CodeGenerator
+@inject ILlmAvailabilityMonitor AvailabilityMonitor
+@inject WorkflowDesignSkillService DesignSkillService
+@inject WorkflowBuilderService BuilderService
+@inject IJSRuntime JSRuntime
+@inject IWorkflowExecutionOrchestrator ExecutionOrchestrator
+
+<PageTitle>Workflow Builder — DBAIAzure</PageTitle>
+
+<div class="workflow-builder-shell flex flex-col h-screen overflow-hidden">
+
+    @* ── Toolbar ──────────────────────────────────────────────────────────────── *@
+    <WorkflowToolbar WorkflowName="@_workflow?.Name"
+                     CanUndo="@(_canvas?.CanUndo ?? false)"
+                     CanRedo="@(_canvas?.CanRedo ?? false)"
+                     IsSnapping="@(_canvas?.IsSnappingToGrid ?? true)"
+                     CanRun="@CanRun"
+                     IsChatOpen="@_isChatOpen"
+                     LastSavedAt="@_lastSavedAt"
+                     ExecutionTimeoutMinutes="@(_workflow?.Settings?.ExecutionTimeoutMinutes ?? 5)"
+                     OnUndoClicked="@(() => _canvas?.Undo())"
+                     OnRedoClicked="@(() => _canvas?.Redo())"
+                     OnSnapToggleClicked="@(() => _canvas?.ToggleSnap())"
+                     OnSaveClicked="@OnSaveAsync"
+                     OnChatToggleClicked="@OnChatToggleClicked"
+                     OnSettingsClicked="@OnSettingsClicked"
+                     OnRunClicked="@OnRunClicked"
+                     OnStopClicked="@OnStopClicked"
+                     IsRunning="@(_activeRunId is not null)" />
+
+    @* ── Body row ──────────────────────────────────────────────────────────────── *@
+    <div class="flex flex-1 overflow-hidden">
+
+        @* Palette *@
+        <WorkflowNodePalette OnPlaceNode="@OnPlaceNodeAsync"
+                             OnDragStarted="@((nodeType) => _draggedNodeType = nodeType)" />
+
+        @* Canvas — flex-1 fills remaining width *@
+        <WorkflowCanvas @ref="_canvas"
+                        Workflow="@_workflow"
+                        WorkflowChanged="@OnWorkflowChanged"
+                        DraggedNodeType="@_draggedNodeType"
+                        NodeStates="@_nodeStates"
+                        NodeDoubleClicked="@OnNodeDoubleClicked" />
+
+        @* Node config panel — opens when user double-clicks a canvas node *@
+        <WorkflowNodeConfigPanel Node="@_configNode"
+                                 IsOpen="@(_configNode is not null)"
+                                 NodeUpdated="@OnNodeUpdated"
+                                 OnCloseRequested="@(() => _configNode = null)" />
+
+        @* Execution output panel — shown during and after a run *@
+        @if (_activeRunId is not null || _nodeStates.Count > 0)
+        {
+            <WorkflowRunOutputPanel NodeStates="@_nodeStates"
+                                    TimeoutMinutes="@(_workflow?.Settings?.ExecutionTimeoutMinutes ?? 5)"
+                                    OnFeedbackRequested="@OnNodeFeedbackRequested"
+                                    OnSettingsClicked="EventCallback.Empty" />
+        }
+
+        @* Settings panel — opens when toolbar Settings button is clicked *@
+        <WorkflowSettingsPanel IsOpen="@_isSettingsOpen"
+                               ExecutionTimeoutMinutes="@(_workflow?.Settings?.ExecutionTimeoutMinutes ?? 5)"
+                               OnTimeoutSaved="@OnTimeoutSaved"
+                               OnCloseRequested="@(() => _isSettingsOpen = false)" />
+
+        @* Chat panel — opens as a right sidebar when IsChatOpen is true *@
+        <WorkflowChatPanel @ref="_chatPanel"
+                           IsOpen="@_isChatOpen"
+                           Workflow="@_workflow"
+                           CodeGenerator="@CodeGenerator"
+                           AvailabilityMonitor="@AvailabilityMonitor"
+                           DesignSkillService="@DesignSkillService"
+                           OnCodeSaved="@OnCodeSaved"
+                           OnCloseRequested="@(() => _isChatOpen = false)" />
+    </div>
+</div>
+
+@* Run input modal *@
+<WorkflowRunInputModal IsOpen="@_isRunModalOpen"
+                       Workflow="@_workflow"
+                       OnRunConfirmed="@OnRunConfirmedAsync"
+                       OnCancelled="@(() => _isRunModalOpen = false)" />
+
+@code {
+    /// <summary>Workflow id from the route; null = new/example workflow.</summary>
+    [Parameter] public string? Id { get; set; }
+
+    private WorkflowCanvas? _canvas;
+    private WorkflowChatPanel? _chatPanel;
+    private WorkflowDefinition? _workflow;
+    private WorkflowNodeType? _draggedNodeType;
+    private WorkflowNode? _configNode;
+    private DateTimeOffset? _lastSavedAt;
+    private bool _isChatOpen;
+    private bool _isSettingsOpen;
+    private IDisposable? _locationChangingRegistration;
+    private bool _isRunModalOpen;
+    private string? _activeRunId;
+    private IReadOnlyDictionary<string, NodeExecutionState> _nodeStates =
+        new Dictionary<string, NodeExecutionState>();
+
+    /// <summary>
+    /// The Run button is only enabled when every node in the workflow has been configured
+    /// (i.e. none are in the amber "unconfigured" state) and there is at least one node.
+    /// </summary>
+    private bool CanRun => _workflow is { Nodes.Count: > 0 }
+                        && _workflow.Nodes.All(n => n.IsConfigured);
+
+    // ── Lifecycle ────────────────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Id))
+        {
+            _workflow = BuildExampleWorkflow();
+        }
+        else if (Guid.TryParse(Id, out var workflowId))
+        {
+            _workflow = await BuilderService.LoadAsync(workflowId, "demo") ?? BuildExampleWorkflow();
+            _lastSavedAt = _workflow.LastModifiedAt;
+        }
+        else
+        {
+            _workflow = BuildExampleWorkflow();
+        }
+
+        // Subscribe to auto-save events so the toolbar shows the timestamp.
+        BuilderService.WorkflowSaved += OnAutoSaved;
+        BuilderService.StartAutoSave(() => Task.FromResult<WorkflowDefinition?>(_workflow));
+
+        // Subscribe to execution orchestrator state changes.
+        ExecutionOrchestrator.RunUpdated += OnRunUpdated;
+
+        // Warn before navigation when there are unsaved changes.
+        _locationChangingRegistration = Nav.RegisterLocationChangingHandler(OnLocationChanging);
+    }
+
+    private void OnAutoSaved(DateTimeOffset savedAt)
+    {
+        _lastSavedAt = savedAt;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private ValueTask OnLocationChanging(LocationChangingContext context)
+    {
+        // Allow navigation unconditionally for now; a confirmation dialog can be added later.
+        return ValueTask.CompletedTask;
+    }
+
+    // ── Example workflow ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Pre-loaded 3-node example that helps first-time users understand the workflow concept.
+    /// Produces a summarize → approve → notify chain.
+    /// </summary>
+    private static WorkflowDefinition BuildExampleWorkflow()
+    {
+        // Helper to create a standard single-input / single-output port pair.
+        static (WorkflowPort input, WorkflowPort output) StandardPorts(string inputLabel, string outputLabel) =>
+            (new WorkflowPort(Guid.NewGuid().ToString("N")[..8], inputLabel, PortDirection.Input),
+             new WorkflowPort(Guid.NewGuid().ToString("N")[..8], outputLabel, PortDirection.Output));
+
+        var (sumIn, sumOut) = StandardPorts("Support request text", "3-bullet summary");
+        var summarizeNode = WorkflowNode.CreateNew(WorkflowNodeType.AgenticReason, "Summarise Request") with
+        {
+            GoalPrompt   = "Read the incoming support request and write a 3-bullet summary.",
+            InputLabel   = sumIn.Label,
+            OutputLabel  = sumOut.Label,
+            InputPorts   = new[] { sumIn }.ToList().AsReadOnly(),
+            OutputPorts  = new[] { sumOut }.ToList().AsReadOnly(),
+            IsConfigured = true,
+            PositionX    = 80,
+            PositionY    = 150,
+        };
+
+        var (appIn, appOut) = StandardPorts("Summary from AI", "Approved / Rejected");
+        var approveNode = WorkflowNode.CreateNew(WorkflowNodeType.HumanApproval, "Manager Approves") with
+        {
+            InputLabel   = appIn.Label,
+            OutputLabel  = appOut.Label,
+            InputPorts   = new[] { appIn }.ToList().AsReadOnly(),
+            OutputPorts  = new[] { appOut }.ToList().AsReadOnly(),
+            IsConfigured = true,
+            PositionX    = 320,
+            PositionY    = 150,
+        };
+
+        var (notIn, notOut) = StandardPorts("Approval decision", "Email sent confirmation");
+        var notifyNode = WorkflowNode.CreateNew(WorkflowNodeType.FunctionNotify, "Notify Customer") with
+        {
+            InputLabel   = notIn.Label,
+            OutputLabel  = notOut.Label,
+            InputPorts   = new[] { notIn }.ToList().AsReadOnly(),
+            OutputPorts  = new[] { notOut }.ToList().AsReadOnly(),
+            IsConfigured = true,
+            PositionX    = 560,
+            PositionY    = 150,
+        };
+
+        var edge1 = WorkflowEdge.CreateNew(
+            summarizeNode.Id, sumOut.Id,
+            approveNode.Id,   appIn.Id,
+            "Summary ready");
+
+        var edge2 = WorkflowEdge.CreateNew(
+            approveNode.Id, appOut.Id,
+            notifyNode.Id,  notIn.Id,
+            "Approved");
+
+        return new WorkflowDefinition
+        {
+            Id             = Guid.NewGuid(),
+            Name           = "Example: Support Request Flow",
+            OwnerId        = "demo",
+            Nodes          = new[] { summarizeNode, approveNode, notifyNode }.ToList().AsReadOnly(),
+            Edges          = new[] { edge1, edge2 }.ToList().AsReadOnly(),
+            Settings       = new WorkflowSettings(),
+            ChatHistory    = Array.Empty<WorkflowChatMessage>(),
+            CreatedAt      = DateTimeOffset.UtcNow,
+            LastModifiedAt = DateTimeOffset.UtcNow,
+        };
+    }
+
+    // ── Event handlers ───────────────────────────────────────────────────────────
+
+    private async Task OnPlaceNodeAsync(WorkflowNodeType nodeType)
+    {
+        if (_canvas is not null)
+            await _canvas.PlaceNodeDefaultPositionAsync(nodeType);
+    }
+
+    private void OnWorkflowChanged(WorkflowDefinition updatedDefinition)
+    {
+        _workflow = updatedDefinition;
+        _chatPanel?.NotifyWorkflowChanged();
+        StateHasChanged();
+    }
+
+    private async Task OnSaveAsync()
+    {
+        if (_workflow is null) return;
+        _workflow = await BuilderService.SaveAsync(_workflow);
+        _lastSavedAt = BuilderService.LastSavedAt;
+        StateHasChanged();
+    }
+
+    private void OnChatToggleClicked()
+    {
+        _isChatOpen = !_isChatOpen;
+        StateHasChanged();
+    }
+
+    private Task OnCodeSaved(string code)
+    {
+        if (_workflow is null)
+            return Task.CompletedTask;
+        _workflow = _workflow with { GeneratedCode = code };
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void OnRunUpdated(string runId)
+    {
+        if (runId != _activeRunId) return;
+        var run = ExecutionOrchestrator.GetRun(runId);
+        if (run is null) return;
+        _nodeStates = run.NodeStates.ToDictionary(ns => ns.NodeId);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnSettingsClicked()
+    {
+        _isSettingsOpen = !_isSettingsOpen;
+        StateHasChanged();
+    }
+
+    private void OnTimeoutSaved(int timeoutMinutes)
+    {
+        if (_workflow is null) return;
+        _workflow = _workflow with
+        {
+            Settings = (_workflow.Settings ?? new WorkflowSettings()) with
+            {
+                ExecutionTimeoutMinutes = timeoutMinutes,
+            },
+        };
+        StateHasChanged();
+    }
+
+    private void OnRunClicked() => _isRunModalOpen = true;
+
+    private async Task OnRunConfirmedAsync(WorkflowRunInput input)
+    {
+        _isRunModalOpen = false;
+        if (_workflow is null) return;
+        _activeRunId = await ExecutionOrchestrator.StartRunAsync(_workflow, input.ScenarioText);
+    }
+
+    private void OnStopClicked()
+    {
+        if (_activeRunId is not null)
+            ExecutionOrchestrator.RequestStop(_activeRunId);
+    }
+
+    private void OnNodeFeedbackRequested(NodeExecutionState nodeState)
+    {
+        _isChatOpen = true;
+        // The chat panel will receive a pre-populated message when fully wired (T063).
+        StateHasChanged();
+    }
+
+    private void OnNodeDoubleClicked(WorkflowNode node)
+    {
+        _configNode = node;
+        StateHasChanged();
+    }
+
+    private void OnNodeUpdated(WorkflowNode updatedNode)
+    {
+        _canvas?.UpdateNodeFromConfig(updatedNode);
+        _configNode = null;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        BuilderService.WorkflowSaved -= OnAutoSaved;
+        BuilderService.StopAutoSave();
+        ExecutionOrchestrator.RunUpdated -= OnRunUpdated;
+        _locationChangingRegistration?.Dispose();
+    }
+}

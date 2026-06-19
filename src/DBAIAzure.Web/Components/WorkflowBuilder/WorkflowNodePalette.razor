@@ -1,0 +1,274 @@
+@* Left-side palette that lists every available workflow node type in 5 category groups.
+   Users can click a node to place it at a smart canvas position, or drag it onto the canvas. *@
+
+<div class="workflow-palette flex flex-col bg-gray-900 border-r border-gray-800 w-56 min-w-[14rem] h-full overflow-y-auto">
+
+    @* Search box with 100ms debounce *@
+    <div class="p-3 border-b border-gray-800">
+        <input type="search"
+               value="@_searchText"
+               @oninput="OnSearchInput"
+               placeholder="Search nodes…"
+               class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm
+                      text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+               aria-label="Search workflow node types" />
+    </div>
+
+    @* Category groups *@
+    @foreach (var category in FilteredCategories)
+    {
+        <div class="palette-category">
+            <button @onclick="() => ToggleCategory(category.Name)"
+                    class="w-full px-3 py-2 text-left text-xs font-semibold text-gray-400 uppercase
+                           tracking-wider flex items-center justify-between hover:bg-gray-800 transition-colors"
+                    aria-label="@category.Name category">
+                <span>@category.Name</span>
+                <span class="text-gray-600">@(_collapsedCategories.Contains(category.Name) ? "▶" : "▼")</span>
+            </button>
+
+            @if (!_collapsedCategories.Contains(category.Name))
+            {
+                <div class="flex flex-col gap-0.5 pb-2">
+                    @foreach (var entry in category.Entries)
+                    {
+                        <div class="palette-entry relative group mx-2"
+                             draggable="true"
+                             @ondragstart="() => OnDragStart(entry.NodeType)"
+                             @ondragend="OnDragEnd"
+                             title="@entry.TooltipText">
+
+                            <div class="flex items-center gap-1">
+                                <button @onclick="() => OnClickPlaceAsync(entry.NodeType)"
+                                        class="@GetEntryClass(entry.NodeType) flex-1 text-left px-3 py-2 rounded
+                                               text-sm text-gray-200 hover:text-white transition-colors cursor-grab
+                                               flex items-center gap-2"
+                                        aria-label="Add @entry.Label node to canvas">
+                                    <span class="text-base">@entry.Icon</span>
+                                    <div class="flex flex-col min-w-0">
+                                        <span class="font-medium truncate">@entry.Label</span>
+                                        <span class="text-xs text-gray-500 truncate">@entry.Subtitle</span>
+                                    </div>
+                                </button>
+                                <button @onclick="() => OpenDetailPanel(entry)"
+                                        class="text-gray-600 hover:text-gray-400 transition-colors px-1.5 text-base rounded"
+                                        aria-label="Show detail for @entry.Label">
+                                    ℹ
+                                </button>
+                            </div>
+
+                            @* Hover tooltip — plain language, no jargon *@
+                            <div class="palette-tooltip absolute left-full top-0 ml-2 z-50 hidden group-hover:block
+                                        bg-gray-700 border border-gray-600 rounded-lg p-3 w-52 shadow-xl pointer-events-none">
+                                <div class="text-sm font-semibold text-white mb-1">@entry.Label</div>
+                                <div class="text-xs text-gray-300 mb-2">@entry.TooltipText</div>
+                                <div class="text-xs text-gray-400 border-t border-gray-600 pt-2">
+                                    <span class="text-gray-500">Input:</span> @entry.IoExample.Split('→')[0].Trim()<br />
+                                    <span class="text-gray-500">Output:</span> @entry.IoExample.Split('→').ElementAtOrDefault(1)?.Trim()
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @if (!FilteredCategories.Any(c => c.Entries.Any()))
+    {
+        <div class="p-4 text-xs text-gray-500 text-center">No nodes match your search.</div>
+    }
+
+    @* Node detail panel — slides open below palette when user clicks a node entry *@
+    @if (_selectedEntry is not null)
+    {
+        <div class="border-t border-gray-800 p-4 flex flex-col gap-3 bg-gray-900/80"
+             role="region"
+             aria-label="Detail for @_selectedEntry.Label">
+
+            <div class="flex items-center justify-between">
+                <span class="text-sm font-semibold text-white">@_selectedEntry.Label</span>
+                <button @onclick="CloseDetailPanel"
+                        class="text-gray-500 hover:text-gray-300 transition-colors text-lg leading-none"
+                        aria-label="Close detail panel">
+                    ×
+                </button>
+            </div>
+            <p class="text-xs text-gray-400">@_selectedEntry.TooltipText</p>
+
+            @* CSS-animated I/O demonstration, max 4 seconds (within 5-second gate) *@
+            <div class="node-detail-animation text-xs text-gray-500 flex items-center gap-2 overflow-hidden">
+                <span class="px-2 py-1 bg-gray-800 rounded text-cyan-400">
+                    @_selectedEntry.IoExample.Split('→').ElementAtOrDefault(0)?.Trim()
+                </span>
+                <span class="text-gray-600 animate-bounce">→</span>
+                <span class="px-2 py-1 bg-gray-800 rounded text-green-400">
+                    @_selectedEntry.IoExample.Split('→').ElementAtOrDefault(1)?.Trim()
+                </span>
+            </div>
+
+            <button @onclick="() => PlaceNodeFromDetail(_selectedEntry.NodeType)"
+                    class="w-full text-xs bg-cyan-700 hover:bg-cyan-600 text-white rounded-lg py-1.5 transition-colors"
+                    aria-label="Add @_selectedEntry.Label to canvas">
+                Add to Canvas
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>Raised when the user clicks to place a node; canvas handles the actual placement.</summary>
+    [Parameter] public EventCallback<WorkflowNodeType> OnPlaceNode { get; set; }
+
+    /// <summary>Raised when the user starts dragging a node entry from the palette.</summary>
+    [Parameter] public EventCallback<WorkflowNodeType> OnDragStarted { get; set; }
+
+    private string _searchText = string.Empty;
+    private System.Threading.CancellationTokenSource? _searchDebounce;
+    private readonly HashSet<string> _collapsedCategories = new();
+    private PaletteEntry? _selectedEntry;
+
+    // ── Palette data ────────────────────────────────────────────────────────────
+
+    private sealed record PaletteEntry(
+        WorkflowNodeType NodeType,
+        string Icon,
+        string Label,
+        string Subtitle,
+        string TooltipText,
+        string IoExample);
+
+    private sealed record PaletteCategory(string Name, IReadOnlyList<PaletteEntry> Entries);
+
+    /// <summary>
+    /// All node types grouped into five plain-language categories.
+    /// No technical terms appear in label, subtitle, tooltip, or IO example text.
+    /// </summary>
+    private static readonly IReadOnlyList<PaletteCategory> AllCategories = new[]
+    {
+        new PaletteCategory("AI Steps", new[]
+        {
+            new PaletteEntry(WorkflowNodeType.AgenticReason, "🧠", "Reason & Decide",
+                "AI thinks through a task",
+                "Reads the situation, weighs options, and produces a written decision or summary.",
+                "Plain description of a problem → A clear decision or action summary"),
+        }),
+        new PaletteCategory("Decisions & Routing", new[]
+        {
+            new PaletteEntry(WorkflowNodeType.FunctionRoute, "🔀", "Smart Branch",
+                "Send work down the right path",
+                "Reads the result of the previous step and chooses which path to follow next.",
+                "Step result text → The name of the next path to take"),
+        }),
+        new PaletteCategory("Data", new[]
+        {
+            new PaletteEntry(WorkflowNodeType.FunctionTransform, "⚙️", "Transform",
+                "Change the shape of information",
+                "Takes information from one step and converts it into the format the next step needs.",
+                "Input text or data → Reformatted or reshaped output"),
+            new PaletteEntry(WorkflowNodeType.FunctionData, "💾", "Save / Load",
+                "Store or retrieve information",
+                "Saves the current result somewhere safe, or retrieves previously stored information.",
+                "Result to store → Confirmed stored value or retrieved record"),
+        }),
+        new PaletteCategory("Notifications", new[]
+        {
+            new PaletteEntry(WorkflowNodeType.FunctionNotify, "🔔", "Notify",
+                "Send a message or alert",
+                "Sends a message, email, or notification to a person or another system.",
+                "Message content → Delivery confirmation"),
+        }),
+        new PaletteCategory("Human Steps", new[]
+        {
+            new PaletteEntry(WorkflowNodeType.HumanApproval, "👤", "Ask a Person",
+                "Pause for a human decision",
+                "Stops the workflow and waits for a person to review the result and give a thumbs-up or thumbs-down.",
+                "Summary for reviewer → Approved or rejected decision"),
+        }),
+    };
+
+    // ── Computed filtered view ──────────────────────────────────────────────────
+
+    private IEnumerable<PaletteCategory> FilteredCategories
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_searchText))
+                return AllCategories;
+
+            var query = _searchText.Trim().ToLowerInvariant();
+            return AllCategories
+                .Select(cat => cat with
+                {
+                    Entries = cat.Entries
+                        .Where(e => e.Label.ToLowerInvariant().Contains(query)
+                                 || e.Subtitle.ToLowerInvariant().Contains(query)
+                                 || e.TooltipText.ToLowerInvariant().Contains(query))
+                        .ToList()
+                        .AsReadOnly()
+                })
+                .Where(cat => cat.Entries.Any());
+        }
+    }
+
+    // ── Event handlers ──────────────────────────────────────────────────────────
+
+    private void OnSearchInput(ChangeEventArgs changeArgs)
+    {
+        _searchText = changeArgs.Value?.ToString() ?? string.Empty;
+
+        // 100ms debounce — cancel the prior timer and start a new one.
+        _searchDebounce?.Cancel();
+        _searchDebounce = new System.Threading.CancellationTokenSource();
+        var token = _searchDebounce.Token;
+
+        _ = Task.Delay(100, token).ContinueWith(_ =>
+        {
+            if (!token.IsCancellationRequested)
+                InvokeAsync(StateHasChanged);
+        }, System.Threading.CancellationToken.None,
+           TaskContinuationOptions.OnlyOnRanToCompletion,
+           TaskScheduler.Default);
+    }
+
+    private async Task OnClickPlaceAsync(WorkflowNodeType nodeType)
+    {
+        await OnPlaceNode.InvokeAsync(nodeType);
+    }
+
+    private async Task OnDragStart(WorkflowNodeType nodeType)
+    {
+        await OnDragStarted.InvokeAsync(nodeType);
+    }
+
+    private void OnDragEnd() { /* no-op — canvas handles the drop */ }
+
+    private void OpenDetailPanel(PaletteEntry entry) =>
+        _selectedEntry = _selectedEntry?.NodeType == entry.NodeType ? null : entry;
+
+    private void CloseDetailPanel() => _selectedEntry = null;
+
+    private async Task PlaceNodeFromDetail(WorkflowNodeType nodeType)
+    {
+        _selectedEntry = null;
+        await OnClickPlaceAsync(nodeType);
+    }
+
+    private void ToggleCategory(string name)
+    {
+        if (!_collapsedCategories.Remove(name))
+            _collapsedCategories.Add(name);
+    }
+
+    private string GetEntryClass(WorkflowNodeType nodeType) => nodeType switch
+    {
+        WorkflowNodeType.AgenticReason    => "hover:bg-amber-900/40",
+        WorkflowNodeType.HumanApproval    => "hover:bg-purple-900/40",
+        _                                 => "hover:bg-cyan-900/40",
+    };
+
+    public void Dispose()
+    {
+        _searchDebounce?.Cancel();
+        _searchDebounce?.Dispose();
+    }
+}
