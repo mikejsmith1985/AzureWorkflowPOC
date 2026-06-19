@@ -2,6 +2,7 @@ using System.Text.Json;
 using DBAIAzure.Connectors;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Validation;
 using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Storage;
 using DBAIAzure.Storage.Repositories;
@@ -192,6 +193,9 @@ builder.Services.AddSingleton<AdoConnectorTester>();
 builder.Services.AddSingleton<LlmConnectorTester>();
 builder.Services.AddSingleton<TeamsConnectorTester>();
 builder.Services.AddSingleton<IConnectorHealthChecker, ConnectorHealthChecker>();
+
+// ── Workflow structural validator (spec 004) ───────────────────────────────────
+builder.Services.AddSingleton<IWorkflowValidator, WorkflowValidator>();
 
 // ── Visual Workflow Builder services (T046–T049) ───────────────────────────────
 // A singleton IChatCompletionService for the Visual Workflow Builder (separate from the

@@ -5,6 +5,7 @@
 
 using Blazor.Diagrams.Core.Geometry;
 using Blazor.Diagrams.Core.Models;
+using Blazor.Diagrams.Core.Models.Base;
 using DBAIAzure.Core.Models;
 
 namespace DBAIAzure.Web.Components.WorkflowBuilder;
@@ -16,6 +17,12 @@ namespace DBAIAzure.Web.Components.WorkflowBuilder;
 /// </summary>
 public sealed class WorkflowNodeModel : NodeModel
 {
+    /// <summary>
+    /// True when this node has zero remaining connections after another node was deleted.
+    /// Set by WorkflowCanvas after a deletion to trigger the amber island badge in WorkflowNodeRenderer.
+    /// Reset when a new edge is added to this node.
+    /// </summary>
+    public bool IsIsolated { get; set; }
     /// <summary>
     /// Initialises the diagram node at the given canvas position and retains the
     /// domain record so that property panels and serialisation paths can read it
@@ -48,6 +55,16 @@ public sealed class WorkflowNodeModel : NodeModel
 
     /// <summary>Called by the renderer component on ondblclick to propagate the event to the canvas.</summary>
     public void RaiseDoubleClicked() => DoubleClicked?.Invoke(this);
+
+    /// <summary>
+    /// Raised by WorkflowNodeRenderer when the user right-clicks the node tile.
+    /// WorkflowCanvas subscribes to open the context menu at the client coordinates.
+    /// </summary>
+    public event Action<WorkflowNodeModel, double, double>? ContextMenuRequested;
+
+    /// <summary>Called by the renderer component on oncontextmenu to propagate the event to the canvas.</summary>
+    public void RaiseContextMenuRequested(double clientX, double clientY) =>
+        ContextMenuRequested?.Invoke(this, clientX, clientY);
 }
 
 /// <summary>
@@ -102,6 +119,9 @@ public sealed class WorkflowEdgeModel : LinkModel
         : base(sourcePort, targetPort)
     {
         WorkflowEdge = workflowEdge;
+
+        // Arrowhead at the target end: 20 × 14 px, which exceeds the FR-10.1 minimum of 12 × 8 px.
+        TargetMarker = LinkMarker.NewArrow(20, 14);
     }
 
     /// <summary>
@@ -110,4 +130,11 @@ public sealed class WorkflowEdgeModel : LinkModel
     /// the workflow definition without referencing the diagram model hierarchy.
     /// </summary>
     public WorkflowEdge WorkflowEdge { get; }
+
+    /// <summary>
+    /// When true, the execution-flow animation (a travelling cyan dot) plays on this edge.
+    /// Set to true by WorkflowCanvas when execution reaches the source node; reset to false
+    /// when execution leaves the target node. Drives the <c>edge-flow-active</c> CSS class.
+    /// </summary>
+    public bool IsAnimating { get; set; }
 }

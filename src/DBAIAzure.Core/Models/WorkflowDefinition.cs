@@ -80,6 +80,21 @@ public sealed record WorkflowDefinition
     public string? ThumbnailSvg { get; init; }
 
     /// <summary>
+    /// Validates structural invariants of the workflow definition before persistence or execution.
+    /// Throws when more than one Trigger node is present, because a workflow must have exactly one entry point.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when multiple Trigger nodes are found. The message is plain-language and safe to show to users.
+    /// </exception>
+    public void ThrowIfInvalid()
+    {
+        var triggerCount = Nodes.Count(n => n.NodeType == WorkflowNodeType.Trigger);
+        if (triggerCount > 1)
+            throw new InvalidOperationException(
+                "A workflow may contain only one starting trigger. Remove the extra trigger before saving.");
+    }
+
+    /// <summary>
     /// Creates a brand-new, empty <see cref="WorkflowDefinition"/> ready to be opened in the
     /// visual builder. All collections are empty, settings are at their defaults, and both
     /// timestamps are set to the current UTC instant so the record is immediately gallery-ready.

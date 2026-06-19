@@ -135,54 +135,74 @@
         string Label,
         string Subtitle,
         string TooltipText,
-        string IoExample);
+        string IoExample,
+        string[] SearchTags = null!)
+    {
+        // Default to empty tags so existing entries without tags still compile.
+        public string[] SearchTags { get; init; } = SearchTags ?? Array.Empty<string>();
+    }
 
     private sealed record PaletteCategory(string Name, IReadOnlyList<PaletteEntry> Entries);
 
     /// <summary>
-    /// All node types grouped into five plain-language categories.
+    /// All node types grouped into six plain-language categories.
+    /// "Triggers" is always first — it is the entry point of every workflow.
     /// No technical terms appear in label, subtitle, tooltip, or IO example text.
     /// </summary>
     private static readonly IReadOnlyList<PaletteCategory> AllCategories = new[]
     {
+        new PaletteCategory("Triggers", new[]
+        {
+            new PaletteEntry(WorkflowNodeType.Trigger, "▶", "Start / Trigger",
+                "Where your workflow begins",
+                "Marks where your workflow begins. Every workflow has exactly one. Connect it to your first step.",
+                "A triggering event (e.g., support ticket arrives) → Initial context and data",
+                new[] { "start", "trigger", "begin", "entry", "first" }),
+        }),
         new PaletteCategory("AI Steps", new[]
         {
             new PaletteEntry(WorkflowNodeType.AgenticReason, "🧠", "Reason & Decide",
                 "AI thinks through a task",
-                "Reads the situation, weighs options, and produces a written decision or summary.",
-                "Plain description of a problem → A clear decision or action summary"),
+                "Reads the situation, weighs options, and produces a written decision or summary. Best used when the answer requires judgement rather than a fixed rule.",
+                "Plain description of a problem → A clear decision or action summary",
+                new[] { "ai", "llm", "think", "analyse", "reason", "decide", "agent" }),
         }),
         new PaletteCategory("Decisions & Routing", new[]
         {
             new PaletteEntry(WorkflowNodeType.FunctionRoute, "🔀", "Smart Branch",
                 "Send work down the right path",
-                "Reads the result of the previous step and chooses which path to follow next.",
-                "Step result text → The name of the next path to take"),
+                "Reads the result of the previous step and chooses which path to follow next. Use this when two or more downstream steps are possible and a condition decides which one runs.",
+                "Step result text → The name of the next path to take",
+                new[] { "branch", "decide", "route", "condition", "smart", "switch", "if", "choose" }),
         }),
         new PaletteCategory("Data", new[]
         {
             new PaletteEntry(WorkflowNodeType.FunctionTransform, "⚙️", "Transform",
                 "Change the shape of information",
-                "Takes information from one step and converts it into the format the next step needs.",
-                "Input text or data → Reformatted or reshaped output"),
+                "Takes information from one step and converts it into the format the next step needs. Use this to clean, reshape, or summarise data before passing it on.",
+                "Input text or data → Reformatted or reshaped output",
+                new[] { "transform", "convert", "reshape", "map", "clean", "format" }),
             new PaletteEntry(WorkflowNodeType.FunctionData, "💾", "Save / Load",
                 "Store or retrieve information",
-                "Saves the current result somewhere safe, or retrieves previously stored information.",
-                "Result to store → Confirmed stored value or retrieved record"),
+                "Saves the current result somewhere safe, or retrieves previously stored information. Use this to persist data between workflow runs or share it with other systems.",
+                "Result to store → Confirmed stored value or retrieved record",
+                new[] { "save", "load", "store", "retrieve", "database", "read", "write", "persist" }),
         }),
         new PaletteCategory("Notifications", new[]
         {
             new PaletteEntry(WorkflowNodeType.FunctionNotify, "🔔", "Notify",
                 "Send a message or alert",
-                "Sends a message, email, or notification to a person or another system.",
-                "Message content → Delivery confirmation"),
+                "Sends a message, email, or notification to a person or another system. Use this to alert someone that the workflow has reached a specific point.",
+                "Message content → Delivery confirmation",
+                new[] { "notify", "email", "message", "alert", "send", "teams", "webhook" }),
         }),
         new PaletteCategory("Human Steps", new[]
         {
             new PaletteEntry(WorkflowNodeType.HumanApproval, "👤", "Ask a Person",
                 "Pause for a human decision",
-                "Stops the workflow and waits for a person to review the result and give a thumbs-up or thumbs-down.",
-                "Summary for reviewer → Approved or rejected decision"),
+                "Stops the workflow and waits for a person to review the result and approve or reject it. The workflow resumes only after a human responds.",
+                "Summary for reviewer → Approved or rejected decision",
+                new[] { "human", "approval", "approve", "review", "person", "hitl", "pause", "wait" }),
         }),
     };
 
@@ -202,7 +222,8 @@
                     Entries = cat.Entries
                         .Where(e => e.Label.ToLowerInvariant().Contains(query)
                                  || e.Subtitle.ToLowerInvariant().Contains(query)
-                                 || e.TooltipText.ToLowerInvariant().Contains(query))
+                                 || e.TooltipText.ToLowerInvariant().Contains(query)
+                                 || e.SearchTags.Any(tag => tag.Contains(query)))
                         .ToList()
                         .AsReadOnly()
                 })
@@ -261,6 +282,7 @@
 
     private string GetEntryClass(WorkflowNodeType nodeType) => nodeType switch
     {
+        WorkflowNodeType.Trigger          => "hover:bg-emerald-900/40",
         WorkflowNodeType.AgenticReason    => "hover:bg-amber-900/40",
         WorkflowNodeType.HumanApproval    => "hover:bg-purple-900/40",
         _                                 => "hover:bg-cyan-900/40",

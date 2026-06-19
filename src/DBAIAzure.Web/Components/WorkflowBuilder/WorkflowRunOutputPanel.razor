@@ -3,10 +3,17 @@
 @using DBAIAzure.Core.Models
 @implements IDisposable
 
-@if (_nodeStates.Count > 0)
+@if (IsTriggerMissing || _nodeStates.Count > 0)
 {
-    <div class="workflow-run-output flex flex-col gap-2 overflow-y-auto max-h-full p-4" role="log"
+    <div class="workflow-run-output flex flex-col gap-2 overflow-y-auto max-h-full p-4 w-64 border-l border-gray-800" role="log"
          aria-label="Workflow run output">
+
+    @if (IsTriggerMissing)
+    {
+        <p class="text-amber-300 text-sm" role="status">
+            Add a "Start / Trigger" node to your workflow before running.
+        </p>
+    }
 
         @foreach (var state in _nodeStates.Values.OrderBy(s => s.NodeId))
         {
@@ -68,6 +75,12 @@
 @code {
     /// <summary>The execution orchestrator pushes node state updates via this parameter.</summary>
     [Parameter] public IReadOnlyDictionary<string, NodeExecutionState> NodeStates { get; set; } = new Dictionary<string, NodeExecutionState>();
+
+    /// <summary>
+    /// When true, the panel shows a plain-language advisory that a Trigger node must be added
+    /// before the workflow can run. Controlled by the parent WorkflowBuilder page.
+    /// </summary>
+    [Parameter] public bool IsTriggerMissing { get; set; }
 
     /// <summary>Workflow execution timeout in minutes — shown on TimedOut nodes.</summary>
     [Parameter] public int TimeoutMinutes { get; set; } = 5;

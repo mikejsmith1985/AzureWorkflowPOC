@@ -11,6 +11,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Z.Blazor.Diagrams — canvas library for the Visual Workflow Builder -->
     <link href="_content/Z.Blazor.Diagrams/style.min.css" rel="stylesheet" />
+    <!-- Workflow canvas animations — execution-flow dot and directional edge accent (spec 004) -->
+    <link href="css/workflow-canvas-animations.css" rel="stylesheet" />
     <script src="_content/Z.Blazor.Diagrams/script.min.js"></script>
     <!-- Mermaid.js — pipeline graph topology visualizer -->
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -31,6 +33,12 @@
         window.scrollToBottom = function (elementId) {
             const el = document.getElementById(elementId);
             if (el) el.scrollTop = el.scrollHeight;
+        };
+        // Returns the bounding rect of a Blazor ElementReference — used by WorkflowCanvas to
+        // convert right-click client coordinates to canvas-relative coordinates.
+        window.getBoundingClientRect = function (element) {
+            const rect = element.getBoundingClientRect();
+            return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
         };
     </script>
 </head>

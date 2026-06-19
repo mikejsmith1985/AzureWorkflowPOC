@@ -179,9 +179,56 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
             var chatService = kernel.GetRequiredService<IChatCompletionService>();
             var inputTranslator = new WorkflowInputTranslator(chatService);
 
-            var (structuredInput, _) = await inputTranslator
+            var (translatedInput, _) = await inputTranslator
                 .TranslateAsync(inputDescription, workflow.Nodes, runState.Cts.Token)
                 .ConfigureAwait(false);
+            // Mutable local so the Trigger context merge below can prepend to it.
+            var structuredInput = translatedInput;
+
+            // ── Resolve the graph entry point ─────────────────────────────────────
+            // The Trigger node marks the entry point but has no runnable logic of its own.
+            // If a Trigger is present, we skip it and start from the first downstream node
+            // (the target of the Trigger's "Begin" output edge). If no Trigger is present
+            // (e.g., legacy workflows) we fall back to the first node in the list.
+            var triggerNode = workflow.Nodes.FirstOrDefault(n => n.NodeType == WorkflowNodeType.Trigger);
+            string firstRunnableNodeId;
+
+            if (triggerNode is not null)
+            {
+                // Find the downstream node connected to the Trigger's output port.
+                var triggerOutEdge = workflow.Edges.FirstOrDefault(e => e.SourceNodeId == triggerNode.Id);
+                firstRunnableNodeId = triggerOutEdge?.TargetNodeId
+                    ?? workflow.Nodes.FirstOrDefault(n => n.NodeType != WorkflowNodeType.Trigger)?.Id
+                    ?? string.Empty;
+
+                // Merge the Trigger's GoalPrompt and initialDataDescription into the input
+                // payload so the first runnable step receives the workflow intent as context.
+                if (!string.IsNullOrWhiteSpace(triggerNode.GoalPrompt))
+                {
+                    var triggerContext = triggerNode.GoalPrompt;
+                    if (!string.IsNullOrWhiteSpace(triggerNode.FunctionConfig))
+                    {
+                        try
+                        {
+                            using var configDoc = System.Text.Json.JsonDocument.Parse(triggerNode.FunctionConfig);
+                            if (configDoc.RootElement.TryGetProperty("initialDataDescription", out var descProp)
+                                && !string.IsNullOrWhiteSpace(descProp.GetString()))
+                            {
+                                triggerContext += $"\n\nAvailable data: {descProp.GetString()}";
+                            }
+                        }
+                        catch { }
+                    }
+
+                    structuredInput = string.IsNullOrWhiteSpace(structuredInput)
+                        ? triggerContext
+                        : $"{triggerContext}\n\n{structuredInput}";
+                }
+            }
+            else
+            {
+                firstRunnableNodeId = workflow.Nodes.Count > 0 ? workflow.Nodes[0].Id : string.Empty;
+            }
 
             // ── Build the KernelProcess from the workflow definition ───────────────
             var process = _runtimeBuilder.Build(workflow);
@@ -192,7 +239,7 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
                 Data = new WorkflowStepData
                 {
                     RunId        = runId,
-                    NodeId       = workflow.Nodes.Count > 0 ? workflow.Nodes[0].Id : string.Empty,
+                    NodeId       = firstRunnableNodeId,
                     InputPayload = structuredInput,
                 },
             };
@@ -305,12 +352,20 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
     /// node in the <see cref="NodeStatus.NotStarted"/> state. The list mirrors the canvas node
     /// order so the UI can render them in the same sequence without additional sorting.
     /// </summary>
+    /// <summary>
+    /// Produces the initial <see cref="NodeExecutionState"/> list for a workflow.
+    /// Trigger nodes start as <see cref="NodeStatus.Skipped"/> because they are the entry
+    /// point marker and have no runnable logic — the runtime skips them and begins execution
+    /// at the first downstream node. All other nodes start as <see cref="NodeStatus.NotStarted"/>.
+    /// </summary>
     private static IReadOnlyList<NodeExecutionState> BuildInitialNodeStates(WorkflowDefinition workflow) =>
         workflow.Nodes
             .Select(node => new NodeExecutionState
             {
-                NodeId    = node.Id,
-                Status    = NodeStatus.NotStarted,
+                NodeId = node.Id,
+                Status = node.NodeType == WorkflowNodeType.Trigger
+                    ? NodeStatus.Skipped
+                    : NodeStatus.NotStarted,
             })
             .ToList()
             .AsReadOnly();

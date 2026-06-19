@@ -11,6 +11,7 @@
 @inject WorkflowBuilderService BuilderService
 @inject IJSRuntime JSRuntime
 @inject IWorkflowExecutionOrchestrator ExecutionOrchestrator
+@using DBAIAzure.Core.Exceptions
 
 <PageTitle>Workflow Builder — DBAIAzure</PageTitle>
 
@@ -22,6 +23,7 @@
                      CanRedo="@(_canvas?.CanRedo ?? false)"
                      IsSnapping="@(_canvas?.IsSnappingToGrid ?? true)"
                      CanRun="@CanRun"
+                     IsTriggerMissing="@_isTriggerMissing"
                      IsChatOpen="@_isChatOpen"
                      LastSavedAt="@_lastSavedAt"
                      ExecutionTimeoutMinutes="@(_workflow?.Settings?.ExecutionTimeoutMinutes ?? 5)"
@@ -48,7 +50,8 @@
                         WorkflowChanged="@OnWorkflowChanged"
                         DraggedNodeType="@_draggedNodeType"
                         NodeStates="@_nodeStates"
-                        NodeDoubleClicked="@OnNodeDoubleClicked" />
+                        NodeDoubleClicked="@OnNodeDoubleClicked"
+                        OnTriggerPresenceChanged="@OnTriggerPresenceChanged" />
 
         @* Node config panel — opens when user double-clicks a canvas node *@
         <WorkflowNodeConfigPanel Node="@_configNode"
@@ -56,10 +59,11 @@
                                  NodeUpdated="@OnNodeUpdated"
                                  OnCloseRequested="@(() => _configNode = null)" />
 
-        @* Execution output panel — shown during and after a run *@
-        @if (_activeRunId is not null || _nodeStates.Count > 0)
+        @* Execution output panel — shown when trigger is missing, during a run, or after completion *@
+        @if (_isTriggerMissing || _activeRunId is not null || _nodeStates.Count > 0)
         {
             <WorkflowRunOutputPanel NodeStates="@_nodeStates"
+                                    IsTriggerMissing="@_isTriggerMissing"
                                     TimeoutMinutes="@(_workflow?.Settings?.ExecutionTimeoutMinutes ?? 5)"
                                     OnFeedbackRequested="@OnNodeFeedbackRequested"
                                     OnSettingsClicked="EventCallback.Empty" />
@@ -104,6 +108,8 @@
     private IDisposable? _locationChangingRegistration;
     private bool _isRunModalOpen;
     private string? _activeRunId;
+    // True when the canvas has no Trigger node yet — gates the Run button and shows advisory badges.
+    private bool _isTriggerMissing = true;
     private IReadOnlyDictionary<string, NodeExecutionState> _nodeStates =
         new Dictionary<string, NodeExecutionState>();
 
@@ -247,8 +253,24 @@
     private async Task OnSaveAsync()
     {
         if (_workflow is null) return;
-        _workflow = await BuilderService.SaveAsync(_workflow);
-        _lastSavedAt = BuilderService.LastSavedAt;
+        try
+        {
+            _workflow    = await BuilderService.SaveAsync(_workflow);
+            _lastSavedAt = BuilderService.LastSavedAt;
+        }
+        catch (WorkflowValidationException ex)
+        {
+            // Surface validation messages as amber advisory banners in the toolbar area.
+            // WorkflowCanvas already shows individual messages via its toast; here we log all.
+            foreach (var message in ex.Messages)
+                _canvas?.ShowToast(message, isError: true);
+        }
+        StateHasChanged();
+    }
+
+    private void OnTriggerPresenceChanged(bool isTriggerPresent)
+    {
+        _isTriggerMissing = !isTriggerPresent;
         StateHasChanged();
     }
 

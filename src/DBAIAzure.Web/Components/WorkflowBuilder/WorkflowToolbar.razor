@@ -49,6 +49,16 @@
         💾 Save
     </button>
 
+    @* Trigger-missing advisory badge — shown until user adds a Trigger node *@
+    @if (IsTriggerMissing)
+    {
+        <span class="bg-amber-900/50 border border-amber-600 text-amber-200 text-xs px-2 py-1 rounded"
+              role="status"
+              aria-live="polite">
+            Add a starting trigger to run this workflow
+        </span>
+    }
+
     @* Auto-saved timestamp *@
     @if (LastSavedAt.HasValue)
     {
@@ -98,10 +108,10 @@
     else
     {
         <button @onclick="OnRunClicked"
-                disabled="@(!CanRun)"
-                class="toolbar-btn @(CanRun ? "bg-green-600 hover:bg-green-500 text-white" : "bg-gray-700 text-gray-500 cursor-not-allowed") px-3 py-1 rounded-md text-sm"
-                aria-label="@(CanRun ? "Run this workflow" : "Configure all nodes before running")"
-                title="@(CanRun ? "Run workflow" : "All nodes must be configured before running")">
+                disabled="@(!(CanRun && !IsTriggerMissing))"
+                class="toolbar-btn @(CanRun && !IsTriggerMissing ? "bg-green-600 hover:bg-green-500 text-white" : "bg-gray-700 text-gray-500 cursor-not-allowed") px-3 py-1 rounded-md text-sm"
+                aria-label="@RunButtonAriaLabel"
+                title="@RunButtonTitle">
             ▶ Run
         </button>
     }
@@ -131,9 +141,20 @@
     [Parameter] public bool    IsSnapping             { get; set; }
     [Parameter] public bool    IsRunning              { get; set; }
     [Parameter] public bool    CanRun                 { get; set; }
+    [Parameter] public bool    IsTriggerMissing       { get; set; }
     [Parameter] public bool    IsChatOpen             { get; set; }
     [Parameter] public DateTimeOffset? LastSavedAt    { get; set; }
     [Parameter] public int     ExecutionTimeoutMinutes{ get; set; }
+
+    private string RunButtonAriaLabel =>
+        IsTriggerMissing ? "Add a starting trigger node before running" :
+        CanRun           ? "Run this workflow" :
+                           "Configure all nodes before running";
+
+    private string RunButtonTitle =>
+        IsTriggerMissing ? "Add a starting trigger before running" :
+        CanRun           ? "Run workflow" :
+                           "All nodes must be configured before running";
 
     [Parameter] public EventCallback OnUndoClicked        { get; set; }
     [Parameter] public EventCallback OnRedoClicked        { get; set; }

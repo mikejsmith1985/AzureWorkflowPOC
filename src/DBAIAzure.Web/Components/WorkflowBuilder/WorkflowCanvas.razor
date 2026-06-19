@@ -1,8 +1,11 @@
 @* Main canvas wrapper around Z.Blazor.Diagrams DiagramCanvas.
    Handles palette drops, port-direction enforcement, undo/redo stack (depth 50),
-   multi-select (built-in via AllowMultiSelection), and Delete-key edge removal. *@
+   multi-select (built-in via AllowMultiSelection), Delete-key node/edge removal,
+   directional arrowheads, Trigger-node guards, and right-click context menu. *@
+@inject IJSRuntime JSRuntime
 
 <div class="workflow-canvas-container relative flex-1 overflow-hidden bg-gray-950"
+     @ref="_canvasContainerRef"
      @ondrop="OnDropAsync"
      @ondragover:preventDefault
      @ondragover="OnDragOver"
@@ -13,14 +16,48 @@
         </div>
     </CascadingValue>
 
-    @* Toast notification for rejected connections *@
+    @* Toast notification for rejected connections and errors *@
     @if (_toastMessage is not null)
     {
-        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-amber-600 text-white text-sm
+        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 @(_toastIsError ? "bg-red-700" : "bg-amber-600") text-white text-sm
                     px-4 py-2 rounded-lg shadow-lg pointer-events-none animate-pulse z-50"
              role="alert" aria-live="polite">
             @_toastMessage
         </div>
+    }
+
+    @* Input-port directional hint — shown for 3 seconds when user drags from a left (input) port *@
+    @if (_inputPortHintVisible)
+    {
+        <div class="input-port-hint absolute bottom-16 left-1/2 -translate-x-1/2 z-50"
+             role="status" aria-live="polite">
+            Connections start from output ports (right side →). Drag from the right side of a node.
+        </div>
+    }
+
+    @* Right-click context menu for node deletion *@
+    @if (_contextMenu.IsVisible)
+    {
+        <div class="absolute z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[140px]"
+             style="left: @(_contextMenu.CanvasX)px; top: @(_contextMenu.CanvasY)px"
+             role="menu"
+             aria-label="Node actions">
+            <button class="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-900/30 transition-colors"
+                    role="menuitem"
+                    tabindex="0"
+                    @onclick="OnContextMenuDeleteClicked"
+                    @onkeydown="OnContextMenuKeyDown">
+                🗑 Delete node
+            </button>
+            <button class="w-full text-left px-4 py-2 text-sm text-gray-400 hover:bg-gray-700 transition-colors"
+                    role="menuitem"
+                    tabindex="0"
+                    @onclick="OnContextMenuDismiss">
+                Cancel
+            </button>
+        </div>
+        @* Invisible backdrop to dismiss menu on outside click *@
+        <div class="absolute inset-0 z-40" @onclick="OnContextMenuDismiss"></div>
     }
 </div>
 
@@ -42,12 +79,26 @@
     /// <summary>Per-node execution state keyed by NodeId; null outside a run.</summary>
     [Parameter] public IReadOnlyDictionary<string, NodeExecutionState>? NodeStates { get; set; }
 
+    /// <summary>
+    /// Raised after every node addition or removal so the parent page can gate the Run button.
+    /// Invoked with true when a Trigger node is present; false when there is none.
+    /// </summary>
+    [Parameter] public EventCallback<bool> OnTriggerPresenceChanged { get; set; }
+
     // ── Diagram state ────────────────────────────────────────────────────────────
 
     private BlazorDiagram _diagram = null!;
     private DiagramCanvas _canvasRef = null!;
+    private ElementReference _canvasContainerRef;
     private string? _toastMessage;
+    private bool _toastIsError;
     private System.Threading.CancellationTokenSource? _toastCts;
+    private bool _inputPortHintVisible;
+    private System.Threading.CancellationTokenSource? _hintCts;
+
+    // Context menu transient state.
+    private NodeContextMenuState _contextMenu = new();
+    private WorkflowNodeModel? _contextMenuTarget;
 
     // ── Undo / redo stack (no built-in in ZBD 3.0.x — custom implementation) ───
 
@@ -72,14 +123,14 @@
         // Register the custom node renderer component.
         _diagram.RegisterComponent<WorkflowNodeModel, WorkflowNodeRenderer>();
 
-        // Wire up port-direction validation and double-click for config panel.
+        // Wire up port-direction validation, double-click, and context menu.
         _diagram.Links.Added   += OnLinkAdded;
         _diagram.Nodes.Added   += OnNodeAdded;
 
-        // Use the built-in keyboard shortcuts for the Delete / Backspace keys.
+        // Replace the built-in Delete/Backspace handler with our custom one that supports undo.
         var kbShortcuts = _diagram.GetBehavior<KeyboardShortcutsBehavior>()!;
-        kbShortcuts.SetShortcut("Delete",    false, false, false, KeyboardShortcutsDefaults.DeleteSelection);
-        kbShortcuts.SetShortcut("Backspace", false, false, false, KeyboardShortcutsDefaults.DeleteSelection);
+        kbShortcuts.SetShortcut("Delete",    false, false, false, async (diagram) => { HandleDeleteSelected(); await ValueTask.CompletedTask; });
+        kbShortcuts.SetShortcut("Backspace", false, false, false, async (diagram) => { HandleDeleteSelected(); await ValueTask.CompletedTask; });
 
         // Sync keyboard undo/redo shortcuts.
         kbShortcuts.SetShortcut("z", false, false, true, (diagram) => { Undo(); return ValueTask.CompletedTask; });
@@ -90,14 +141,48 @@
     {
         if (Workflow is not null && _diagram.Nodes.Count == 0 && Workflow.Nodes.Count > 0)
             LoadWorkflowIntoCanvas(Workflow);
+
+        // Sync edge animation from execution orchestrator state.
+        if (NodeStates is not null)
+        {
+            foreach (var edge in _diagram.Links.OfType<WorkflowEdgeModel>())
+            {
+                var sourceNodeId = (edge.Source?.Model as WorkflowPortModel)?.Parent?.Id;
+                var isSourceActive = sourceNodeId is not null
+                    && NodeStates.TryGetValue(sourceNodeId, out var state)
+                    && state.Status == NodeStatus.Active;
+                edge.IsAnimating = isSourceActive;
+            }
+        }
     }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        // Cache the canvas bounding rect once so context-menu coordinate conversion is fast.
+        try
+        {
+            _canvasBounds = await JSRuntime.InvokeAsync<BoundingRect>(
+                "getBoundingClientRect", _canvasContainerRef);
+        }
+        catch
+        {
+            // JS interop not available (pre-render); coordinates fall back to raw client coords.
+        }
+    }
+
+    // Cached bounding rect of the canvas container element for client→canvas coordinate conversion.
+    private BoundingRect _canvasBounds = new(0, 0, 0, 0);
 
     // ── Port-direction guard ─────────────────────────────────────────────────────
 
     /// <summary>
     /// Called synchronously when the diagram library adds a new link.
     /// Rejects any connection that is not output→input (e.g. input→input, output→output)
-    /// and shows an amber toast explaining why.
+    /// and shows an amber toast explaining why. When the user drags from an input port
+    /// specifically, a separate directional hint guides them to the output side instead.
     /// </summary>
     private void OnLinkAdded(Blazor.Diagrams.Core.Models.Base.BaseLinkModel link)
     {
@@ -116,20 +201,25 @@
 
         if (!isValidDirection)
         {
-            // Remove the invalid link and notify the user.
             _diagram.Links.Remove(link);
-            ShowToast("Connections must run from an output port (→) to an input port (←).");
+
+            // Show a directional hint when the user accidentally drags from an input (left) port.
+            if (sourcePort.Alignment == PortAlignment.Left)
+                ShowInputPortHint();
+            else
+                ShowToast("Connections must run from an output port (→) to an input port (←).");
+
             return;
         }
 
-        // Valid connection — record it in undo history.
-        var edge = WorkflowEdge.CreateNew(
-            sourcePort.Parent!.Id,
-            sourcePort.WorkflowPort.Id,
-            targetPort.Parent!.Id,
-            targetPort.WorkflowPort.Id,
-            sourcePort.WorkflowPort.Label);
+        // Valid connection — reset island badge on the target node now that it is connected.
+        if (targetPort.Parent is WorkflowNodeModel targetNode)
+        {
+            targetNode.IsIsolated = false;
+            targetNode.Refresh();
+        }
 
+        // Record in undo history.
         var action = new AddEdgeAction(link as WorkflowEdgeModel ?? throw new InvalidOperationException("Expected WorkflowEdgeModel"), this);
         RecordAction(action);
         _ = NotifyWorkflowChanged();
@@ -154,14 +244,27 @@
     /// <summary>
     /// Adds a new node of the given type at the specified client-space coordinates.
     /// Called both from drag-drop and from palette click-to-place.
+    /// Trigger nodes are snapped to (80, 80) on first placement; a second Trigger
+    /// is blocked with a toast rather than added.
     /// </summary>
     public async Task PlaceNodeAtPositionAsync(WorkflowNodeType nodeType, double clientX, double clientY)
     {
+        if (nodeType == WorkflowNodeType.Trigger && HasTriggerNode())
+        {
+            ShowToast("This workflow already has a starting trigger. A workflow can only have one.");
+            return;
+        }
+
         // Convert client coordinates to diagram canvas space.
         var relativePoint = _diagram.GetRelativeMousePoint(clientX, clientY);
 
+        // Trigger nodes always snap to the top-left anchor position for visual clarity.
+        var position = nodeType == WorkflowNodeType.Trigger
+            ? new Point(80, 80)
+            : relativePoint;
+
         var domainNode = WorkflowNode.CreateNew(nodeType, DefaultLabel(nodeType));
-        domainNode = domainNode with { PositionX = relativePoint.X, PositionY = relativePoint.Y };
+        domainNode = domainNode with { PositionX = position.X, PositionY = position.Y };
 
         var nodeModel = CreateNodeModel(domainNode);
         _diagram.Nodes.Add(nodeModel);
@@ -169,21 +272,36 @@
         var action = new AddNodeAction(nodeModel, this);
         RecordAction(action);
 
+        await FireTriggerPresenceChanged();
         await NotifyWorkflowChanged();
     }
 
     /// <summary>
     /// Places a node at a smart default position (offset from the canvas center).
     /// Called when the user clicks a palette entry without dragging.
+    /// Trigger nodes are guarded the same way as drag-drop placement.
     /// </summary>
     public async Task PlaceNodeDefaultPositionAsync(WorkflowNodeType nodeType)
     {
-        var existingCount = _diagram.Nodes.Count;
-        var xOffset = 120 + (existingCount % 4) * 180.0;
-        var yOffset = 100 + (existingCount / 4) * 140.0;
+        if (nodeType == WorkflowNodeType.Trigger && HasTriggerNode())
+        {
+            ShowToast("This workflow already has a starting trigger. A workflow can only have one.");
+            return;
+        }
+
+        Point position;
+        if (nodeType == WorkflowNodeType.Trigger)
+        {
+            position = new Point(80, 80);
+        }
+        else
+        {
+            var existingCount = _diagram.Nodes.Count;
+            position = new Point(120 + (existingCount % 4) * 180.0, 100 + (existingCount / 4) * 140.0);
+        }
 
         var domainNode = WorkflowNode.CreateNew(nodeType, DefaultLabel(nodeType));
-        domainNode = domainNode with { PositionX = xOffset, PositionY = yOffset };
+        domainNode = domainNode with { PositionX = position.X, PositionY = position.Y };
 
         var nodeModel = CreateNodeModel(domainNode);
         _diagram.Nodes.Add(nodeModel);
@@ -191,8 +309,16 @@
         var action = new AddNodeAction(nodeModel, this);
         RecordAction(action);
 
+        await FireTriggerPresenceChanged();
         await NotifyWorkflowChanged();
     }
+
+    private bool HasTriggerNode() =>
+        _diagram.Nodes.OfType<WorkflowNodeModel>()
+                      .Any(nm => nm.WorkflowNode.NodeType == WorkflowNodeType.Trigger);
+
+    private async Task FireTriggerPresenceChanged() =>
+        await OnTriggerPresenceChanged.InvokeAsync(HasTriggerNode());
 
     // ── Undo / redo ───────────────────────────────────────────────────────────────
 
@@ -204,6 +330,7 @@
 
         action.Undo();
         _redoStack.Push(action);
+        _ = FireTriggerPresenceChanged();
         _ = NotifyWorkflowChanged();
         StateHasChanged();
     }
@@ -216,6 +343,7 @@
 
         action.Do();
         _undoStack.Push(action);
+        _ = FireTriggerPresenceChanged();
         _ = NotifyWorkflowChanged();
         StateHasChanged();
     }
@@ -249,6 +377,157 @@
     {
         _diagram.Options.GridSize = _diagram.Options.GridSize.HasValue ? null : 20;
         StateHasChanged();
+    }
+
+    // ── Node deletion ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Deletes all currently selected nodes with undo support.
+    /// After deletion, any former neighbours that have zero remaining connections
+    /// receive the amber "island" badge to alert the user.
+    /// Replaces the library's KeyboardShortcutsDefaults.DeleteSelection so we can
+    /// intercept deletion, push it to the undo stack, and check for island nodes.
+    /// </summary>
+    private void HandleDeleteSelected()
+    {
+        var selectedNodes = _diagram.Nodes
+            .OfType<WorkflowNodeModel>()
+            .Where(nm => nm.Selected)
+            .ToList();
+
+        if (selectedNodes.Count == 0)
+        {
+            // No nodes selected — fall back to edge deletion (library default behaviour).
+            var selectedEdges = _diagram.Links.Where(l => l.Selected).ToList();
+            foreach (var edge in selectedEdges)
+                _diagram.Links.Remove(edge);
+            return;
+        }
+
+        foreach (var nodeModel in selectedNodes)
+        {
+            var attachedEdges = _diagram.Links
+                .OfType<WorkflowEdgeModel>()
+                .Where(e => IsEdgeAttached(e, nodeModel))
+                .ToArray();
+
+            // Collect neighbours BEFORE removal so we can badge them afterwards.
+            var neighbourIds = attachedEdges
+                .SelectMany(e => new[]
+                {
+                    (e.Source?.Model as WorkflowPortModel)?.Parent?.Id,
+                    (e.Target?.Model as WorkflowPortModel)?.Parent?.Id,
+                })
+                .Where(id => id != null && id != nodeModel.Id)
+                .ToHashSet();
+
+            var command = new UndoDeleteNodeCommand(nodeModel, nodeModel.Position ?? Point.Zero, attachedEdges, this);
+            command.Execute();
+            RecordAction(command);
+
+            // Badge any former neighbours that are now islands.
+            BadgeIslandNeighbours(neighbourIds);
+        }
+
+        _ = FireTriggerPresenceChanged();
+        _ = NotifyWorkflowChanged();
+        StateHasChanged();
+    }
+
+    private static bool IsEdgeAttached(WorkflowEdgeModel edge, WorkflowNodeModel node)
+    {
+        var sourceParentId = (edge.Source?.Model as WorkflowPortModel)?.Parent?.Id;
+        var targetParentId = (edge.Target?.Model as WorkflowPortModel)?.Parent?.Id;
+        return sourceParentId == node.Id || targetParentId == node.Id;
+    }
+
+    private void BadgeIslandNeighbours(IEnumerable<string?> formerNeighbourIds)
+    {
+        var connectedNodeIds = _diagram.Links
+            .SelectMany(l => new[]
+            {
+                (l.Source?.Model as WorkflowPortModel)?.Parent?.Id,
+                (l.Target?.Model as WorkflowPortModel)?.Parent?.Id,
+            })
+            .Where(id => id != null)
+            .ToHashSet();
+
+        foreach (var neighbourId in formerNeighbourIds.Where(id => id != null))
+        {
+            if (!connectedNodeIds.Contains(neighbourId))
+            {
+                var neighbour = _diagram.Nodes.OfType<WorkflowNodeModel>()
+                    .FirstOrDefault(nm => nm.Id == neighbourId);
+                if (neighbour is not null)
+                {
+                    neighbour.IsIsolated = true;
+                    neighbour.Refresh();
+                }
+            }
+        }
+    }
+
+    // ── Context menu ─────────────────────────────────────────────────────────────
+
+    private void OnContextMenuRequested(WorkflowNodeModel nodeModel, double clientX, double clientY)
+    {
+        // Convert client coordinates to canvas-relative coordinates.
+        var canvasX = clientX - _canvasBounds.Left;
+        var canvasY = clientY - _canvasBounds.Top;
+
+        _contextMenuTarget = nodeModel;
+        _contextMenu = new NodeContextMenuState(true, canvasX, canvasY, nodeModel.Id);
+        StateHasChanged();
+    }
+
+    private void OnContextMenuDeleteClicked()
+    {
+        if (_contextMenuTarget is null)
+        {
+            OnContextMenuDismiss();
+            return;
+        }
+
+        var nodeModel = _contextMenuTarget;
+        var attachedEdges = _diagram.Links
+            .OfType<WorkflowEdgeModel>()
+            .Where(e => IsEdgeAttached(e, nodeModel))
+            .ToArray();
+
+        var neighbourIds = attachedEdges
+            .SelectMany(e => new[]
+            {
+                (e.Source?.Model as WorkflowPortModel)?.Parent?.Id,
+                (e.Target?.Model as WorkflowPortModel)?.Parent?.Id,
+            })
+            .Where(id => id != null && id != nodeModel.Id)
+            .ToHashSet();
+
+        var command = new UndoDeleteNodeCommand(nodeModel, nodeModel.Position ?? Point.Zero, attachedEdges, this);
+        command.Execute();
+        RecordAction(command);
+
+        BadgeIslandNeighbours(neighbourIds);
+
+        OnContextMenuDismiss();
+
+        _ = FireTriggerPresenceChanged();
+        _ = NotifyWorkflowChanged();
+    }
+
+    private void OnContextMenuDismiss()
+    {
+        _contextMenuTarget = null;
+        _contextMenu       = new NodeContextMenuState(false, 0, 0, null);
+        StateHasChanged();
+    }
+
+    private void OnContextMenuKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            OnContextMenuDismiss();
+        else if (e.Key == "Enter" || e.Key == " ")
+            OnContextMenuDeleteClicked();
     }
 
     // ── Canvas → WorkflowDefinition sync ─────────────────────────────────────────
@@ -318,6 +597,9 @@
             _diagram.SuspendRefresh = false;
             _diagram.Refresh();
         }
+
+        // Fire trigger presence after loading so initial state is correct.
+        _ = FireTriggerPresenceChanged();
     }
 
     private WorkflowNodeModel CreateNodeModel(WorkflowNode domainNode)
@@ -336,6 +618,7 @@
 
     private static string DefaultLabel(WorkflowNodeType nodeType) => nodeType switch
     {
+        WorkflowNodeType.Trigger          => "Start / Trigger",
         WorkflowNodeType.AgenticReason    => "Reason & Decide",
         WorkflowNodeType.FunctionRoute    => "Smart Branch",
         WorkflowNodeType.FunctionTransform=> "Transform",
@@ -347,10 +630,16 @@
 
     // ── Toast ─────────────────────────────────────────────────────────────────────
 
-    private void ShowToast(string message)
+    /// <summary>
+    /// Displays a transient toast banner at the bottom of the canvas.
+    /// When isError is true, the banner renders in red instead of amber.
+    /// The toast auto-dismisses after 3 seconds.
+    /// </summary>
+    public void ShowToast(string message, bool isError = false)
     {
         _toastCts?.Cancel();
         _toastMessage = message;
+        _toastIsError = isError;
         StateHasChanged();
 
         _toastCts = new System.Threading.CancellationTokenSource();
@@ -358,18 +647,38 @@
         _ = Task.Delay(3000, token).ContinueWith(_ =>
         {
             if (!token.IsCancellationRequested)
-                InvokeAsync(() => { _toastMessage = null; StateHasChanged(); });
+                InvokeAsync(() => { _toastMessage = null; _toastIsError = false; StateHasChanged(); });
         }, System.Threading.CancellationToken.None,
            TaskContinuationOptions.OnlyOnRanToCompletion,
            TaskScheduler.Default);
     }
 
-    // ── Node double-click ─────────────────────────────────────────────────────────
+    private void ShowInputPortHint()
+    {
+        _hintCts?.Cancel();
+        _inputPortHintVisible = true;
+        StateHasChanged();
+
+        _hintCts = new System.Threading.CancellationTokenSource();
+        var token = _hintCts.Token;
+        _ = Task.Delay(3000, token).ContinueWith(_ =>
+        {
+            if (!token.IsCancellationRequested)
+                InvokeAsync(() => { _inputPortHintVisible = false; StateHasChanged(); });
+        }, System.Threading.CancellationToken.None,
+           TaskContinuationOptions.OnlyOnRanToCompletion,
+           TaskScheduler.Default);
+    }
+
+    // ── Node event wiring ─────────────────────────────────────────────────────────
 
     private void OnNodeAdded(NodeModel node)
     {
-        if (node is WorkflowNodeModel nodeModel)
-            nodeModel.DoubleClicked += OnNodeDoubleClicked;
+        if (node is not WorkflowNodeModel nodeModel)
+            return;
+
+        nodeModel.DoubleClicked       += OnNodeDoubleClicked;
+        nodeModel.ContextMenuRequested += OnContextMenuRequested;
     }
 
     private void OnNodeDoubleClicked(WorkflowNodeModel nodeModel)
@@ -400,9 +709,14 @@
         _diagram.Links.Added -= OnLinkAdded;
         _diagram.Nodes.Added -= OnNodeAdded;
         foreach (var node in _diagram.Nodes.OfType<WorkflowNodeModel>())
-            node.DoubleClicked -= OnNodeDoubleClicked;
+        {
+            node.DoubleClicked        -= OnNodeDoubleClicked;
+            node.ContextMenuRequested -= OnContextMenuRequested;
+        }
         _toastCts?.Cancel();
         _toastCts?.Dispose();
+        _hintCts?.Cancel();
+        _hintCts?.Dispose();
     }
 
     // ── ICanvasAction command pattern ─────────────────────────────────────────────
@@ -443,4 +757,67 @@
         public void Do()   => _canvas._diagram.Links.Add(_edgeModel);
         public void Undo() => _canvas._diagram.Links.Remove(_edgeModel);
     }
+
+    /// <summary>
+    /// Reversible node deletion command: removes the node and its attached edges on Execute,
+    /// and restores both on Undo. Implements ICanvasAction so it participates in the undo/redo stack.
+    /// </summary>
+    private sealed class UndoDeleteNodeCommand : ICanvasAction
+    {
+        private readonly WorkflowNodeModel    _node;
+        private readonly Point                _position;
+        private readonly WorkflowEdgeModel[]  _attachedEdges;
+        private readonly WorkflowCanvas       _canvas;
+
+        public UndoDeleteNodeCommand(
+            WorkflowNodeModel node,
+            Point position,
+            WorkflowEdgeModel[] attachedEdges,
+            WorkflowCanvas canvas)
+        {
+            _node          = node;
+            _position      = position;
+            _attachedEdges = attachedEdges;
+            _canvas        = canvas;
+        }
+
+        /// <summary>Removes the node and all its edges from the diagram.</summary>
+        public void Execute()
+        {
+            foreach (var edge in _attachedEdges)
+                _canvas._diagram.Links.Remove(edge);
+            _canvas._diagram.Nodes.Remove(_node);
+        }
+
+        // ICanvasAction.Do re-executes for redo support.
+        public void Do() => Execute();
+
+        /// <summary>Restores the node at its original position with all connected edges.</summary>
+        public void Undo()
+        {
+            _node.SetPosition(_position.X, _position.Y);
+            _canvas._diagram.Nodes.Add(_node);
+            foreach (var edge in _attachedEdges)
+                _canvas._diagram.Links.Add(edge);
+
+            // Clear the island badge since the node is back with its connections.
+            _node.IsIsolated = false;
+            _node.Refresh();
+        }
+    }
+
+    // ── Supporting types ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Transient UI state for the right-click context menu.
+    /// Destroyed when the menu is dismissed or an action is taken.
+    /// </summary>
+    private sealed record NodeContextMenuState(
+        bool    IsVisible    = false,
+        double  CanvasX      = 0,
+        double  CanvasY      = 0,
+        string? TargetNodeId = null);
+
+    /// <summary>Return type for the JavaScript getBoundingClientRect helper.</summary>
+    private sealed record BoundingRect(double Left, double Top, double Width, double Height);
 }

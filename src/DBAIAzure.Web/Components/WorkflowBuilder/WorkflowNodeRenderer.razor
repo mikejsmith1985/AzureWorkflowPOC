@@ -4,6 +4,8 @@
 
 <div class="workflow-node @GetBorderClass() @GetBackgroundClass() @GetExecutionRingClass() rounded-lg border-2 shadow-lg min-w-[140px] select-none relative transition-shadow"
      @ondblclick="OnDoubleClick"
+     @oncontextmenu:preventDefault
+     @oncontextmenu="OnContextMenu"
      title="Double-click to configure"
      aria-label="@Node.WorkflowNode.Label — double-click to configure">
 
@@ -17,15 +19,33 @@
         </div>
     }
 
+    @* Island badge — shown after a neighbouring node is deleted and this node becomes unconnected *@
+    @if (Node.IsIsolated)
+    {
+        <div class="absolute -top-2 -left-2 w-5 h-5 bg-amber-600 rounded-full flex items-center justify-center"
+             title="This node is not connected to anything"
+             aria-label="Node is disconnected — connect it to the workflow">
+            <span class="text-white text-xs font-bold leading-none">!</span>
+        </div>
+    }
+
     @* Node type icon + label header *@
     <div class="@GetHeaderClass() rounded-t-md px-3 py-2 flex items-center gap-2">
         <span class="text-lg" role="img" aria-label="@Node.WorkflowNode.NodeType.ToString()">@GetIcon()</span>
-        <span class="text-white text-sm font-semibold truncate max-w-[110px]">@Node.WorkflowNode.Label</span>
+        <div class="flex flex-col min-w-0">
+            <span class="text-white text-sm font-semibold truncate max-w-[110px]">@Node.WorkflowNode.Label</span>
+            @if (Node.WorkflowNode.NodeType == WorkflowNodeType.Trigger)
+            {
+                <span class="text-xs text-emerald-200 mt-0.5">Start here</span>
+            }
+        </div>
     </div>
 
     @* Port chips and goal preview *@
     <div class="px-3 py-2 flex flex-col gap-1">
-        @if (!string.IsNullOrWhiteSpace(Node.WorkflowNode.InputLabel))
+        @* Trigger nodes have no input port — hide the input label row for them *@
+        @if (Node.WorkflowNode.NodeType != WorkflowNodeType.Trigger
+             && !string.IsNullOrWhiteSpace(Node.WorkflowNode.InputLabel))
         {
             <span class="text-xs text-gray-400 truncate">← @Node.WorkflowNode.InputLabel</span>
         }
@@ -67,9 +87,11 @@
     public NodeExecutionState? ExecutionState { get; set; }
 
     private void OnDoubleClick(MouseEventArgs _) => Node.RaiseDoubleClicked();
+    private void OnContextMenu(MouseEventArgs e) => Node.RaiseContextMenuRequested(e.ClientX, e.ClientY);
 
     private string GetBorderClass() => Node.WorkflowNode.NodeType switch
     {
+        WorkflowNodeType.Trigger        => "border-emerald-500",
         WorkflowNodeType.AgenticReason  => "border-amber-500",
         WorkflowNodeType.HumanApproval  => "border-purple-500",
         _                               => "border-cyan-600",
@@ -77,24 +99,25 @@
 
     private string GetBackgroundClass() => Node.WorkflowNode.NodeType switch
     {
-        WorkflowNodeType.AgenticReason  => "bg-gray-900",
-        WorkflowNodeType.HumanApproval  => "bg-gray-900",
+        WorkflowNodeType.Trigger        => "bg-emerald-950",
         _                               => "bg-gray-900",
     };
 
     private string GetHeaderClass() => Node.WorkflowNode.NodeType switch
     {
-        WorkflowNodeType.AgenticReason  => "bg-amber-600",
-        WorkflowNodeType.HumanApproval  => "bg-purple-700",
-        WorkflowNodeType.FunctionRoute  => "bg-cyan-700",
+        WorkflowNodeType.Trigger           => "bg-emerald-700",
+        WorkflowNodeType.AgenticReason     => "bg-amber-600",
+        WorkflowNodeType.HumanApproval     => "bg-purple-700",
+        WorkflowNodeType.FunctionRoute     => "bg-cyan-700",
         WorkflowNodeType.FunctionTransform => "bg-teal-700",
-        WorkflowNodeType.FunctionNotify => "bg-sky-700",
-        WorkflowNodeType.FunctionData   => "bg-indigo-700",
-        _                               => "bg-cyan-700",
+        WorkflowNodeType.FunctionNotify    => "bg-sky-700",
+        WorkflowNodeType.FunctionData      => "bg-indigo-700",
+        _                                  => "bg-cyan-700",
     };
 
     private string GetIcon() => Node.WorkflowNode.NodeType switch
     {
+        WorkflowNodeType.Trigger          => "▶",
         WorkflowNodeType.AgenticReason    => "🧠",
         WorkflowNodeType.HumanApproval    => "👤",
         WorkflowNodeType.FunctionRoute    => "🔀",

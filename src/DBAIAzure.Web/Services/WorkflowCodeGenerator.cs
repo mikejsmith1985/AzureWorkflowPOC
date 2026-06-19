@@ -76,8 +76,9 @@ public sealed class WorkflowCodeGenerator : IWorkflowCodeGenerator
         string? userInstruction)
     {
         var topology = _serializer.Serialize(workflow);
+        var triggerContext = BuildTriggerContext(workflow);
         var history  = new ChatHistory();
-        history.AddSystemMessage(BuildSystemPrompt(topology));
+        history.AddSystemMessage(BuildSystemPrompt(topology, triggerContext));
 
         foreach (var message in domainHistory)
         {
@@ -93,14 +94,55 @@ public sealed class WorkflowCodeGenerator : IWorkflowCodeGenerator
         return history;
     }
 
-    private static string BuildSystemPrompt(string topology) =>
-        $"""
+    /// <summary>
+    /// Extracts the Trigger node's GoalPrompt and initialDataDescription so the code generator
+    /// can emit an entry-point comment that documents the workflow's starting contract.
+    /// Returns null when no Trigger node is present (legacy or untriggered workflows).
+    /// </summary>
+    private static string? BuildTriggerContext(WorkflowDefinition workflow)
+    {
+        var triggerNode = workflow.Nodes.FirstOrDefault(n => n.NodeType == WorkflowNodeType.Trigger);
+        if (triggerNode is null || string.IsNullOrWhiteSpace(triggerNode.GoalPrompt))
+            return null;
+
+        var description = triggerNode.GoalPrompt;
+        if (!string.IsNullOrWhiteSpace(triggerNode.FunctionConfig))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(triggerNode.FunctionConfig);
+                if (doc.RootElement.TryGetProperty("initialDataDescription", out var prop)
+                    && !string.IsNullOrWhiteSpace(prop.GetString()))
+                {
+                    description += $"\n    /// Available data: {prop.GetString()}";
+                }
+            }
+            catch { }
+        }
+
+        return description;
+    }
+
+    private static string BuildSystemPrompt(string topology, string? triggerContext)
+    {
+        // Emit an entry-point XML doc comment that documents the workflow's trigger contract
+        // so code consumers immediately understand what starts the process and what data arrives.
+        var entryPointComment = triggerContext is not null
+            ? $"""
+              At the top of the generated file, before the namespace declaration, emit this XML doc region:
+              /// <summary>Entry point: {triggerContext}</summary>
+
+              """
+            : string.Empty;
+
+        return $"""
         You are an expert Semantic Kernel developer. Generate production-ready C# code
         implementing the workflow described below as a KernelProcess with typed steps and events.
         Follow .NET 8 and Semantic Kernel 1.x conventions. Add XML doc comments to every public type.
-
+        {entryPointComment}
         {topology}
         """;
+    }
 
     private async Task<string> StreamResponseAsync(
         ChatHistory history,

@@ -31,31 +31,33 @@ public sealed record WorkflowNode
     public required string Label { get; init; }
 
     /// <summary>
-    /// Agentic nodes only: the user's plain-language description of what this step
-    /// should accomplish. Sent verbatim to the LLM as the task goal. Null for
-    /// non-agentic node types such as triggers and control-flow gates.
+    /// Agentic and Trigger nodes: the user's plain-language description of what this step
+    /// should accomplish (for AgenticReason nodes) or what event starts this workflow
+    /// (for Trigger nodes). Sent verbatim to the LLM as the task goal. Null for function
+    /// and control-flow node types that carry no goal description.
     /// </summary>
     public string? GoalPrompt { get; init; }
 
     /// <summary>
-    /// Agentic nodes only: human-readable label describing the data this step
-    /// expects to receive from its upstream connection. Surfaced in the canvas tooltip
-    /// and the connector configuration modal to guide the user when wiring edges.
+    /// Human-readable label describing the data this step expects to receive from its
+    /// upstream connection. Surfaced in the canvas tooltip and the connector configuration
+    /// modal to guide the user when wiring edges.
     /// </summary>
     public string? InputLabel { get; init; }
 
     /// <summary>
-    /// Agentic nodes only: human-readable description of what this step produces and
-    /// passes to downstream nodes. Surfaced in the connector configuration modal so
-    /// users understand what they are connecting when they draw an edge from this node.
+    /// Human-readable description of what this step produces and passes to downstream
+    /// nodes. Surfaced in the connector configuration modal so users understand what they
+    /// are connecting when they draw an edge from this node.
     /// </summary>
     public string? OutputLabel { get; init; }
 
     /// <summary>
-    /// Function nodes only: a JSON-serialized blob that holds the per-type configuration
-    /// specific to this node (e.g. HTTP method and URL for an HTTP-call node, or the
-    /// Azure Function name for a function-invocation node). Null for node types that
-    /// carry no additional configuration.
+    /// JSON-serialized blob that holds the per-type configuration specific to this node.
+    /// For Trigger nodes: <c>{"initialDataDescription":""}</c> where <c>initialDataDescription</c>
+    /// maps to the "What information is available at the start?" field.
+    /// For function nodes: HTTP method/URL, Azure Function name, etc.
+    /// Null for node types that carry no additional configuration.
     /// </summary>
     public string? FunctionConfig { get; init; }
 
@@ -82,7 +84,7 @@ public sealed record WorkflowNode
     /// <summary>
     /// Named connection points on the left (incoming) side of the node. Each port
     /// represents one logical data or control-flow channel that upstream nodes can
-    /// attach an edge to.
+    /// attach an edge to. Trigger nodes always have an empty list here.
     /// </summary>
     public required IReadOnlyList<WorkflowPort> InputPorts { get; init; }
 
@@ -95,27 +97,53 @@ public sealed record WorkflowNode
 
     /// <summary>
     /// Creates a new <see cref="WorkflowNode"/> with a freshly generated 8-character
-    /// hex identifier and sensible defaults. Ports are intentionally left empty so that
-    /// the caller — typically a node-type factory — can attach the correct port
-    /// topology for the chosen <paramref name="nodeType"/> before storing the record.
+    /// hex identifier and sensible defaults per node type.
+    /// Trigger nodes are created with their fixed port topology (zero input ports, one
+    /// "Begin" output port) and Trigger-specific field defaults so callers do not need
+    /// to know the convention. All other node types get empty port lists for the caller
+    /// to populate with the correct topology.
     /// </summary>
     /// <param name="nodeType">The category of node being created.</param>
     /// <param name="label">Display name shown on the canvas tile (max 50 chars).</param>
     /// <returns>
-    /// An unconfigured <see cref="WorkflowNode"/> positioned at the canvas origin with
-    /// empty port lists. <see cref="IsConfigured"/> is <c>false</c> until the caller
-    /// populates the required fields and replaces this record via <c>with</c> expression.
+    /// A <see cref="WorkflowNode"/> with a unique ID. For Trigger nodes, ports and domain
+    /// fields are fully initialised; for other types, port lists are empty and callers
+    /// must attach the correct ports before storing the record.
     /// </returns>
-    public static WorkflowNode CreateNew(WorkflowNodeType nodeType, string label) =>
-        new()
+    public static WorkflowNode CreateNew(WorkflowNodeType nodeType, string label)
+    {
+        if (nodeType == WorkflowNodeType.Trigger)
         {
-            Id = Guid.NewGuid().ToString("N")[..8],
-            NodeType = nodeType,
-            Label = label,
+            // Trigger nodes have a fixed topology: zero input ports, one "Begin" output port.
+            // The factory fully initialises them so callers never need to know this convention.
+            var beginPort = new WorkflowPort("begin", "Begin", PortDirection.Output);
+            return new WorkflowNode
+            {
+                Id             = Guid.NewGuid().ToString("N")[..8],
+                NodeType       = nodeType,
+                Label          = label,
+                GoalPrompt     = string.Empty,
+                InputLabel     = "Trigger",
+                OutputLabel    = "Begin",
+                FunctionConfig = "{\"initialDataDescription\":\"\"}",
+                IsConfigured   = false,
+                PositionX      = 0,
+                PositionY      = 0,
+                InputPorts     = Array.Empty<WorkflowPort>(),
+                OutputPorts    = new[] { beginPort }.ToList().AsReadOnly(),
+            };
+        }
+
+        return new WorkflowNode
+        {
+            Id           = Guid.NewGuid().ToString("N")[..8],
+            NodeType     = nodeType,
+            Label        = label,
             IsConfigured = false,
-            PositionX = 0,
-            PositionY = 0,
-            InputPorts = Array.Empty<WorkflowPort>(),
-            OutputPorts = Array.Empty<WorkflowPort>()
+            PositionX    = 0,
+            PositionY    = 0,
+            InputPorts   = Array.Empty<WorkflowPort>(),
+            OutputPorts  = Array.Empty<WorkflowPort>(),
         };
+    }
 }

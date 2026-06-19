@@ -35,7 +35,43 @@
     @* Form fields — 3 visible without scrolling, no raw JSON *@
     <div class="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4">
 
-        @if (Node.NodeType == WorkflowNodeType.AgenticReason)
+        @if (Node.NodeType == WorkflowNodeType.Trigger)
+        {
+            @* Trigger: What starts this workflow? + What information is available at the start? *@
+            <p class="text-xs text-gray-400">
+                Describe the event that kicks off this workflow and what information is available when it fires.
+            </p>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-xs font-medium text-gray-400 flex items-center gap-1">
+                    What starts this workflow?
+                    <span class="text-amber-400" aria-label="required">*</span>
+                </label>
+                <textarea value="@_goalPrompt"
+                          @oninput="OnGoalInput"
+                          rows="3"
+                          placeholder="e.g. A support ticket arrives with a customer complaint…"
+                          class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                                 text-gray-100 placeholder-gray-500 resize-none
+                                 focus:outline-none focus:border-emerald-500"
+                          aria-label="What event starts this workflow?"></textarea>
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-xs font-medium text-gray-400">
+                    What information is available at the start?
+                </label>
+                <textarea value="@_initialDataDescription"
+                          @oninput="@((e) => _initialDataDescription = e.Value?.ToString() ?? string.Empty)"
+                          rows="3"
+                          placeholder="e.g. The ticket text, the customer name, and the priority level…"
+                          class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                                 text-gray-100 placeholder-gray-500 resize-none
+                                 focus:outline-none focus:border-emerald-500"
+                          aria-label="What information is available when this workflow starts?"></textarea>
+            </div>
+        }
+        else if (Node.NodeType == WorkflowNodeType.AgenticReason)
         {
             @* AgenticReason: Goal (required), Input label, Output label *@
             <div class="flex flex-col gap-1">
@@ -169,9 +205,10 @@
 
     // ── Local state ─────────────────────────────────────────────────────────────
 
-    private string _goalPrompt   = string.Empty;
-    private string _inputLabel   = string.Empty;
-    private string _outputLabel  = string.Empty;
+    private string _goalPrompt              = string.Empty;
+    private string _inputLabel              = string.Empty;
+    private string _outputLabel             = string.Empty;
+    private string _initialDataDescription  = string.Empty;
     private bool   _showRequiredBanner;
 
     // ── Lifecycle ────────────────────────────────────────────────────────────────
@@ -183,6 +220,25 @@
         _inputLabel  = Node.InputLabel  ?? string.Empty;
         _outputLabel = Node.OutputLabel ?? string.Empty;
         _showRequiredBanner = false;
+
+        // Populate the Trigger-specific field from the JSON config blob.
+        if (Node.NodeType == WorkflowNodeType.Trigger && !string.IsNullOrWhiteSpace(Node.FunctionConfig))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(Node.FunctionConfig);
+                if (doc.RootElement.TryGetProperty("initialDataDescription", out var prop))
+                    _initialDataDescription = prop.GetString() ?? string.Empty;
+            }
+            catch
+            {
+                _initialDataDescription = string.Empty;
+            }
+        }
+        else if (Node.NodeType != WorkflowNodeType.Trigger)
+        {
+            _initialDataDescription = string.Empty;
+        }
     }
 
     // ── Event handlers ───────────────────────────────────────────────────────────
@@ -196,33 +252,52 @@
     {
         if (Node is null) return;
 
-        // Goal is required for AgenticReason — show amber banner and refuse to close if empty.
-        if (Node.NodeType == WorkflowNodeType.AgenticReason && string.IsNullOrWhiteSpace(_goalPrompt))
+        // Goal is required for AgenticReason and Trigger — show amber banner and refuse to close if empty.
+        if ((Node.NodeType == WorkflowNodeType.AgenticReason || Node.NodeType == WorkflowNodeType.Trigger)
+            && string.IsNullOrWhiteSpace(_goalPrompt))
         {
             _showRequiredBanner = true;
             return;
         }
 
         _showRequiredBanner = false;
-        var isConfigured = Node.NodeType switch
-        {
-            WorkflowNodeType.AgenticReason => !string.IsNullOrWhiteSpace(_goalPrompt),
-            _                              => true,  // function nodes are configured by their presence
-        };
 
-        // Label mirrors Goal for agentic nodes so the canvas chip stays readable.
-        var updatedLabel = Node.NodeType == WorkflowNodeType.AgenticReason && !string.IsNullOrWhiteSpace(_goalPrompt)
-            ? _goalPrompt
-            : Node.Label;
-
-        var updatedNode = Node with
+        WorkflowNode updatedNode;
+        if (Node.NodeType == WorkflowNodeType.Trigger)
         {
-            GoalPrompt   = string.IsNullOrWhiteSpace(_goalPrompt) ? null : _goalPrompt,
-            InputLabel   = string.IsNullOrWhiteSpace(_inputLabel) ? null : _inputLabel,
-            OutputLabel  = string.IsNullOrWhiteSpace(_outputLabel) ? null : _outputLabel,
-            Label        = updatedLabel,
-            IsConfigured = isConfigured,
-        };
+            // Serialize the Trigger-specific fields back into the FunctionConfig JSON blob.
+            var configJson = System.Text.Json.JsonSerializer.Serialize(
+                new { initialDataDescription = _initialDataDescription });
+
+            updatedNode = Node with
+            {
+                GoalPrompt     = string.IsNullOrWhiteSpace(_goalPrompt) ? null : _goalPrompt,
+                FunctionConfig = configJson,
+                IsConfigured   = !string.IsNullOrWhiteSpace(_goalPrompt),
+            };
+        }
+        else
+        {
+            var isConfigured = Node.NodeType switch
+            {
+                WorkflowNodeType.AgenticReason => !string.IsNullOrWhiteSpace(_goalPrompt),
+                _                              => true,  // function nodes are configured by their presence
+            };
+
+            // Label mirrors Goal for agentic nodes so the canvas chip stays readable.
+            var updatedLabel = Node.NodeType == WorkflowNodeType.AgenticReason && !string.IsNullOrWhiteSpace(_goalPrompt)
+                ? _goalPrompt
+                : Node.Label;
+
+            updatedNode = Node with
+            {
+                GoalPrompt   = string.IsNullOrWhiteSpace(_goalPrompt) ? null : _goalPrompt,
+                InputLabel   = string.IsNullOrWhiteSpace(_inputLabel) ? null : _inputLabel,
+                OutputLabel  = string.IsNullOrWhiteSpace(_outputLabel) ? null : _outputLabel,
+                Label        = updatedLabel,
+                IsConfigured = isConfigured,
+            };
+        }
 
         await NodeUpdated.InvokeAsync(updatedNode);
     }
@@ -237,6 +312,7 @@
 
     private string GetNodeTypeName() => Node?.NodeType switch
     {
+        WorkflowNodeType.Trigger          => "Start / Trigger",
         WorkflowNodeType.AgenticReason    => "Reason & Decide",
         WorkflowNodeType.HumanApproval    => "Ask a Person",
         WorkflowNodeType.FunctionRoute    => "Smart Branch",
@@ -248,6 +324,7 @@
 
     private string GetHeaderAccentClass() => Node?.NodeType switch
     {
+        WorkflowNodeType.Trigger          => "bg-emerald-400",
         WorkflowNodeType.AgenticReason    => "bg-amber-400",
         WorkflowNodeType.HumanApproval    => "bg-purple-400",
         _                                 => "bg-cyan-400",

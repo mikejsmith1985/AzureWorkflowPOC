@@ -1,6 +1,7 @@
 // Manages save, load, duplicate, and auto-save for the Visual Workflow Builder.
 // Single service instance shared across the builder page and toolbar.
 
+using DBAIAzure.Core.Exceptions;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
 
@@ -20,6 +21,7 @@ public sealed class WorkflowBuilderService : IDisposable
 
     private readonly IWorkflowRepository _repository;
     private readonly WorkflowThumbnailGenerator _thumbnailGenerator;
+    private readonly IWorkflowValidator _validator;
     private readonly ILogger<WorkflowBuilderService> _logger;
 
     private System.Threading.Timer? _autoSaveTimer;
@@ -32,16 +34,18 @@ public sealed class WorkflowBuilderService : IDisposable
     public event Action<DateTimeOffset>? WorkflowSaved;
 
     /// <summary>
-    /// Initialises the service with the workflow repository, thumbnail generator, and logger.
+    /// Initialises the service with the workflow repository, thumbnail generator, validator, and logger.
     /// </summary>
     public WorkflowBuilderService(
         IWorkflowRepository repository,
         WorkflowThumbnailGenerator thumbnailGenerator,
+        IWorkflowValidator validator,
         ILogger<WorkflowBuilderService> logger)
     {
-        _repository          = repository;
-        _thumbnailGenerator  = thumbnailGenerator;
-        _logger              = logger;
+        _repository         = repository;
+        _thumbnailGenerator = thumbnailGenerator;
+        _validator          = validator;
+        _logger             = logger;
     }
 
     /// <summary>
@@ -55,6 +59,11 @@ public sealed class WorkflowBuilderService : IDisposable
         WorkflowDefinition workflow,
         CancellationToken cancellationToken = default)
     {
+        // Gate: validate structural invariants before touching storage.
+        var validationMessages = _validator.Validate(workflow);
+        if (validationMessages.Count > 0)
+            throw new WorkflowValidationException(validationMessages);
+
         var thumbnail  = _thumbnailGenerator.Generate(workflow);
         var utcNow     = DateTimeOffset.UtcNow;
         var toSave     = workflow with
