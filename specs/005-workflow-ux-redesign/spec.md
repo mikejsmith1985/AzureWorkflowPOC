@@ -440,9 +440,13 @@ shortcut for the tool. If they cannot name one, the shortcuts are undiscoverable
   Typing in the config panel without clicking Done does not set the flag. The state is cleared
   whenever the workflow is successfully saved.
 - **FR-06.2** When the "changed" state is true and the user triggers navigation away from the
-  builder, a confirmation must be presented before navigation proceeds. The confirmation must
-  offer two options: "Stay and save" (cancels navigation and places focus on the Save button)
-  and "Leave without saving" (allows navigation).
+  builder, a confirmation modal must be presented before navigation proceeds. The modal must
+  offer three options:
+  - **"Save & Continue"** — saves the workflow immediately and then allows navigation to proceed.
+  - **"Discard Changes"** — abandons uncommitted edits and allows navigation to proceed.
+  - **"Cancel — keep editing"** — closes the modal and returns the user to the exact canvas
+    state they left, with no navigation. No focus management is required since the user is
+    returning to the builder.
 - **FR-06.3** When the "changed" state is false (workflow is up to date), navigation must
   proceed without any confirmation — the guard must not fire unnecessarily.
 

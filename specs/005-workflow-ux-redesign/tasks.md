@@ -157,7 +157,7 @@ loads → make no changes → navigate → no confirmation.
 
 ### TDD Test (write first — must fail before any implementation task below)
 
-- [X] T039 [US5] Write bUnit test `WorkflowUnsavedChangesModalTests` in `tests/DBAIAzure.Tests/WorkflowUnsavedChangesModalTests.cs` — test: modal renders when `IsOpen = true`; "Stay and save" fires `OnStayRequested`; "Leave without saving" fires `OnLeaveRequested`
+- [X] T039 [US5] Write unit test `WorkflowUnsavedChangesModalTests` in `tests/DBAIAzure.Tests/WorkflowUnsavedChangesModalTests.cs` — tests the `WorkflowUnsavedChangesGuardState` value object: modal opens only when dirty; `AfterSave()` clears flag and closes; `Discard()` clears flag and closes; `Cancel()` keeps dirty flag and closes only the modal; multiple `MarkDirty()` calls are idempotent. **Note**: the actual modal component exposes three callbacks — `OnSave`, `OnDiscard`, `OnCancel` — matching the `WorkflowUnsavedChangesModal.razor` implementation (FR-06.2 updated 2026-06-20 to reflect 3-button design).
 
 ### Implementation for User Story 5
 

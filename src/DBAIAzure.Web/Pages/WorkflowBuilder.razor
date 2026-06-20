@@ -353,6 +353,10 @@
     private void OnChatToggleClicked()
     {
         _isChatOpen = !_isChatOpen;
+        // FR-07.4: clear the orange dot as soon as the panel opens, regardless of
+        // whether the user proceeds to regenerate code.
+        if (_isChatOpen)
+            _hasCanvasChangedSinceCodeGen = false;
         StateHasChanged();
     }
 

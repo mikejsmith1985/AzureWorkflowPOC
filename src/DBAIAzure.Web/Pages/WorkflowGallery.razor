@@ -39,8 +39,15 @@
                    aria-label="Filter workflows by name or step type" />
             @if (!string.IsNullOrWhiteSpace(_searchText) && FilteredWorkflows.Count == 0)
             {
-                <p class="text-xs text-gray-500 mt-2">
-                    No workflows match "<span class="text-gray-300">@_searchText</span>".
+                <p class="text-xs text-gray-500 mt-2 flex items-center gap-2">
+                    <span>No workflows match "<span class="text-gray-300">@_searchText</span>".</span>
+                    @* FR-09.3: explicit Clear search button so the action is keyboard-accessible
+                       and visible regardless of browser support for the native type="search" clear control. *@
+                    <button @onclick="@(() => _searchText = string.Empty)"
+                            class="text-cyan-500 hover:text-cyan-300 underline text-xs transition-colors"
+                            aria-label="Clear search and show all workflows">
+                        Clear search
+                    </button>
                 </p>
             }
         </div>

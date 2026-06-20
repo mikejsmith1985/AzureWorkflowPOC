@@ -372,7 +372,7 @@
     /// Triggered by the "Update code" button in the workflow-changed banner.
     /// Regenerates code and computes a compact diff vs the previously generated code (T052).
     /// </summary>
-    private async Task RegenerateWithDiffAsync()
+    private async Task RegenerateWithDiffAsync(CancellationToken cancellationToken = default)
     {
         if (Workflow is null || _isGenerating || !_isLlmAvailable) return;
 
@@ -391,7 +391,8 @@
             var newCode = await CodeGenerator.GenerateAsync(
                 Workflow,
                 chatHistory,
-                token => { _streamingBuffer.Append(token); InvokeAsync(StateHasChanged); });
+                token => { _streamingBuffer.Append(token); InvokeAsync(StateHasChanged); },
+                cancellationToken);
 
             _messages.Add(new WorkflowChatMessage(ChatRole.Assistant, newCode, true, DateTimeOffset.UtcNow));
 
