@@ -25,10 +25,22 @@
     </div>
 
     @* Card body *@
-    <div class="flex flex-col flex-1 px-4 py-3 gap-1">
+    <div class="flex flex-col flex-1 px-4 py-3 gap-2">
         <div class="font-semibold text-gray-100 text-sm truncate">@Workflow.Name</div>
-        <div class="text-xs text-gray-500 flex items-center gap-3">
-            <span>@Workflow.Nodes.Count step(s)</span>
+
+        @* Node-type summary chips — plain-language labels for each distinct type (T061) *@
+        @if (Workflow.Nodes.Count > 0)
+        {
+            <div class="flex flex-wrap gap-1">
+                @foreach (var (label, colorClass) in GetNodeTypeSummary())
+                {
+                    <span class="text-xs px-2 py-0.5 rounded-full font-medium @colorClass">@label</span>
+                }
+            </div>
+        }
+
+        <div class="text-xs text-gray-500 flex items-center gap-3 mt-auto">
+            <span>@Workflow.Nodes.Count step@(Workflow.Nodes.Count == 1 ? "" : "s")</span>
             <span>@FormatLastModified(Workflow.LastModifiedAt)</span>
         </div>
     </div>
@@ -101,6 +113,29 @@
     {
         _showDeleteConfirm = false;
         await OnDeleteConfirmed.InvokeAsync(Workflow.Id);
+    }
+
+    /// <summary>
+    /// Returns up to 3 distinct node-type labels with their Tailwind colour classes for
+    /// the node-type summary chips shown on the card (T061).
+    /// </summary>
+    private IEnumerable<(string Label, string ColorClass)> GetNodeTypeSummary()
+    {
+        return Workflow.Nodes
+            .Select(n => n.NodeType)
+            .Distinct()
+            .Take(3)
+            .Select(nodeType => nodeType switch
+            {
+                WorkflowNodeType.Trigger          => ("▶ Trigger",  "bg-emerald-900/60 text-emerald-300"),
+                WorkflowNodeType.AgenticReason    => ("🧠 AI Step",  "bg-amber-900/60 text-amber-300"),
+                WorkflowNodeType.HumanApproval    => ("👤 Human",    "bg-purple-900/60 text-purple-300"),
+                WorkflowNodeType.FunctionRoute    => ("🔀 Branch",   "bg-cyan-900/60 text-cyan-300"),
+                WorkflowNodeType.FunctionTransform=> ("⚙️ Transform","bg-teal-900/60 text-teal-300"),
+                WorkflowNodeType.FunctionNotify   => ("🔔 Notify",   "bg-sky-900/60 text-sky-300"),
+                WorkflowNodeType.FunctionData     => ("💾 Data",     "bg-indigo-900/60 text-indigo-300"),
+                _                                 => ("📦 Step",     "bg-gray-700/60 text-gray-300"),
+            });
     }
 
     private static string FormatLastModified(DateTimeOffset lastModified)

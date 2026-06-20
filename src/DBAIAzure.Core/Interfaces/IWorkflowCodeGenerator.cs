@@ -41,11 +41,11 @@ public interface IWorkflowCodeGenerator
     /// <param name="onToken">Callback invoked once per streamed token; must be thread-safe.</param>
     /// <param name="cancellationToken">Token used to cancel the streaming request mid-flight.</param>
     /// <returns>
-    /// A tuple of the updated source code and a <see cref="CodeDiff"/> that describes every
-    /// addition, removal, and unchanged hunk so the UI can render a diff view.
+    /// A tuple of the updated source code and a <see cref="DiffResult"/> that describes every
+    /// addition, removal, and unchanged context line so the UI can render a diff view.
     /// </returns>
     /// <exception cref="LlmUnavailableException">Thrown when the language model endpoint is unreachable or returns a non-retriable error.</exception>
-    Task<(string UpdatedCode, CodeDiff Diff)> RefineAsync(
+    Task<(string UpdatedCode, DiffResult Diff)> RefineAsync(
         string previousCode,
         string instruction,
         WorkflowDefinition workflow,

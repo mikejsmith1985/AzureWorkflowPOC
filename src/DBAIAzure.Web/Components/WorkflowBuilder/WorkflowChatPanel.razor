@@ -45,12 +45,23 @@
     @* Workflow-changed banner *@
     @if (_showWorkflowChangedBanner)
     {
-        <div class="mx-3 mt-3 bg-sky-900/40 border border-sky-700/50 rounded-lg p-3 text-sm text-sky-300 shrink-0 flex items-start justify-between gap-2"
+        <div class="mx-3 mt-3 bg-sky-900/40 border border-sky-700/50 rounded-lg p-3 text-sm text-sky-300 shrink-0 flex flex-col gap-2"
              role="alert">
             <span>Your workflow has changed — regenerate code to apply the latest layout.</span>
-            <button @onclick="DismissWorkflowChangedBanner"
-                    class="text-sky-500 hover:text-sky-300 text-xs ml-1 shrink-0"
-                    aria-label="Dismiss workflow changed notice">Dismiss</button>
+            <div class="flex items-center gap-2">
+                @* "Update code" regenerates with a compact diff view (T051/T052) *@
+                <button @onclick="RegenerateWithDiffAsync"
+                        disabled="@(!_isLlmAvailable || _isGenerating)"
+                        class="text-xs bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded-md transition-colors disabled:opacity-40"
+                        aria-label="Regenerate code and show what changed">
+                    Update code
+                </button>
+                <button @onclick="DismissWorkflowChangedBanner"
+                        class="text-sky-500 hover:text-sky-300 text-xs transition-colors"
+                        aria-label="Dismiss workflow changed notice">
+                    Dismiss
+                </button>
+            </div>
         </div>
     }
 
@@ -88,15 +99,33 @@
                                     aria-label="Save generated code to workflow">Save</button>
                         </div>
                     </div>
-                    @* Render either diff-highlighted or plain code *@
-                    @if (_pendingDiff is not null && message == _messages.LastOrDefault(m => m.IsCodeBlock))
+                    @* Render either diff-highlighted or plain code (T053/T055) *@
+                    @if (_pendingDiff is not null && !_showFullCodeForDiff
+                         && message == _messages.LastOrDefault(m => m.IsCodeBlock))
                     {
                         <div class="overflow-x-auto max-h-96 text-xs font-mono p-3 leading-5">
                             @foreach (var diffLine in _pendingDiff.Lines)
                             {
-                                <div class="@GetDiffLineClass(diffLine.Kind) px-1 rounded-sm">@diffLine.Content</div>
+                                <div class="@GetDiffLineClass(diffLine.Type) px-1 rounded-sm">
+                                    <span class="select-none text-gray-500 mr-1">@GetDiffPrefix(diffLine.Type)</span>@diffLine.Content
+                                </div>
                             }
                         </div>
+                        <button @onclick="() => _showFullCodeForDiff = true"
+                                class="text-xs text-gray-500 hover:text-gray-300 px-3 py-1.5 transition-colors text-left"
+                                aria-label="Show full generated code instead of diff">
+                            Show full code ↓
+                        </button>
+                    }
+                    else if (_pendingDiff is not null && _showFullCodeForDiff
+                             && message == _messages.LastOrDefault(m => m.IsCodeBlock))
+                    {
+                        <pre class="overflow-x-auto max-h-96 p-3 text-xs font-mono text-gray-100 leading-5"><code>@message.Content</code></pre>
+                        <button @onclick="() => _showFullCodeForDiff = false"
+                                class="text-xs text-gray-500 hover:text-gray-300 px-3 py-1.5 transition-colors text-left"
+                                aria-label="Show compact diff view">
+                            Show diff ↑
+                        </button>
                     }
                     else
                     {
@@ -179,6 +208,9 @@
     /// <summary>Raised when the user clicks the close (✕) button.</summary>
     [Parameter] public EventCallback OnCloseRequested { get; set; }
 
+    /// <summary>Injected code diff service — used to compute a compact diff for regeneration (T052).</summary>
+    [Parameter] public IWorkflowCodeDiffService? DiffService { get; set; }
+
     // ── Local state ─────────────────────────────────────────────────────────────
 
     private readonly List<WorkflowChatMessage> _messages = new();
@@ -187,7 +219,9 @@
     private bool _isGenerating;
     private bool _isLlmAvailable = true;
     private bool _showWorkflowChangedBanner;
-    private CodeDiff? _pendingDiff;
+    private DiffResult? _pendingDiff;
+    private string? _previousGeneratedCode;
+    private bool _showFullCodeForDiff;
     private ElementReference _textareaRef;
 
     // ── Lifecycle ────────────────────────────────────────────────────────────────
@@ -334,16 +368,73 @@
 
     private void DismissWorkflowChangedBanner() => _showWorkflowChangedBanner = false;
 
+    /// <summary>
+    /// Triggered by the "Update code" button in the workflow-changed banner.
+    /// Regenerates code and computes a compact diff vs the previously generated code (T052).
+    /// </summary>
+    private async Task RegenerateWithDiffAsync()
+    {
+        if (Workflow is null || _isGenerating || !_isLlmAvailable) return;
+
+        // Snapshot the current code before overwriting it (T050).
+        _previousGeneratedCode = _messages.LastOrDefault(m => m.IsCodeBlock)?.Content;
+
+        _isGenerating = true;
+        _streamingBuffer.Clear();
+        _showWorkflowChangedBanner = false;
+        _showFullCodeForDiff = false;
+        StateHasChanged();
+
+        try
+        {
+            var chatHistory = _messages.Select(m => m).ToList().AsReadOnly();
+            var newCode = await CodeGenerator.GenerateAsync(
+                Workflow,
+                chatHistory,
+                token => { _streamingBuffer.Append(token); InvokeAsync(StateHasChanged); });
+
+            _messages.Add(new WorkflowChatMessage(ChatRole.Assistant, newCode, true, DateTimeOffset.UtcNow));
+
+            // Compute the diff when the service is available (T052).
+            if (DiffService is not null && !string.IsNullOrWhiteSpace(_previousGeneratedCode))
+            {
+                var diff = DiffService.ComputeDiff(_previousGeneratedCode, newCode);
+                _pendingDiff = diff.HasChanges ? diff : null;
+            }
+        }
+        catch (LlmUnavailableException)
+        {
+            _messages.Add(new WorkflowChatMessage(
+                ChatRole.Assistant,
+                "The assistant couldn't be reached. Please try again in a moment.",
+                false,
+                DateTimeOffset.UtcNow));
+        }
+        finally
+        {
+            _streamingBuffer.Clear();
+            _isGenerating = false;
+            StateHasChanged();
+        }
+    }
+
     private string GetGenerateButtonClass() =>
         _isLlmAvailable && !_isGenerating
             ? "bg-cyan-700 hover:bg-cyan-600 text-white"
             : "bg-gray-700 text-gray-500 cursor-not-allowed";
 
-    private static string GetDiffLineClass(DiffLineKind kind) => kind switch
+    private static string GetDiffLineClass(DiffLineType type) => type switch
     {
-        DiffLineKind.Added   => "bg-green-950/80 text-green-300",
-        DiffLineKind.Removed => "bg-red-950/80 text-red-300 line-through",
-        _                    => "text-gray-300",
+        DiffLineType.Added   => "diff-add bg-green-950/80 text-green-300",
+        DiffLineType.Removed => "diff-remove bg-red-950/80 text-red-300 line-through",
+        _                    => "diff-context text-gray-300",
+    };
+
+    private static string GetDiffPrefix(DiffLineType type) => type switch
+    {
+        DiffLineType.Added   => "+",
+        DiffLineType.Removed => "-",
+        _                    => " ",
     };
 
     /// <summary>
@@ -354,6 +445,16 @@
     {
         if (_messages.Any(m => m.IsCodeBlock))
             _showWorkflowChangedBanner = true;
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Pre-populates the chat input with a suggested message so the user can
+    /// immediately send feedback about a run step (T058).
+    /// </summary>
+    public void PrePopulateInput(string suggestion)
+    {
+        _inputText = suggestion;
         StateHasChanged();
     }
 

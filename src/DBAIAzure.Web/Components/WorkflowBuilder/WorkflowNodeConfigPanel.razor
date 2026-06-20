@@ -47,7 +47,8 @@
                     What starts this workflow?
                     <span class="text-amber-400" aria-label="required">*</span>
                 </label>
-                <textarea value="@_goalPrompt"
+                <textarea @ref="_firstFieldRef"
+                          value="@_goalPrompt"
                           @oninput="OnGoalInput"
                           rows="3"
                           placeholder="e.g. A support ticket arrives with a customer complaint…"
@@ -79,7 +80,8 @@
                     Goal
                     <span class="text-amber-400" aria-label="required">*</span>
                 </label>
-                <textarea value="@_goalPrompt"
+                <textarea @ref="_firstFieldRef"
+                          value="@_goalPrompt"
                           @oninput="OnGoalInput"
                           rows="3"
                           placeholder="Describe what this step should do in plain language…"
@@ -175,12 +177,12 @@
         }
     </div>
 
-    @* Save button *@
+    @* Done button (T027) *@
     <div class="shrink-0 border-t border-gray-800 px-4 py-3">
         <button @onclick="OnSaveAsync"
                 class="w-full bg-cyan-700 hover:bg-cyan-600 text-white rounded-lg py-2 text-sm font-medium transition-colors"
-                aria-label="Save node configuration">
-            Save
+                aria-label="Confirm node configuration and close panel">
+            Done
         </button>
     </div>
 </aside>
@@ -203,6 +205,18 @@
     /// <summary>Raised when the user closes the panel without saving.</summary>
     [Parameter] public EventCallback OnCloseRequested { get; set; }
 
+    /// <summary>
+    /// Raised immediately after NodeUpdated when the user clicks Done; used by the parent page
+    /// to set the unsaved-changes dirty flag (T028).
+    /// </summary>
+    [Parameter] public EventCallback OnConfigCommitted { get; set; }
+
+    /// <summary>
+    /// Raised on every keystroke in the Goal field with a 200 ms debounce so the canvas can
+    /// live-preview the node label without closing the panel (T026).
+    /// </summary>
+    [Parameter] public EventCallback<string> OnGoalPreview { get; set; }
+
     // ── Local state ─────────────────────────────────────────────────────────────
 
     private string _goalPrompt              = string.Empty;
@@ -211,10 +225,18 @@
     private string _initialDataDescription  = string.Empty;
     private bool   _showRequiredBanner;
 
+    // Reference to the first visible input/textarea for focus-on-open (T025).
+    private ElementReference _firstFieldRef;
+    private System.Threading.CancellationTokenSource? _goalPreviewDebounce;
+    private bool _isFirstRenderComplete;
+
     // ── Lifecycle ────────────────────────────────────────────────────────────────
 
     protected override void OnParametersSet()
     {
+        // Reset focus flag when the panel opens for a new node (T025).
+        _isFirstRenderComplete = false;
+
         if (Node is null) return;
         _goalPrompt  = Node.GoalPrompt  ?? string.Empty;
         _inputLabel  = Node.InputLabel  ?? string.Empty;
@@ -241,11 +263,41 @@
         }
     }
 
+    // ── Lifecycle: focus on open (T025) ─────────────────────────────────────────
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_isFirstRenderComplete || !IsOpen || Node is null)
+            return;
+
+        _isFirstRenderComplete = true;
+        try
+        {
+            await _firstFieldRef.FocusAsync();
+        }
+        catch
+        {
+            // JS not yet ready (pre-render); focus silently skipped.
+        }
+    }
+
     // ── Event handlers ───────────────────────────────────────────────────────────
 
     private void OnGoalInput(ChangeEventArgs changeArgs)
     {
         _goalPrompt = changeArgs.Value?.ToString() ?? string.Empty;
+        // 200 ms debounce for live label preview (T026).
+        _goalPreviewDebounce?.Cancel();
+        _goalPreviewDebounce = new System.Threading.CancellationTokenSource();
+        var token = _goalPreviewDebounce.Token;
+        var preview = _goalPrompt;
+        _ = Task.Delay(200, token).ContinueWith(_ =>
+        {
+            if (!token.IsCancellationRequested)
+                InvokeAsync(() => OnGoalPreview.InvokeAsync(preview));
+        }, System.Threading.CancellationToken.None,
+           TaskContinuationOptions.OnlyOnRanToCompletion,
+           TaskScheduler.Default);
     }
 
     private async Task OnSaveAsync()
@@ -300,6 +352,7 @@
         }
 
         await NodeUpdated.InvokeAsync(updatedNode);
+        await OnConfigCommitted.InvokeAsync();
     }
 
     private async Task OnCloseAsync()

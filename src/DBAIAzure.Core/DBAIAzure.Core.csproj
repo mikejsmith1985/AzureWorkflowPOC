@@ -4,4 +4,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- DiffPlex: MIT-licensed line-level diff engine used by WorkflowCodeDiffService -->
+    <PackageReference Include="DiffPlex" Version="1.7.2" />
+  </ItemGroup>
 </Project>

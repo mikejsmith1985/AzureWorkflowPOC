@@ -2,6 +2,7 @@ using System.Text.Json;
 using DBAIAzure.Connectors;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Services;
 using DBAIAzure.Core.Validation;
 using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Storage;
@@ -207,7 +208,8 @@ builder.Services.AddSingleton<WorkflowTopologySerializer>();
 builder.Services.AddSingleton<ILlmAvailabilityMonitor, LlmAvailabilityMonitor>();
 builder.Services.AddSingleton<IWorkflowCodeGenerator, WorkflowCodeGenerator>();
 builder.Services.AddSingleton<WorkflowDesignSkillService>();
-builder.Services.AddSingleton<WorkflowThumbnailGenerator>();
+builder.Services.AddSingleton<IWorkflowThumbnailGenerator, WorkflowThumbnailGenerator>();
+builder.Services.AddSingleton<IWorkflowCodeDiffService, WorkflowCodeDiffService>();
 // WorkflowBuilderService is scoped (one instance per session / per page).
 builder.Services.AddScoped<WorkflowBuilderService>();
 

@@ -1,10 +1,13 @@
 @* Personal workflow gallery — a grid of saved WorkflowDefinition cards.
    Owner-scoped: only shows workflows belonging to the current session user.
+   Features: live search (T059), SVG thumbnails (T062), and node-type summary chips on each card.
    Routes: /workflow-gallery *@
 @page "/workflow-gallery"
 @inject IWorkflowRepository WorkflowRepository
 @inject NavigationManager Nav
 @inject WorkflowBuilderService BuilderService
+@inject IWorkflowThumbnailGenerator ThumbnailGenerator
+@using DBAIAzure.Core.Interfaces
 
 <PageTitle>Workflow Gallery — DBAIAzure</PageTitle>
 
@@ -22,6 +25,26 @@
             New Workflow
         </a>
     </div>
+
+    @* Search box — filters cards live as the user types (T059) *@
+    @if (!_isLoading && _workflows.Count > 0)
+    {
+        <div class="mb-5">
+            <input type="search"
+                   value="@_searchText"
+                   @oninput="OnSearchInput"
+                   placeholder="Search workflows by name or step type…"
+                   class="w-full max-w-sm bg-gray-800 border border-gray-700 rounded-lg px-3 py-2
+                          text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+                   aria-label="Filter workflows by name or step type" />
+            @if (!string.IsNullOrWhiteSpace(_searchText) && FilteredWorkflows.Count == 0)
+            {
+                <p class="text-xs text-gray-500 mt-2">
+                    No workflows match "<span class="text-gray-300">@_searchText</span>".
+                </p>
+            }
+        </div>
+    }
 
     @* Loading state *@
     @if (_isLoading)
@@ -46,9 +69,9 @@
     }
     else
     {
-        @* Workflow grid *@
+        @* Workflow grid — filters applied to the list (T060) *@
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            @foreach (var workflow in _workflows)
+            @foreach (var workflow in FilteredWorkflows)
             {
                 <WorkflowGalleryCard Workflow="@workflow"
                                      OnOpenRequested="@((id) => OpenWorkflow(id))"
@@ -72,8 +95,9 @@
     private List<WorkflowDefinition> _workflows = new();
     private bool _isLoading = true;
     private string? _errorMessage;
+    private string _searchText = string.Empty;
 
-    // Stub owner ID — wired to real auth in Phase 9 (T068).
+    // Stub owner ID — wired to real auth in a future auth phase.
     private const string DemoOwnerId = "demo";
 
     protected override async Task OnInitializedAsync()
@@ -81,14 +105,45 @@
         await LoadWorkflowsAsync();
     }
 
+    // ── Search / filter (T060) ────────────────────────────────────────────────────
+
+    private List<WorkflowDefinition> FilteredWorkflows
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_searchText))
+                return _workflows;
+
+            var query = _searchText.Trim().ToLowerInvariant();
+            return _workflows.Where(w =>
+                (w.Name ?? string.Empty).ToLowerInvariant().Contains(query)
+                || w.Nodes.Any(n => n.Label.ToLowerInvariant().Contains(query)
+                                  || n.NodeType.ToString().ToLowerInvariant().Contains(query))
+            ).ToList();
+        }
+    }
+
+    private void OnSearchInput(ChangeEventArgs changeArgs)
+    {
+        _searchText = changeArgs.Value?.ToString() ?? string.Empty;
+    }
+
+    // ── Data loading ─────────────────────────────────────────────────────────────
+
     private async Task LoadWorkflowsAsync()
     {
-        _isLoading = true;
+        _isLoading    = true;
         _errorMessage = null;
         try
         {
             var loaded = await WorkflowRepository.ListByOwnerAsync(DemoOwnerId);
-            _workflows = loaded.OrderByDescending(w => w.LastModifiedAt).ToList();
+            // Generate SVG thumbnails for any workflow that doesn't have one yet (T062).
+            _workflows = loaded
+                .OrderByDescending(w => w.LastModifiedAt)
+                .Select(w => string.IsNullOrWhiteSpace(w.ThumbnailSvg)
+                    ? w with { ThumbnailSvg = ThumbnailGenerator.GenerateSvg(w) }
+                    : w)
+                .ToList();
         }
         catch (Exception ex)
         {
