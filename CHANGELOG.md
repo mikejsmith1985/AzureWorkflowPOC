@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Playwright E2E Test Suite
+
+- New project `tests/DBAIAzure.E2ETests` with 16 Playwright tests covering every navigation
+  tab (Threads, Graph, New Ticket, Workflow Builder, Workflow Gallery), the canvas, node
+  palette, toolbar, chat toggle, connector gear icon, and unsaved-changes guard.
+- `WebAppFixture` starts the real Blazor Server app on port 5099 via a child process so
+  Playwright connects through genuine HTTP/SignalR — no TestServer shortcuts.
+- `PlaywrightFixture` manages a shared headless Chromium browser; each test gets an isolated
+  `IBrowserContext`.
+- `scripts/run-e2e.ps1` — one-command build + browser install + test run.
+- Constitution Article V updated: Playwright replaces Cypress as the mandatory E2E framework.
+
 ### Added — Workflow Builder UX Master Review (`specs/005-workflow-ux-redesign`)
 
 All 10 UX improvements shipped on `feature/visual-workflow-builder`:
