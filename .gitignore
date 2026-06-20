@@ -31,6 +31,9 @@ coverage/
 # Machine-specific SDK resolution (hardcoded user-local dotnet path)
 global.json
 
+# Local release output — zip archives and unpacked publish directories
+publish/
+
 # Local tooling — not part of the project
 .forge/
 .github/
