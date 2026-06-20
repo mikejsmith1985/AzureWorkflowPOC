@@ -35,6 +35,54 @@
         </div>
     }
 
+    @* Welcome overlay — full illustration shown before any node has ever been placed *@
+    @if (!_hasEverHadNode && _diagram.Nodes.Count == 0)
+    {
+        <div class="absolute inset-0 flex flex-col items-center justify-center gap-6 pointer-events-none z-10
+                    text-gray-500 select-none"
+             aria-label="Empty canvas welcome">
+            @* Simple SVG illustration of nodes being connected *@
+            <svg width="200" height="80" viewBox="0 0 200 80" aria-hidden="true">
+                <rect x="8"   y="28" width="52" height="24" rx="6" fill="#10b981" opacity="0.8" />
+                <rect x="74"  y="28" width="52" height="24" rx="6" fill="#a855f7" opacity="0.8" />
+                <rect x="140" y="28" width="52" height="24" rx="6" fill="#06b6d4" opacity="0.8" />
+                <line x1="60" y1="40" x2="74" y2="40" stroke="#4b5563" stroke-width="2" marker-end="url(#arr)" />
+                <line x1="126" y1="40" x2="140" y2="40" stroke="#4b5563" stroke-width="2" marker-end="url(#arr)" />
+                <defs>
+                    <marker id="arr" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto">
+                        <path d="M0,0 L6,3 L0,6 Z" fill="#4b5563" />
+                    </marker>
+                </defs>
+            </svg>
+            <div class="flex flex-col items-center gap-2">
+                <p class="text-base font-medium text-gray-400">Build your first workflow</p>
+                <p class="text-sm text-gray-500">Drag a step from the palette on the left, or click one to place it.</p>
+                <p class="text-xs text-gray-600 mt-1">Start with a <span class="text-emerald-500 font-medium">Trigger</span> to define how your workflow begins.</p>
+            </div>
+        </div>
+    }
+
+    @* Minimal empty-canvas label — shown once user has placed then removed all nodes *@
+    @if (_hasEverHadNode && _diagram.Nodes.Count == 0)
+    {
+        <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-10 select-none"
+             aria-label="Canvas is empty">
+            <p class="text-sm text-gray-600">Canvas is empty — drag a step here to continue.</p>
+        </div>
+    }
+
+    @* Single-click tooltip — "Double-click to configure this step" (T024) *@
+    @if (_singleClickTooltipNodeId is not null && _singleClickTooltipPosition is not null)
+    {
+        var tooltipPos = _singleClickTooltipPosition;
+        <div class="absolute z-30 pointer-events-none"
+             style="left: @(tooltipPos.X + 20)px; top: @(tooltipPos.Y - 44)px">
+            <div class="bg-gray-700 text-xs text-gray-200 px-3 py-1.5 rounded-lg shadow-lg border border-gray-600 whitespace-nowrap">
+                Double-click to configure this step
+            </div>
+        </div>
+    }
+
     @* Right-click context menu for node deletion *@
     @if (_contextMenu.IsVisible)
     {
@@ -85,6 +133,12 @@
     /// </summary>
     [Parameter] public EventCallback<bool> OnTriggerPresenceChanged { get; set; }
 
+    /// <summary>
+    /// Raised when the user single-clicks a node, carrying the node's domain Id.
+    /// Used by the parent page to show the "double-click to configure" single-click tooltip.
+    /// </summary>
+    [Parameter] public EventCallback<string> OnNodeSingleClicked { get; set; }
+
     // ── Diagram state ────────────────────────────────────────────────────────────
 
     private BlazorDiagram _diagram = null!;
@@ -99,6 +153,19 @@
     // Context menu transient state.
     private NodeContextMenuState _contextMenu = new();
     private WorkflowNodeModel? _contextMenuTarget;
+
+    // True once the user has placed at least one node; never resets so the two empty-canvas
+    // states (welcome illustration vs. minimal label) can be differentiated (T018/T019).
+    private bool _hasEverHadNode;
+
+    /// <summary>True when the canvas has no nodes; consumed by WorkflowNodePalette for the pulse glow (T020).</summary>
+    public bool IsCanvasEmpty => _diagram.Nodes.Count == 0;
+
+    // Single-click tooltip state (T024) — shown for 2 seconds; suppressed for 60 s per node.
+    private string? _singleClickTooltipNodeId;
+    private Point? _singleClickTooltipPosition;
+    private System.Threading.CancellationTokenSource? _tooltipCts;
+    private readonly HashSet<string> _tooltipCooldownNodeIds = new();
 
     // ── Undo / redo stack (no built-in in ZBD 3.0.x — custom implementation) ───
 
@@ -123,9 +190,10 @@
         // Register the custom node renderer component.
         _diagram.RegisterComponent<WorkflowNodeModel, WorkflowNodeRenderer>();
 
-        // Wire up port-direction validation, double-click, and context menu.
-        _diagram.Links.Added   += OnLinkAdded;
-        _diagram.Nodes.Added   += OnNodeAdded;
+        // Wire up port-direction validation, double-click, context menu, and selection.
+        _diagram.Links.Added        += OnLinkAdded;
+        _diagram.Nodes.Added        += OnNodeAdded;
+        _diagram.SelectionChanged   += OnSelectionChanged;
 
         // Replace the built-in Delete/Backspace handler with our custom one that supports undo.
         var kbShortcuts = _diagram.GetBehavior<KeyboardShortcutsBehavior>()!;
@@ -679,11 +747,81 @@
 
         nodeModel.DoubleClicked       += OnNodeDoubleClicked;
         nodeModel.ContextMenuRequested += OnContextMenuRequested;
+
+        // Mark that the canvas has had at least one node — collapses the full welcome overlay
+        // to the minimal "canvas is empty" label on subsequent removal (T018).
+        _hasEverHadNode = true;
     }
 
     private void OnNodeDoubleClicked(WorkflowNodeModel nodeModel)
     {
         _ = NodeDoubleClicked.InvokeAsync(nodeModel.WorkflowNode);
+    }
+
+    /// <summary>
+    /// Fires when the user single-clicks a node (selection changes to exactly one WorkflowNodeModel).
+    /// Shows the "double-click to configure" tooltip for 2 seconds, suppressed per-node for 60 s.
+    /// Also raises <see cref="OnNodeSingleClicked"/> so the parent page can react.
+    /// </summary>
+    private void OnSelectionChanged(Blazor.Diagrams.Core.Models.Base.SelectableModel model)
+    {
+        var selectedNodes = _diagram.Nodes
+            .OfType<WorkflowNodeModel>()
+            .Where(nm => nm.Selected)
+            .ToList();
+
+        if (selectedNodes.Count == 1)
+        {
+            var nodeModel = selectedNodes[0];
+            _ = OnNodeSingleClicked.InvokeAsync(nodeModel.Id);
+            ShowSingleClickTooltip(nodeModel);
+        }
+        else
+        {
+            HideSingleClickTooltip();
+            if (selectedNodes.Count == 0)
+                _ = OnNodeSingleClicked.InvokeAsync(string.Empty);
+        }
+    }
+
+    private void ShowSingleClickTooltip(WorkflowNodeModel nodeModel)
+    {
+        // Suppress tooltip if this node was shown recently (60-second cooldown).
+        if (_tooltipCooldownNodeIds.Contains(nodeModel.Id))
+            return;
+
+        _tooltipCts?.Cancel();
+        _singleClickTooltipNodeId      = nodeModel.Id;
+        _singleClickTooltipPosition    = nodeModel.Position;
+        StateHasChanged();
+
+        _tooltipCts = new System.Threading.CancellationTokenSource();
+        var token = _tooltipCts.Token;
+
+        // Auto-hide after 2 seconds; add to cooldown so it won't show again for 60 seconds.
+        _ = Task.Delay(2000, token).ContinueWith(_ =>
+        {
+            if (token.IsCancellationRequested)
+                return;
+            _tooltipCooldownNodeIds.Add(nodeModel.Id);
+            InvokeAsync(HideSingleClickTooltip);
+
+            // Remove from cooldown after 60 seconds.
+            _ = Task.Delay(60_000).ContinueWith(__ =>
+                _tooltipCooldownNodeIds.Remove(nodeModel.Id),
+                System.Threading.CancellationToken.None,
+                TaskContinuationOptions.OnlyOnRanToCompletion,
+                TaskScheduler.Default);
+        }, System.Threading.CancellationToken.None,
+           TaskContinuationOptions.OnlyOnRanToCompletion,
+           TaskScheduler.Default);
+    }
+
+    private void HideSingleClickTooltip()
+    {
+        _singleClickTooltipNodeId   = null;
+        _singleClickTooltipPosition = null;
+        StateHasChanged();
     }
 
     /// <summary>
@@ -706,8 +844,9 @@
 
     public void Dispose()
     {
-        _diagram.Links.Added -= OnLinkAdded;
-        _diagram.Nodes.Added -= OnNodeAdded;
+        _diagram.Links.Added      -= OnLinkAdded;
+        _diagram.Nodes.Added      -= OnNodeAdded;
+        _diagram.SelectionChanged -= OnSelectionChanged;
         foreach (var node in _diagram.Nodes.OfType<WorkflowNodeModel>())
         {
             node.DoubleClicked        -= OnNodeDoubleClicked;
@@ -717,6 +856,8 @@
         _toastCts?.Dispose();
         _hintCts?.Cancel();
         _hintCts?.Dispose();
+        _tooltipCts?.Cancel();
+        _tooltipCts?.Dispose();
     }
 
     // ── ICanvasAction command pattern ─────────────────────────────────────────────

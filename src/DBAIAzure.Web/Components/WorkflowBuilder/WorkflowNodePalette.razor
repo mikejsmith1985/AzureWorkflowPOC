@@ -19,8 +19,9 @@
     {
         <div class="palette-category">
             <button @onclick="() => ToggleCategory(category.Name)"
-                    class="w-full px-3 py-2 text-left text-xs font-semibold text-gray-400 uppercase
-                           tracking-wider flex items-center justify-between hover:bg-gray-800 transition-colors"
+                    class="w-full px-3 py-2 text-left text-xs font-semibold uppercase
+                           tracking-wider flex items-center justify-between hover:bg-gray-800 transition-colors
+                           @(IsCanvasEmpty && category.Name == "Triggers" ? "text-emerald-400 animate-pulse palette-trigger-glow" : "text-gray-400")"
                     aria-label="@category.Name category">
                 <span>@category.Name</span>
                 <span class="text-gray-600">@(_collapsedCategories.Contains(category.Name) ? "▶" : "▼")</span>
@@ -121,6 +122,12 @@
 
     /// <summary>Raised when the user starts dragging a node entry from the palette.</summary>
     [Parameter] public EventCallback<WorkflowNodeType> OnDragStarted { get; set; }
+
+    /// <summary>
+    /// When true, the Triggers category header pulses with a green glow to guide first-time
+    /// users toward placing a trigger as their first step.
+    /// </summary>
+    [Parameter] public bool IsCanvasEmpty { get; set; }
 
     private string _searchText = string.Empty;
     private System.Threading.CancellationTokenSource? _searchDebounce;

@@ -9,13 +9,18 @@
      title="Double-click to configure"
      aria-label="@Node.WorkflowNode.Label — double-click to configure">
 
-    @* Amber badge when the node has not been configured yet *@
+    @* Amber badge + "Set up →" label when the node has not been configured yet *@
     @if (!Node.WorkflowNode.IsConfigured)
     {
         <div class="absolute -top-2 -right-2 w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center"
              title="This node needs configuration"
              aria-label="Node requires configuration">
             <span class="text-white text-xs font-bold leading-none">!</span>
+        </div>
+        @* Plain-text affordance so the user knows to double-click and configure (T022). *@
+        <div class="absolute -bottom-5 right-0 text-xs text-amber-400 font-medium whitespace-nowrap pointer-events-none select-none"
+             aria-label="Double-click to set up this step">
+            Set up →
         </div>
     }
 

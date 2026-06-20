@@ -11,9 +11,11 @@
 @inject WorkflowBuilderService BuilderService
 @inject IJSRuntime JSRuntime
 @inject IWorkflowExecutionOrchestrator ExecutionOrchestrator
+@inject IWorkflowCodeDiffService CodeDiffService
 @using DBAIAzure.Core.Exceptions
+@using DBAIAzure.Core.Interfaces
 
-<PageTitle>Workflow Builder — DBAIAzure</PageTitle>
+<PageTitle>@(string.IsNullOrWhiteSpace(_workflow?.Name) ? "Workflow Builder" : _workflow!.Name) — DBAIAzure</PageTitle>
 
 <div class="workflow-builder-shell flex flex-col h-screen overflow-hidden">
 
@@ -27,6 +29,8 @@
                      IsChatOpen="@_isChatOpen"
                      LastSavedAt="@_lastSavedAt"
                      ExecutionTimeoutMinutes="@(_workflow?.Settings?.ExecutionTimeoutMinutes ?? 5)"
+                     HasCanvasChangedSinceCodeGen="@_hasCanvasChangedSinceCodeGen"
+                     IsShortcutsPanelOpen="@_isShortcutsPanelOpen"
                      OnUndoClicked="@(() => _canvas?.Undo())"
                      OnRedoClicked="@(() => _canvas?.Redo())"
                      OnSnapToggleClicked="@(() => _canvas?.ToggleSnap())"
@@ -35,6 +39,8 @@
                      OnSettingsClicked="@OnSettingsClicked"
                      OnRunClicked="@OnRunClicked"
                      OnStopClicked="@OnStopClicked"
+                     OnNameChanged="@OnWorkflowNameChanged"
+                     OnShortcutsToggleClicked="@OnShortcutsToggleClicked"
                      IsRunning="@(_activeRunId is not null)" />
 
     @* ── Body row ──────────────────────────────────────────────────────────────── *@
@@ -42,7 +48,8 @@
 
         @* Palette *@
         <WorkflowNodePalette OnPlaceNode="@OnPlaceNodeAsync"
-                             OnDragStarted="@((nodeType) => _draggedNodeType = nodeType)" />
+                             OnDragStarted="@((nodeType) => _draggedNodeType = nodeType)"
+                             IsCanvasEmpty="@(_canvas?.IsCanvasEmpty ?? true)" />
 
         @* Canvas — flex-1 fills remaining width *@
         <WorkflowCanvas @ref="_canvas"
@@ -57,7 +64,9 @@
         <WorkflowNodeConfigPanel Node="@_configNode"
                                  IsOpen="@(_configNode is not null)"
                                  NodeUpdated="@OnNodeUpdated"
-                                 OnCloseRequested="@(() => _configNode = null)" />
+                                 OnCloseRequested="@(() => _configNode = null)"
+                                 OnGoalPreview="@OnGoalPreview"
+                                 OnConfigCommitted="@OnConfigCommitted" />
 
         @* Execution output panel — shown when trigger is missing, during a run, or after completion *@
         @if (_isTriggerMissing || _activeRunId is not null || _nodeStates.Count > 0)
@@ -82,6 +91,7 @@
                            CodeGenerator="@CodeGenerator"
                            AvailabilityMonitor="@AvailabilityMonitor"
                            DesignSkillService="@DesignSkillService"
+                           DiffService="@CodeDiffService"
                            OnCodeSaved="@OnCodeSaved"
                            OnCloseRequested="@(() => _isChatOpen = false)" />
     </div>
@@ -92,6 +102,17 @@
                        Workflow="@_workflow"
                        OnRunConfirmed="@OnRunConfirmedAsync"
                        OnCancelled="@(() => _isRunModalOpen = false)" />
+
+@* First-run entry choice modal — shown when user has no saved workflows and no URL id *@
+<WorkflowEntryChoiceModal IsOpen="@_isEntryModalOpen"
+                          OnScratchChosen="@OnEntryScratchChosen"
+                          OnExampleChosen="@OnEntryExampleChosen" />
+
+@* Unsaved-changes guard — shown when navigating away with pending edits (US5) *@
+<WorkflowUnsavedChangesModal IsOpen="@_isUnsavedChangesModalOpen"
+                             OnSave="@OnUnsavedChangesSave"
+                             OnDiscard="@OnUnsavedChangesDiscard"
+                             OnCancel="@OnUnsavedChangesCancel" />
 
 @code {
     /// <summary>Workflow id from the route; null = new/example workflow.</summary>
@@ -112,6 +133,17 @@
     private bool _isTriggerMissing = true;
     private IReadOnlyDictionary<string, NodeExecutionState> _nodeStates =
         new Dictionary<string, NodeExecutionState>();
+    // Entry-choice modal: shown to first-time users who have no saved workflows and no URL id.
+    private int _savedWorkflowCount = -1;
+    private bool _isEntryModalOpen;
+    private bool _hasUnsavedChanges;
+    // Orange dot badge on Chat button when the canvas changes after code generation (T048).
+    private bool _hasCanvasChangedSinceCodeGen;
+    // Keyboard shortcuts panel (T064).
+    private bool _isShortcutsPanelOpen;
+    // Unsaved-changes nav guard modal (T039).
+    private bool _isUnsavedChangesModalOpen;
+    private LocationChangingContext? _pendingNavContext;
 
     /// <summary>
     /// The Run button is only enabled when every node in the workflow has been configured
@@ -122,15 +154,31 @@
 
     // ── Lifecycle ────────────────────────────────────────────────────────────────
 
+    // Constant owner id used throughout the demo build (single-tenant MVP).
+    private const string DemoOwnerId = "demo";
+
     protected override async Task OnInitializedAsync()
     {
         if (string.IsNullOrWhiteSpace(Id))
         {
-            _workflow = BuildExampleWorkflow();
+            // Count the user's saved workflows so we can show the first-run entry modal.
+            var existingWorkflows = await BuilderService.ListByOwnerAsync(DemoOwnerId);
+            _savedWorkflowCount  = existingWorkflows.Count;
+
+            if (_savedWorkflowCount == 0)
+            {
+                // No saved workflows: show the entry choice modal and leave the canvas blank.
+                _isEntryModalOpen = true;
+                _workflow = WorkflowDefinition.CreateNew("Untitled Workflow", DemoOwnerId);
+            }
+            else
+            {
+                _workflow = BuildExampleWorkflow();
+            }
         }
         else if (Guid.TryParse(Id, out var workflowId))
         {
-            _workflow = await BuilderService.LoadAsync(workflowId, "demo") ?? BuildExampleWorkflow();
+            _workflow = await BuilderService.LoadAsync(workflowId, DemoOwnerId) ?? BuildExampleWorkflow();
             _lastSavedAt = _workflow.LastModifiedAt;
         }
         else
@@ -157,15 +205,23 @@
 
     private ValueTask OnLocationChanging(LocationChangingContext context)
     {
-        // Allow navigation unconditionally for now; a confirmation dialog can be added later.
+        if (!_hasUnsavedChanges)
+            return ValueTask.CompletedTask;
+
+        // Pause navigation and show the unsaved-changes confirmation modal (T040).
+        context.PreventNavigation();
+        _pendingNavContext          = context;
+        _isUnsavedChangesModalOpen = true;
+        _ = InvokeAsync(StateHasChanged);
         return ValueTask.CompletedTask;
     }
 
     // ── Example workflow ─────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Pre-loaded 3-node example that helps first-time users understand the workflow concept.
-    /// Produces a summarize → approve → notify chain.
+    /// Pre-loaded 4-node example (Trigger → Summarise → Approve → Notify) that helps
+    /// first-time users understand the workflow concept. All nodes are fully configured
+    /// so no amber badges appear and the Run button is immediately enabled.
     /// </summary>
     private static WorkflowDefinition BuildExampleWorkflow()
     {
@@ -173,6 +229,18 @@
         static (WorkflowPort input, WorkflowPort output) StandardPorts(string inputLabel, string outputLabel) =>
             (new WorkflowPort(Guid.NewGuid().ToString("N")[..8], inputLabel, PortDirection.Input),
              new WorkflowPort(Guid.NewGuid().ToString("N")[..8], outputLabel, PortDirection.Output));
+
+        // Trigger node — entry point; always must be present for Run to be enabled (FR-01.3).
+        var trigOut = new WorkflowPort(Guid.NewGuid().ToString("N")[..8], "Support request text", PortDirection.Output);
+        var triggerNode = WorkflowNode.CreateNew(WorkflowNodeType.Trigger, "Receive Request") with
+        {
+            GoalPrompt    = "Receive an incoming customer support request and pass it to the AI step.",
+            OutputLabel   = trigOut.Label,
+            OutputPorts   = new[] { trigOut }.ToList().AsReadOnly(),
+            IsConfigured  = true,
+            PositionX     = 80,
+            PositionY     = 150,
+        };
 
         var (sumIn, sumOut) = StandardPorts("Support request text", "3-bullet summary");
         var summarizeNode = WorkflowNode.CreateNew(WorkflowNodeType.AgenticReason, "Summarise Request") with
@@ -183,7 +251,7 @@
             InputPorts   = new[] { sumIn }.ToList().AsReadOnly(),
             OutputPorts  = new[] { sumOut }.ToList().AsReadOnly(),
             IsConfigured = true,
-            PositionX    = 80,
+            PositionX    = 320,
             PositionY    = 150,
         };
 
@@ -195,7 +263,7 @@
             InputPorts   = new[] { appIn }.ToList().AsReadOnly(),
             OutputPorts  = new[] { appOut }.ToList().AsReadOnly(),
             IsConfigured = true,
-            PositionX    = 320,
+            PositionX    = 560,
             PositionY    = 150,
         };
 
@@ -207,9 +275,14 @@
             InputPorts   = new[] { notIn }.ToList().AsReadOnly(),
             OutputPorts  = new[] { notOut }.ToList().AsReadOnly(),
             IsConfigured = true,
-            PositionX    = 560,
+            PositionX    = 800,
             PositionY    = 150,
         };
+
+        var edgeTriggerToSummarise = WorkflowEdge.CreateNew(
+            sourceNodeId: triggerNode.Id, sourcePortId: trigOut.Id,
+            targetNodeId: summarizeNode.Id, targetPortId: sumIn.Id,
+            label: "Request received");
 
         var edge1 = WorkflowEdge.CreateNew(
             summarizeNode.Id, sumOut.Id,
@@ -226,8 +299,8 @@
             Id             = Guid.NewGuid(),
             Name           = "Example: Support Request Flow",
             OwnerId        = "demo",
-            Nodes          = new[] { summarizeNode, approveNode, notifyNode }.ToList().AsReadOnly(),
-            Edges          = new[] { edge1, edge2 }.ToList().AsReadOnly(),
+            Nodes          = new[] { triggerNode, summarizeNode, approveNode, notifyNode }.ToList().AsReadOnly(),
+            Edges          = new[] { edgeTriggerToSummarise, edge1, edge2 }.ToList().AsReadOnly(),
             Settings       = new WorkflowSettings(),
             ChatHistory    = Array.Empty<WorkflowChatMessage>(),
             CreatedAt      = DateTimeOffset.UtcNow,
@@ -246,6 +319,9 @@
     private void OnWorkflowChanged(WorkflowDefinition updatedDefinition)
     {
         _workflow = updatedDefinition;
+        _hasUnsavedChanges = true;
+        // Mark orange dot on Chat button whenever canvas changes (T047).
+        _hasCanvasChangedSinceCodeGen = true;
         _chatPanel?.NotifyWorkflowChanged();
         StateHasChanged();
     }
@@ -277,6 +353,10 @@
     private void OnChatToggleClicked()
     {
         _isChatOpen = !_isChatOpen;
+        // FR-07.4: clear the orange dot as soon as the panel opens, regardless of
+        // whether the user proceeds to regenerate code.
+        if (_isChatOpen)
+            _hasCanvasChangedSinceCodeGen = false;
         StateHasChanged();
     }
 
@@ -285,6 +365,8 @@
         if (_workflow is null)
             return Task.CompletedTask;
         _workflow = _workflow with { GeneratedCode = code };
+        // Clear the orange dot badge once code is generated from the current canvas (T049).
+        _hasCanvasChangedSinceCodeGen = false;
         StateHasChanged();
         return Task.CompletedTask;
     }
@@ -335,7 +417,14 @@
     private void OnNodeFeedbackRequested(NodeExecutionState nodeState)
     {
         _isChatOpen = true;
-        // The chat panel will receive a pre-populated message when fully wired (T063).
+        // Pre-populate the chat with a context message about the failed/completed step (T056).
+        var stepLabel  = _workflow?.Nodes.FirstOrDefault(n => n.Id == nodeState.NodeId)?.Label ?? "this step";
+        var statusWord = nodeState.Status == NodeStatus.Failed ? "failed" : "completed";
+        var suggestion = $"The '{stepLabel}' step {statusWord}. "
+            + (string.IsNullOrWhiteSpace(nodeState.OutputSummary)
+                ? "Can you suggest what to check or improve?"
+                : $"Output: {nodeState.OutputSummary}. Does this look correct?");
+        _chatPanel?.PrePopulateInput(suggestion);
         StateHasChanged();
     }
 
@@ -349,6 +438,81 @@
     {
         _canvas?.UpdateNodeFromConfig(updatedNode);
         _configNode = null;
+        _hasUnsavedChanges = true;
+        StateHasChanged();
+    }
+
+    // ── Toolbar name editing (US4) ────────────────────────────────────────────────
+
+    private void OnWorkflowNameChanged(string newName)
+    {
+        if (_workflow is null || string.IsNullOrWhiteSpace(newName)) return;
+        _workflow = _workflow with { Name = newName };
+        _hasUnsavedChanges = true;
+        StateHasChanged();
+    }
+
+    // ── Keyboard shortcuts panel (US9) ────────────────────────────────────────────
+
+    private void OnShortcutsToggleClicked()
+    {
+        _isShortcutsPanelOpen = !_isShortcutsPanelOpen;
+        StateHasChanged();
+    }
+
+    // ── Unsaved changes nav guard (US5) ──────────────────────────────────────────
+
+    private void OnUnsavedChangesDiscard()
+    {
+        _hasUnsavedChanges         = false;
+        _isUnsavedChangesModalOpen = false;
+        StateHasChanged();
+    }
+
+    private async Task OnUnsavedChangesSave()
+    {
+        await OnSaveAsync();
+        _hasUnsavedChanges         = false;
+        _isUnsavedChangesModalOpen = false;
+        StateHasChanged();
+    }
+
+    private void OnUnsavedChangesCancel()
+    {
+        _pendingNavContext         = null;
+        _isUnsavedChangesModalOpen = false;
+        StateHasChanged();
+    }
+
+    // ── Config panel live-preview and commit handlers (US2) ──────────────────────
+
+    private void OnGoalPreview(string goalText)
+    {
+        // Live-update the canvas node label while the user types in the config panel (T026).
+        if (_configNode is null || _workflow is null) return;
+        var previewNode = _configNode with { Label = string.IsNullOrWhiteSpace(goalText) ? _configNode.Label : goalText };
+        _canvas?.UpdateNodeFromConfig(previewNode);
+    }
+
+    private void OnConfigCommitted()
+    {
+        _hasUnsavedChanges = true;
+        StateHasChanged();
+    }
+
+    // ── Entry choice modal handlers (US1) ────────────────────────────────────────
+
+    private void OnEntryScratchChosen()
+    {
+        _isEntryModalOpen = false;
+        _workflow         = WorkflowDefinition.CreateNew("Untitled Workflow", DemoOwnerId);
+        StateHasChanged();
+    }
+
+    private void OnEntryExampleChosen()
+    {
+        _isEntryModalOpen = false;
+        _workflow         = BuildExampleWorkflow();
         StateHasChanged();
     }
 

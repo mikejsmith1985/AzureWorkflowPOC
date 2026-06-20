@@ -1,0 +1,46 @@
+@* First-run entry choice modal — shown to users who have zero saved workflows.
+   Presents two clear options: start from scratch or load the example workflow. *@
+
+@if (!IsOpen)
+{
+    return;
+}
+
+<div class="fixed inset-0 bg-gray-950/90 flex items-center justify-center z-50"
+     role="dialog" aria-modal="true" aria-labelledby="entry-choice-title">
+    <div class="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-full max-w-md flex flex-col gap-6 shadow-2xl">
+        <div>
+            <h1 id="entry-choice-title" class="text-xl font-bold text-gray-100">Build a workflow</h1>
+            <p class="text-sm text-gray-400 mt-1">How would you like to start?</p>
+        </div>
+
+        <div class="flex flex-col gap-3">
+            <button @onclick="OnScratchChosen"
+                    class="w-full flex flex-col gap-1 border border-gray-700 hover:border-cyan-600
+                           rounded-xl px-5 py-4 text-left transition-colors hover:bg-gray-800/50"
+                    aria-label="Start from scratch — open a blank canvas">
+                <span class="text-sm font-semibold text-gray-100">Start from scratch</span>
+                <span class="text-xs text-gray-400">Open a blank canvas and drag steps from the palette.</span>
+            </button>
+
+            <button @onclick="OnExampleChosen"
+                    class="w-full flex flex-col gap-1 border border-cyan-800 hover:border-cyan-500
+                           rounded-xl px-5 py-4 text-left transition-colors bg-cyan-900/20 hover:bg-cyan-900/40"
+                    aria-label="Try the example workflow">
+                <span class="text-sm font-semibold text-cyan-300">Try the example</span>
+                <span class="text-xs text-cyan-400/70">Load a pre-built support-request flow to explore the builder.</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    /// <summary>Controls whether this modal is visible. Set to true when the user has no saved workflows.</summary>
+    [Parameter] public bool IsOpen { get; set; }
+
+    /// <summary>Raised when the user chooses to start from a blank canvas.</summary>
+    [Parameter] public EventCallback OnScratchChosen { get; set; }
+
+    /// <summary>Raised when the user chooses to load the example workflow.</summary>
+    [Parameter] public EventCallback OnExampleChosen { get; set; }
+}

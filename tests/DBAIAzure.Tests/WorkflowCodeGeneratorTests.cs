@@ -44,7 +44,7 @@ public class WorkflowCodeGeneratorTests
             return sb.ToString();
         }
 
-        public async Task<(string UpdatedCode, CodeDiff Diff)> RefineAsync(
+        public async Task<(string UpdatedCode, DiffResult Diff)> RefineAsync(
             string previousCode,
             string instruction,
             WorkflowDefinition workflow,
@@ -61,11 +61,11 @@ public class WorkflowCodeGeneratorTests
             // Build a simple diff: everything from previousCode is unchanged, new line is Added.
             var previousLines = previousCode.Split('\n');
             var diffLines = new List<DiffLine>();
-            for (var lineIndex = 0; lineIndex < previousLines.Length; lineIndex++)
-                diffLines.Add(new DiffLine(lineIndex + 1, DiffLineKind.Unchanged, previousLines[lineIndex]));
+            foreach (var line in previousLines)
+                diffLines.Add(new DiffLine(line, DiffLineType.Unchanged, IsContext: false));
 
-            diffLines.Add(new DiffLine(previousLines.Length + 1, DiffLineKind.Added, "// refined: " + instruction));
-            var diff = new CodeDiff(diffLines.AsReadOnly());
+            diffLines.Add(new DiffLine("// refined: " + instruction, DiffLineType.Added, IsContext: false));
+            var diff = new DiffResult(diffLines.AsReadOnly(), HasChanges: true, AddedCount: 1, RemovedCount: 0);
 
             return (updatedCode, diff);
         }
@@ -146,7 +146,7 @@ public class WorkflowCodeGeneratorTests
         var (updatedCode, diff) = await generator.RefineAsync(previousCode, instruction, workflow, _ => { });
 
         Assert.Contains("// refined: add logging", updatedCode);
-        Assert.Contains(diff.Lines, line => line.Kind == DiffLineKind.Added);
+        Assert.Contains(diff.Lines, line => line.Type == DiffLineType.Added);
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public class WorkflowCodeGeneratorTests
 
         var (_, diff) = await generator.RefineAsync("line1\nline2", "tweak", workflow, _ => { });
 
-        Assert.Contains(diff.Lines, line => line.Kind == DiffLineKind.Unchanged);
+        Assert.Contains(diff.Lines, line => line.Type == DiffLineType.Unchanged);
     }
 
     [Fact]

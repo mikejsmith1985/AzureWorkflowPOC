@@ -20,7 +20,7 @@ public sealed class WorkflowBuilderService : IDisposable
     private static readonly TimeSpan AutoSaveInterval = TimeSpan.FromSeconds(60);
 
     private readonly IWorkflowRepository _repository;
-    private readonly WorkflowThumbnailGenerator _thumbnailGenerator;
+    private readonly IWorkflowThumbnailGenerator _thumbnailGenerator;
     private readonly IWorkflowValidator _validator;
     private readonly ILogger<WorkflowBuilderService> _logger;
 
@@ -38,7 +38,7 @@ public sealed class WorkflowBuilderService : IDisposable
     /// </summary>
     public WorkflowBuilderService(
         IWorkflowRepository repository,
-        WorkflowThumbnailGenerator thumbnailGenerator,
+        IWorkflowThumbnailGenerator thumbnailGenerator,
         IWorkflowValidator validator,
         ILogger<WorkflowBuilderService> logger)
     {
@@ -64,13 +64,14 @@ public sealed class WorkflowBuilderService : IDisposable
         if (validationMessages.Count > 0)
             throw new WorkflowValidationException(validationMessages);
 
-        var thumbnail  = _thumbnailGenerator.Generate(workflow);
-        var utcNow     = DateTimeOffset.UtcNow;
-        var toSave     = workflow with
-        {
-            ThumbnailSvg   = thumbnail,
-            LastModifiedAt = utcNow,
-        };
+        var utcNow    = DateTimeOffset.UtcNow;
+        var withStamp = workflow with { LastModifiedAt = utcNow };
+
+        // Generate a thumbnail and attach it if successful; proceed without one on failure (null).
+        var thumbnailSvg = _thumbnailGenerator.GenerateSvg(withStamp);
+        var toSave       = thumbnailSvg is not null
+            ? withStamp with { ThumbnailSvg = thumbnailSvg }
+            : withStamp;
 
         await _repository.SaveAsync(toSave, cancellationToken).ConfigureAwait(false);
 
@@ -86,6 +87,13 @@ public sealed class WorkflowBuilderService : IDisposable
     /// </summary>
     public Task<WorkflowDefinition?> LoadAsync(Guid id, string ownerId, CancellationToken cancellationToken = default)
         => _repository.GetAsync(id, ownerId, cancellationToken);
+
+    /// <summary>
+    /// Returns all workflows for the given owner. Used by the entry-choice modal to decide
+    /// whether to show the first-run welcome screen.
+    /// </summary>
+    public Task<IReadOnlyList<WorkflowDefinition>> ListByOwnerAsync(string ownerId, CancellationToken cancellationToken = default)
+        => _repository.ListByOwnerAsync(ownerId, cancellationToken);
 
     /// <summary>
     /// Creates a copy of the workflow with " (copy)" appended to the name (idempotent).

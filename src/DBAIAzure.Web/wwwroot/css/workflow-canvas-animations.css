@@ -35,6 +35,30 @@
     pointer-events: none;
 }
 
+/* ── Diff-view line colours (T054) ──────────────────────────────────────────── */
+
+/* Applied to individual diff lines inside the chat panel's code-diff view. */
+.diff-add {
+    background-color: rgba(6, 78, 59, 0.5);  /* green-950 tint */
+    color: #86efac;                            /* green-300 */
+}
+
+.diff-remove {
+    background-color: rgba(69, 10, 10, 0.5); /* red-950 tint */
+    color: #fca5a5;                            /* red-300 */
+    text-decoration: line-through;
+}
+
+.diff-context {
+    color: #d1d5db; /* gray-300 */
+}
+
+/* ── Run button ready-state transition (T031) ────────────────────────────────── */
+
+.run-btn-ready {
+    transition: background-color 300ms ease-in-out, color 300ms ease-in-out;
+}
+
 /* ── Input-port hint ──────────────────────────────────────────────────────────── */
 
 /* Shown for 3 seconds when the user attempts to drag from an input (left) port.

@@ -49,7 +49,7 @@ public sealed class WorkflowCodeGenerator : IWorkflowCodeGenerator
     }
 
     /// <inheritdoc/>
-    public async Task<(string UpdatedCode, CodeDiff Diff)> RefineAsync(
+    public async Task<(string UpdatedCode, DiffResult Diff)> RefineAsync(
         string previousCode,
         string instruction,
         WorkflowDefinition workflow,
@@ -180,23 +180,29 @@ public sealed class WorkflowCodeGenerator : IWorkflowCodeGenerator
 
     /// <summary>
     /// Computes a line-level diff between <paramref name="beforeCode"/> and <paramref name="afterCode"/>
-    /// using a simple LCS-based algorithm. Returns a <see cref="CodeDiff"/> where each line is
-    /// tagged as Unchanged, Added, or Removed.
+    /// using a simple LCS-based algorithm. Returns a <see cref="DiffResult"/> where each line is
+    /// tagged as Unchanged, Added, or Removed, with <c>IsContext = false</c> for all lines
+    /// (no context windowing — use <see cref="IWorkflowCodeDiffService"/> for windowed diffs).
     /// </summary>
-    private static CodeDiff ComputeLinesDiff(string beforeCode, string afterCode)
+    private static DiffResult ComputeLinesDiff(string beforeCode, string afterCode)
     {
         var beforeLines = beforeCode.Split('\n');
         var afterLines  = afterCode.Split('\n');
 
         var lcsMatrix = BuildLcsMatrix(beforeLines, afterLines);
         var diffLines = new List<DiffLine>();
-        int lineNumber = 1;
 
         // Backtrack through the LCS matrix to produce the diff.
-        TraceBack(lcsMatrix, beforeLines, afterLines, beforeLines.Length, afterLines.Length,
-            diffLines, ref lineNumber);
+        TraceBack(lcsMatrix, beforeLines, afterLines, beforeLines.Length, afterLines.Length, diffLines);
 
-        return new CodeDiff(diffLines.AsReadOnly());
+        var addedCount   = diffLines.Count(line => line.Type == DiffLineType.Added);
+        var removedCount = diffLines.Count(line => line.Type == DiffLineType.Removed);
+
+        return new DiffResult(
+            diffLines.AsReadOnly(),
+            HasChanges: addedCount > 0 || removedCount > 0,
+            AddedCount: addedCount,
+            RemovedCount: removedCount);
     }
 
     private static int[,] BuildLcsMatrix(string[] before, string[] after)
@@ -224,26 +230,25 @@ public sealed class WorkflowCodeGenerator : IWorkflowCodeGenerator
         string[] after,
         int beforeIndex,
         int afterIndex,
-        List<DiffLine> result,
-        ref int lineNumber)
+        List<DiffLine> result)
     {
         if (beforeIndex == 0 && afterIndex == 0)
             return;
 
         if (beforeIndex > 0 && afterIndex > 0 && before[beforeIndex - 1] == after[afterIndex - 1])
         {
-            TraceBack(matrix, before, after, beforeIndex - 1, afterIndex - 1, result, ref lineNumber);
-            result.Add(new DiffLine(lineNumber++, DiffLineKind.Unchanged, before[beforeIndex - 1]));
+            TraceBack(matrix, before, after, beforeIndex - 1, afterIndex - 1, result);
+            result.Add(new DiffLine(before[beforeIndex - 1], DiffLineType.Unchanged, IsContext: false));
         }
         else if (afterIndex > 0 && (beforeIndex == 0 || matrix[beforeIndex, afterIndex - 1] >= matrix[beforeIndex - 1, afterIndex]))
         {
-            TraceBack(matrix, before, after, beforeIndex, afterIndex - 1, result, ref lineNumber);
-            result.Add(new DiffLine(lineNumber++, DiffLineKind.Added, after[afterIndex - 1]));
+            TraceBack(matrix, before, after, beforeIndex, afterIndex - 1, result);
+            result.Add(new DiffLine(after[afterIndex - 1], DiffLineType.Added, IsContext: false));
         }
         else
         {
-            TraceBack(matrix, before, after, beforeIndex - 1, afterIndex, result, ref lineNumber);
-            result.Add(new DiffLine(lineNumber++, DiffLineKind.Removed, before[beforeIndex - 1]));
+            TraceBack(matrix, before, after, beforeIndex - 1, afterIndex, result);
+            result.Add(new DiffLine(before[beforeIndex - 1], DiffLineType.Removed, IsContext: false));
         }
     }
 }

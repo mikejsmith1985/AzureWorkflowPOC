@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Workflow Builder UX Master Review (`specs/005-workflow-ux-redesign`)
+
+All 10 UX improvements shipped on `feature/visual-workflow-builder`:
+
+1. **First-run entry choice** — users with no saved workflows see a "Start from scratch / Try the example" modal instead of a blank canvas; `WorkflowEntryChoiceModal.razor`; `OnScratchChosen` / `OnExampleChosen` callbacks.
+2. **Welcome overlay & empty-canvas guide** — `WorkflowCanvas` shows a full welcome illustration until the very first node is placed; thereafter an empty canvas shows only a minimal "drag a step to continue" label; Triggers category pulses green when the canvas is empty.
+3. **Node configuration affordance** — every unconfigured node shows an amber "!" badge and a plain-text "Set up →" label beneath it; single-click shows a 2-second "Double-click to configure" tooltip (60-second per-node cooldown); config panel opens with keyboard focus on the first field; "Save" button renamed to "Done".
+4. **Live goal → label sync** — typing in the Goal field of the node config panel updates the canvas node label in real time via a 200 ms debounced `OnGoalPreview` EventCallback.
+5. **Run button disabled reason** — an always-visible plain-language reason appears beside the Run button when it is disabled: "Needs a trigger to start" or "Set up all steps first"; text disappears and button fades to green (300 ms CSS transition) when all nodes are ready.
+6. **Inline workflow name editing** — clicking the workflow name in the toolbar opens an inline input; Enter or blur commits; blank name reverts and flashes a 1-second tooltip; `<PageTitle>` updates reactively; name amber-coloured when "Untitled Workflow".
+7. **Unsaved-changes navigation guard** — any topology change, name commit, or config Done sets a dirty flag; navigating away while dirty shows a three-button confirmation: "Save & Continue", "Discard Changes", "Cancel — keep editing"; guard active via `Nav.RegisterLocationChangingHandler`.
+8. **Chat panel canvas-change indicator** — an orange dot badge appears on the Chat button whenever the canvas changes after code has been generated; dot clears when chat is opened or code is regenerated; "Update code" button in the workflow-changed banner triggers `RegenerateWithDiffAsync`, which computes a DiffPlex-backed compact diff (+ / - / context lines with "Show full code ↓" toggle).
+9. **Post-run feedback pre-population** — clicking the feedback button on a node badge opens the chat panel with a pre-populated message naming the step, its status, and its output excerpt.
+10. **Gallery improvements** — search input above the card grid filters by workflow name and node type; node-type summary chips (▶ Trigger, 🧠 AI Step, 👤 Human, etc.) replace the raw step count on each card; SVG thumbnails generated on load for any workflow that lacks one; zero-result state with plain-language message.
+- **Keyboard shortcuts panel** — "?" button at the far right of the toolbar opens a floating `WorkflowKeyboardShortcutsPanel`; lists Ctrl+Z / Ctrl+Y / Delete / Ctrl+S shortcuts; closes on Escape or outside click.
+- **New types** — `DiffResult`, `DiffLine`, `DiffLineType` in `DBAIAzure.Core.Models.DiffModels`; `IWorkflowThumbnailGenerator`, `IWorkflowCodeDiffService` interfaces in `DBAIAzure.Core.Interfaces`.
+- **New services** — `WorkflowThumbnailGenerator` (SVG, 200×100 viewBox, colour-coded `<rect>` per node) and `WorkflowCodeDiffService` (DiffPlex-backed, ±3 context lines) in `DBAIAzure.Core.Services`.
+- **15 new unit tests** — `WorkflowThumbnailGeneratorTests` (6), `WorkflowCodeDiffServiceTests` (7), `WorkflowEntryChoiceModalTests` (5), `WorkflowNodeRendererAffordanceTests` (5), `WorkflowUnsavedChangesModalTests` (5), `WorkflowToolbarNameEditTests` (5); all 283 passing.
+
 ### Added — Trigger Node, Directional Links & Node Deletion (`specs/004-workflow-trigger-links-delete`)
 - **Trigger node (FR-09)** — new `WorkflowNodeType.Trigger` (value 0) added as the explicit entry point for every workflow; emerald colour scheme (`border-emerald-500`, `bg-emerald-950`, `bg-emerald-700` header); "Start here" subtitle on canvas; two plain-language config fields ("What starts this workflow?" and "What information is available at the start?"); a second Trigger is blocked at drop time with an amber toast; Trigger is always first in the palette under the new "Triggers" category; `WorkflowNode.CreateNew(Trigger, ...)` returns a node with zero input ports and one "Begin" output port; `_isTriggerMissing` state chain feeds the toolbar badge, Run button gate, and Run Output Panel advisory message
 - **Structural validation (FR-09)** — new `IWorkflowValidator` / `WorkflowValidator` service registered as a singleton; enforces VAL-001 (no Trigger), VAL-002 (two+ Triggers), VAL-003 (island node) before every save; `WorkflowValidationException` carries user-displayable messages; `WorkflowBuilderService.SaveAsync` throws on validation failure; `WorkflowBuilder.razor` catches and surfaces each message as an amber canvas toast
