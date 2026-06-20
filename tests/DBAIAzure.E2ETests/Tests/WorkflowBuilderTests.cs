@@ -7,66 +7,99 @@ namespace DBAIAzure.E2ETests.Tests;
 
 /// <summary>
 /// End-to-end tests for the Visual Workflow Builder page (/workflow-builder).
-/// Covers canvas render, node palette, toolbar, chat toggle, and unsaved-changes guard.
+/// Navigates to /workflow-builder/new so the example workflow loads directly,
+/// bypassing the first-run entry choice modal (which only shows for an empty DB).
+/// Covers canvas render, node palette, toolbar, chat toggle, and run button.
 /// </summary>
 public sealed class WorkflowBuilderTests : E2ETestBase
 {
+    // /workflow-builder/new — "new" is not a valid GUID so the page falls through to
+    // BuildExampleWorkflow(), which loads a 4-node example without the entry-choice modal.
+    private const string BuilderUrl = "/workflow-builder/new";
+
     public WorkflowBuilderTests(WebAppFixture webApp, PlaywrightFixture playwright)
         : base(webApp, playwright) { }
 
     [Fact]
     public async Task CanvasContainer_IsVisible_OnLoad()
     {
-        await NavigateAsync("/workflow-builder");
+        await NavigateAsync(BuilderUrl);
+        await WaitForToolbarAsync();
 
-        // The Z.Blazor.Diagrams canvas renders inside a div with class containing "diagram".
-        var canvas = Page.Locator("[class*='diagram'], svg").First;
-        await canvas.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 15_000 });
+        // WorkflowCanvas.razor renders with id="workflow-canvas-drop-zone".
+        // Use a JS-evaluated dimension check so Tailwind Play CDN's async CSS injection
+        // does not cause a race with Playwright's static visibility heuristic.
+        await Page.WaitForFunctionAsync(@"
+            () => {
+                const el = document.getElementById('workflow-canvas-drop-zone');
+                return el !== null && el.getBoundingClientRect().height > 0;
+            }");
     }
 
     [Fact]
     public async Task NodePalette_IsVisible_OnLoad()
     {
-        await NavigateAsync("/workflow-builder");
+        await NavigateAsync(BuilderUrl);
+        await WaitForToolbarAsync();
 
-        // The palette lists node types the user can drag onto the canvas.
-        // At least one node-type button should be present.
-        var paletteItem = Page.Locator("button[draggable='true'], [class*='palette'] button").First;
-        await paletteItem.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
+        // WorkflowNodePalette.razor renders a div.workflow-palette containing palette-entry items.
+        var palette = Page.Locator(".workflow-palette").First;
+        await palette.WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 10_000 });
+
+        // At least one draggable palette entry must be present.
+        var entry = Page.Locator("div.palette-entry").First;
+        await entry.WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 5_000 });
     }
 
     [Fact]
     public async Task Toolbar_WorkflowNameInput_IsVisible()
     {
-        await NavigateAsync("/workflow-builder");
+        await NavigateAsync(BuilderUrl);
+        await WaitForToolbarAsync();
 
-        // The toolbar contains an editable workflow name input.
-        var nameInput = Page.Locator("input[placeholder*='name' i], input[aria-label*='name' i]").First;
-        await nameInput.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
+        // The toolbar shows the workflow name as a clickable span in display mode.
+        // aria-label="Rename workflow — click to edit" is set on that span.
+        var nameSpan = Page.Locator("span[aria-label='Rename workflow — click to edit']").First;
+        await nameSpan.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
     }
 
     [Fact]
     public async Task ChatToggleButton_Click_OpensChatPanel()
     {
-        await NavigateAsync("/workflow-builder");
+        await NavigateAsync(BuilderUrl);
+        await WaitForToolbarAsync();
 
-        // The chat panel is hidden until the toggle button is clicked.
-        var toggle = Page.Locator("button[aria-label*='chat' i], button[aria-label*='AI' i]").First;
+        // The toolbar has a chat toggle button; aria-label is "Open chat panel" when closed.
+        var toggle = Page.Locator("button[aria-label='Open chat panel']").First;
         await toggle.WaitForAsync(new() { State = WaitForSelectorState.Visible });
         await toggle.ClickAsync();
 
-        // After clicking, the chat input or panel heading should appear.
-        var chatPanel = Page.Locator("textarea[placeholder*='describe' i], [class*='chat']").First;
+        // After clicking, the chat panel <aside> becomes visible.
+        var chatPanel = Page.Locator("aside.workflow-chat-panel").First;
         await chatPanel.WaitForAsync(new() { State = WaitForSelectorState.Visible });
     }
 
     [Fact]
     public async Task RunButton_IsPresent_OnLoad()
     {
-        await NavigateAsync("/workflow-builder");
+        await NavigateAsync(BuilderUrl);
+        await WaitForToolbarAsync();
 
-        // The Run button must be visible and labelled — used to execute the workflow.
-        var runBtn = Page.Locator("button:has-text('Run'), button[aria-label*='run' i]").First;
+        // The example workflow has all nodes configured, so CanRun = true and
+        // the Run button has class "run-btn-ready". It must be present in the toolbar.
+        var runBtn = Page.Locator(".workflow-toolbar .run-btn-ready").First;
         await runBtn.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Waits for the toolbar to be visible, confirming Blazor has completed its first
+    /// interactive render pass. Must be called before asserting any page element.
+    /// </summary>
+    private async Task WaitForToolbarAsync()
+    {
+        await Page.Locator(".workflow-toolbar").WaitForAsync(
+            new() { State = WaitForSelectorState.Visible, Timeout = 20_000 });
     }
 }

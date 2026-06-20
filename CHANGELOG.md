@@ -7,11 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — Playwright E2E Test Suite (all 17 tests now pass)
+
+- `WebAppFixture`: resolved user-local `.dotnet/dotnet.exe` instead of the system dotnet
+  at `C:\Program Files\dotnet`, which lacks the ASP.NET Core 8 runtime, causing all tests
+  to time out waiting for the app to start.
+- `WorkflowBuilderTests`: navigate to `/workflow-builder/new` (non-GUID id bypasses the
+  first-run entry choice modal and loads the example workflow directly); use
+  `Page.WaitForFunctionAsync` to check `getBoundingClientRect().height > 0` instead of
+  Playwright's static visibility heuristic, which races with Tailwind Play CDN's async CSS
+  injection via MutationObserver; corrected all CSS selectors to match actual rendered HTML
+  (`#workflow-canvas-drop-zone`, `.workflow-palette`, `.run-btn-ready`,
+  `span[aria-label='Rename workflow — click to edit']`, `button[aria-label='Open chat panel']`).
+- `NavigationTests`: same `/workflow-builder/new` + `WaitForFunctionAsync` canvas check.
+- `ThreadsPageTests`: fix connector-modal selector to `h2:has-text('Connector Configuration')`
+  (the modal renders a styled div without `role="dialog"`, not a `<dialog>` element).
+
 ### Added — Playwright E2E Test Suite
 
-- New project `tests/DBAIAzure.E2ETests` with 16 Playwright tests covering every navigation
+- New project `tests/DBAIAzure.E2ETests` with 17 Playwright tests covering every navigation
   tab (Threads, Graph, New Ticket, Workflow Builder, Workflow Gallery), the canvas, node
-  palette, toolbar, chat toggle, connector gear icon, and unsaved-changes guard.
+  palette, toolbar, chat toggle, connector gear icon, and run button.
 - `WebAppFixture` starts the real Blazor Server app on port 5099 via a child process so
   Playwright connects through genuine HTTP/SignalR — no TestServer shortcuts.
 - `PlaywrightFixture` manages a shared headless Chromium browser; each test gets an isolated

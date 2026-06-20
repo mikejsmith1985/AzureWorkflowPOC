@@ -24,7 +24,15 @@ public sealed class WebAppFixture : IAsyncLifetime
         var repoRoot = FindRepoRoot();
         var webProjectDir = Path.Combine(repoRoot, "src", "DBAIAzure.Web");
 
-        var startInfo = new ProcessStartInfo("dotnet", $"run --project \"{webProjectDir}\" --no-build")
+        // The project pins a user-local SDK via global.json (C:\Users\<user>\.dotnet\dotnet.exe).
+        // The system dotnet at C:\Program Files\dotnet lacks ASP.NET Core 8 and will fail.
+        // Mirror what start-web.ps1 does: resolve the user-profile dotnet explicitly.
+        var userDotnet = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".dotnet", "dotnet.exe");
+        var dotnetExe = File.Exists(userDotnet) ? userDotnet : "dotnet";
+
+        var startInfo = new ProcessStartInfo(dotnetExe, $"run --project \"{webProjectDir}\"")
         {
             UseShellExecute       = false,
             RedirectStandardOutput = true,

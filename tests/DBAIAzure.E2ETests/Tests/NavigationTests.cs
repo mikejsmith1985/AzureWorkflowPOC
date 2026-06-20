@@ -66,12 +66,21 @@ public sealed class NavigationTests : E2ETestBase
     [Fact]
     public async Task WorkflowBuilderTab_Loads_CanvasVisible()
     {
-        await NavigateAsync("/workflow-builder");
+        // /workflow-builder/new loads the example workflow directly, bypassing the
+        // first-run entry modal (which only shows when the SQLite DB is empty).
+        await NavigateAsync("/workflow-builder/new");
 
-        // Z.Blazor.Diagrams renders a <svg> element inside the canvas container.
-        // Waiting for it confirms the diagram library initialised successfully.
-        var canvas = Page.Locator(".diagram-canvas, svg, [class*='diagram']").First;
-        await canvas.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 15_000 });
+        // Wait for the toolbar — confirms Blazor has completed its first interactive render.
+        await Page.Locator(".workflow-toolbar").WaitForAsync(
+            new() { State = WaitForSelectorState.Visible, Timeout = 20_000 });
+
+        // Confirm the canvas container is in the DOM and has layout dimensions (height > 0).
+        // Uses a JS check because Tailwind Play CDN injects CSS asynchronously via MutationObserver.
+        await Page.WaitForFunctionAsync(@"
+            () => {
+                const el = document.getElementById('workflow-canvas-drop-zone');
+                return el !== null && el.getBoundingClientRect().height > 0;
+            }");
 
         Assert.True(await IsBlazorConnectedAsync());
     }
