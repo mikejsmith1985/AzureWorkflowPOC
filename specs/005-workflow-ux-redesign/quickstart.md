@@ -109,15 +109,16 @@ Delete all saved workflows via the gallery before running the first-run scenario
 
 1. Open any workflow and add a node (do not save)
 2. Click the browser back button or navigate to `/workflow-gallery` via the nav
-3. **Expect**: A confirmation appears with "You have unsaved changes." Options: "Stay and
-   save" and "Leave without saving."
-4. Click "Stay and save"
+3. **Expect**: A confirmation modal appears with "You have unsaved changes." and three buttons:
+   **"Save & Continue"**, **"Discard Changes"**, and **"Cancel — keep editing"**.
+4. Click "Cancel — keep editing"
 5. **Expect**: Navigation is cancelled; the builder is still open with the unsaved change intact.
-6. Repeat step 2, then click "Leave without saving"
-7. **Expect**: Navigation to the gallery proceeds. The unsaved node is not present if the
-   workflow is re-opened (auto-save had not fired yet).
-8. Open the same workflow again and make no changes, then navigate away
-9. **Expect**: No confirmation appears (guard does not fire when nothing has changed).
+6. Repeat step 2, then click "Save & Continue"
+7. **Expect**: The workflow is saved and navigation to the gallery proceeds.
+8. Repeat with a fresh change, then click "Discard Changes"
+9. **Expect**: Navigation proceeds without saving. Changes are lost.
+10. Open the same workflow again and make no changes, then navigate away
+11. **Expect**: No confirmation appears (guard does not fire when nothing has changed).
 
 ---
 
