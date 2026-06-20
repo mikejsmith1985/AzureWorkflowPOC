@@ -50,7 +50,7 @@
             <span>Your workflow has changed — regenerate code to apply the latest layout.</span>
             <div class="flex items-center gap-2">
                 @* "Update code" regenerates with a compact diff view (T051/T052) *@
-                <button @onclick="RegenerateWithDiffAsync"
+                <button @onclick="() => RegenerateWithDiffAsync()"
                         disabled="@(!_isLlmAvailable || _isGenerating)"
                         class="text-xs bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded-md transition-colors disabled:opacity-40"
                         aria-label="Regenerate code and show what changed">
