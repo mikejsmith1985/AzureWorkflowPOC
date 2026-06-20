@@ -46,8 +46,8 @@ public sealed class ThreadsPageTests : E2ETestBase
         await gear.WaitForAsync(new() { State = WaitForSelectorState.Visible });
         await gear.ClickAsync();
 
-        // The modal should appear with at least one connector card (e.g. "LLM").
-        var modal = Page.Locator("[role='dialog'], [class*='modal']").First;
+        // ConnectorConfigModal.razor renders a fixed-position overlay with an h2 header.
+        var modal = Page.Locator("h2:has-text('Connector Configuration'), div.fixed.inset-0.z-50").First;
         await modal.WaitForAsync(new() { State = WaitForSelectorState.Visible });
     }
 
