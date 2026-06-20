@@ -412,10 +412,9 @@ shortcut for the tool. If they cannot name one, the shortcuts are undiscoverable
   - When a Trigger node is absent: "Needs a trigger to start"
   - When nodes are unconfigured: "Set up all steps first"
 - **FR-04.2** When all pre-conditions are met and the Run button transitions from disabled to
-  enabled, the button must visually animate from grey to green over 300 ms to draw the user's
-  attention to the change.
-- **FR-04.3** The explanatory text adjacent to the Run button must disappear when the button
-  becomes enabled — it must not persist as visual noise once it is no longer actionable.
+  enabled, the button must simultaneously animate from grey to green over 300 ms **and** the
+  disabled-reason text must disappear — both changes happen in the same render cycle so the
+  moment of "readiness" is visually unambiguous.
 
 ### FR-05 Inline Workflow Name Editing
 

@@ -74,8 +74,9 @@
     @* Single-click tooltip — "Double-click to configure this step" (T024) *@
     @if (_singleClickTooltipNodeId is not null && _singleClickTooltipPosition is not null)
     {
+        var tooltipPos = _singleClickTooltipPosition;
         <div class="absolute z-30 pointer-events-none"
-             style="left: @(_singleClickTooltipPosition!.X + 20)px; top: @(_singleClickTooltipPosition!.Y - 44)px">
+             style="left: @(tooltipPos.X + 20)px; top: @(tooltipPos.Y - 44)px">
             <div class="bg-gray-700 text-xs text-gray-200 px-3 py-1.5 rounded-lg shadow-lg border border-gray-600 whitespace-nowrap">
                 Double-click to configure this step
             </div>

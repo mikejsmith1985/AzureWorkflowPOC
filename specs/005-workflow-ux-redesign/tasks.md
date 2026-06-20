@@ -166,7 +166,7 @@ loads → make no changes → navigate → no confirmation.
 - [X] T042 [US5] Clear `_hasUnsavedChanges = false` in `WorkflowBuilder.razor` inside `OnSaveAsync` (after successful manual save) and inside `OnAutoSaved` (after auto-save fires successfully); these are the ONLY two events that clear the dirty flag
 - [X] T043 [US5] Replace the stub `OnLocationChanging` in `WorkflowBuilder.razor` with real logic: if `_hasUnsavedChanges` is true, call `context.PreventNavigation()`, store `context.TargetLocation` in `_pendingNavigationUri`, set `_isUnsavedChangesModalOpen = true`, call `StateHasChanged()`; if false, return without blocking
 - [X] T044 [US5] Implement `WorkflowUnsavedChangesModal.razor` in `src/DBAIAzure.Web/Components/WorkflowBuilder/WorkflowUnsavedChangesModal.razor` — modal overlay with "You have unsaved changes." message; "Stay and save" button fires `OnStayRequested`; "Leave without saving" button fires `OnLeaveRequested`; `IsOpen` parameter controls visibility
-- [X] T045 [US5] Wire `WorkflowUnsavedChangesModal` into `WorkflowBuilder.razor`: `OnStayRequested` → close modal (`_isUnsavedChangesModalOpen = false`) then call `await _saveButtonRef.FocusAsync()` to place keyboard focus on the Save button per FR-06.2; `OnLeaveRequested` → set `_hasUnsavedChanges = false`, close modal, then call `Nav.NavigateTo(_pendingNavigationUri!)`; add `@ref="_saveButtonRef"` to the Save button element in `WorkflowToolbar.razor`
+- [X] T045 [US5] Wire `WorkflowUnsavedChangesModal` into `WorkflowBuilder.razor`: `OnSave` → call `await OnSaveAsync()` then `Nav.NavigateTo(_pendingNavigationUri!)` (saves and proceeds); `OnDiscard` → set `_hasUnsavedChanges = false`, close modal, then `Nav.NavigateTo(_pendingNavigationUri!)`; `OnCancel` → close modal only, returning user to builder with changes intact (no focus management needed — FR-06.2 updated 2026-06-20 to reflect 3-button design)
 
 **Checkpoint**: Verified per quickstart.md Scenario 6. No workflows will be silently lost once this phase is complete — the navigation guard is active.
 
@@ -182,6 +182,7 @@ a compact diff view and "Show full code" toggle.
 orange dot appears within 500 ms → open chat → dot gone, "update?" message visible → click
 "Update code" → compact diff shown with + / - / context lines → "Show full code" expands.
 
+- ~~T046~~ *(intentionally removed — planned auto-save status indicator; deferred out of scope during planning; Phase 8 tasks renumbered from T047)*
 - [X] T047 [US6] Add `_hasCanvasChangedSinceCodeGen` bool to `WorkflowBuilder.razor`; set to `true` in `OnWorkflowChanged` when `_workflow?.GeneratedCode is not null`; set to `false` when `OnChatToggleClicked` opens the chat panel
 - [X] T048 [P] [US6] Add `HasCanvasChangedSinceCodeGen bool` parameter to `WorkflowToolbar.razor`; render a small orange dot (`<span>`) overlaid on the Chat button when `HasCanvasChangedSinceCodeGen` is true; hide dot when false
 - [X] T049 [US6] Pass `HasCanvasChangedSinceCodeGen="@_hasCanvasChangedSinceCodeGen"` from `WorkflowBuilder.razor` to `WorkflowToolbar`
@@ -225,7 +226,7 @@ thumbnail (not "No preview") → search input always visible → type partial na
 *Prerequisite*: T013 (thumbnail save integration) and T011 (generator implementation) must be complete.
 
 - [X] T059 [US8] Add `_searchText string` field and `FilteredWorkflows` computed property to `WorkflowGallery.razor`; `FilteredWorkflows` returns `_workflows` filtered by case-insensitive name containment when `_searchText` is non-empty, else returns all
-- [X] T060 [US8] Add always-visible search `<input>` above the workflow grid in `WorkflowGallery.razor` — rendered whenever `_workflows.Count > 0`; `@oninput` updates `_searchText` with 100 ms debounce (reuse the debounce pattern from `WorkflowNodePalette.razor`); `aria-label="Search your workflows"`
+- [X] T060 [US8] Add always-visible search `<input type="search">` above the workflow grid in `WorkflowGallery.razor` — rendered whenever `_workflows.Count > 0`; `@oninput` updates `_searchText` via direct assignment (no debounce — LINQ filter is synchronous and sub-millisecond, so debounce adds latency without benefit; FR-09.2 requires ≤150 ms which direct assignment satisfies); `aria-label="Filter workflows by name or step type"`
 - [X] T061 [US8] Replace `_workflows` loop in `WorkflowGallery.razor` with `FilteredWorkflows` loop; add zero-result state: when `_searchText` is non-empty and `FilteredWorkflows` is empty, render "No workflows match '@_searchText'" with a "Clear search" button that sets `_searchText = string.Empty`
 - [X] T062 [P] [US8] Update `WorkflowGalleryCard.razor` footer to show a node-type summary string in place of "X step(s)": compute counts of each `WorkflowNodeType` in `Workflow.Nodes` and format as "1 trigger, 2 AI steps, 1 approval" (omitting types with zero count); fall back to "N steps" when `Workflow.Nodes` is empty
 
