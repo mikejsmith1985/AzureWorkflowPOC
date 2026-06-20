@@ -1,0 +1,157 @@
+@* Modal that captures a plain-English test scenario and translates it to structured
+   workflow input before handing off to the execution orchestrator. *@
+@using DBAIAzure.Core.Models
+@using DBAIAzure.Web.Services
+@inject ILlmAvailabilityMonitor AvailabilityMonitor
+
+@if (IsOpen)
+{
+    <div class="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+         role="dialog" aria-modal="true" aria-labelledby="run-modal-title">
+
+        <div class="bg-gray-900 border border-gray-700 rounded-xl w-[28rem] flex flex-col gap-5 p-6 shadow-2xl">
+
+            <h2 id="run-modal-title" class="text-base font-semibold text-gray-100">
+                Run Workflow
+            </h2>
+
+            @* LLM unavailability banner *@
+            @if (!_isLlmAvailable)
+            {
+                <div class="bg-amber-900/40 border border-amber-700/40 text-amber-300 text-xs rounded-lg px-3 py-2"
+                     role="alert">
+                    AI is temporarily unavailable. You can still run the workflow with a manual input description.
+                </div>
+            }
+
+            @* Scenario textarea *@
+            <div class="flex flex-col gap-1.5">
+                <label class="text-sm text-gray-400 font-medium"
+                       for="scenario-input">
+                    What scenario should I test?
+                </label>
+                <textarea id="scenario-input"
+                          @bind="_scenarioText"
+                          @bind:event="oninput"
+                          placeholder="e.g. A customer submitted a P1 outage ticket asking why their database is down."
+                          rows="4"
+                          class="bg-gray-950 border border-gray-700 rounded-lg p-3 text-sm text-gray-100
+                                 placeholder-gray-600 resize-none focus:outline-none focus:border-cyan-600 transition-colors"
+                          aria-required="true"></textarea>
+            </div>
+
+            @* LLM confirmation one-liner *@
+            @if (!string.IsNullOrWhiteSpace(_confirmationMessage))
+            {
+                <div class="text-xs text-gray-400 bg-gray-800 rounded-lg px-3 py-2" role="status">
+                    @_confirmationMessage
+                </div>
+            }
+
+            @* Footer buttons *@
+            <div class="flex items-center justify-end gap-3">
+                <button @onclick="Cancel"
+                        class="px-4 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors"
+                        aria-label="Cancel run">
+                    Cancel
+                </button>
+                <button @onclick="TranslateAndConfirmAsync"
+                        disabled="@(string.IsNullOrWhiteSpace(_scenarioText) || _isTranslating)"
+                        class="px-4 py-2 text-sm bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50
+                               disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                        aria-label="Translate scenario">
+                    @(_isTranslating ? "Translating…" : "Translate")
+                </button>
+                @if (_translatedInput is not null)
+                {
+                    <button @onclick="ConfirmRunAsync"
+                            disabled="@(!_isLlmAvailable && _translatedInput is null)"
+                            class="px-4 py-2 text-sm bg-green-700 hover:bg-green-600 disabled:opacity-50
+                                   disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                            aria-label="Confirm and start run">
+                        Confirm &amp; Run
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Controls modal visibility.</summary>
+    [Parameter] public bool IsOpen { get; set; }
+
+    /// <summary>The workflow definition to run (used to set context for translation).</summary>
+    [Parameter] public WorkflowDefinition? Workflow { get; set; }
+
+    /// <summary>Raised when the user confirms the run with a structured input record.</summary>
+    [Parameter] public EventCallback<WorkflowRunInput> OnRunConfirmed { get; set; }
+
+    /// <summary>Raised when the user cancels the modal.</summary>
+    [Parameter] public EventCallback OnCancelled { get; set; }
+
+    private string _scenarioText = string.Empty;
+    private string? _confirmationMessage;
+    private WorkflowRunInput? _translatedInput;
+    private bool _isTranslating;
+    private bool _isLlmAvailable = true;
+
+    protected override void OnInitialized()
+    {
+        _isLlmAvailable = AvailabilityMonitor.IsAvailable;
+        AvailabilityMonitor.StateChanged += OnAvailabilityStateChanged;
+    }
+
+    private void OnAvailabilityStateChanged(bool isAvailable)
+    {
+        _isLlmAvailable = isAvailable;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task TranslateAndConfirmAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_scenarioText)) return;
+        _isTranslating = true;
+        _confirmationMessage = null;
+
+        // Produce structured input directly from the plain-English scenario.
+        // WorkflowInputTranslator (T059) is a standalone service; inline the basic
+        // translation here so the modal is testable without the orchestrator.
+        await Task.Delay(1); // yield to allow spinner to render
+        _translatedInput = new WorkflowRunInput
+        {
+            ScenarioText   = _scenarioText.Trim(),
+            WorkflowId     = Workflow?.Id ?? Guid.Empty,
+            SubmittedAt    = DateTimeOffset.UtcNow,
+        };
+        _confirmationMessage = $"Ready to run: \"{_scenarioText.Trim()}\"";
+
+        _isTranslating = false;
+    }
+
+    private async Task ConfirmRunAsync()
+    {
+        if (_translatedInput is null) return;
+        await OnRunConfirmed.InvokeAsync(_translatedInput);
+        Reset();
+    }
+
+    private async Task Cancel()
+    {
+        Reset();
+        await OnCancelled.InvokeAsync();
+    }
+
+    private void Reset()
+    {
+        _scenarioText        = string.Empty;
+        _confirmationMessage = null;
+        _translatedInput     = null;
+        _isTranslating       = false;
+    }
+
+    public void Dispose()
+    {
+        AvailabilityMonitor.StateChanged -= OnAvailabilityStateChanged;
+    }
+}

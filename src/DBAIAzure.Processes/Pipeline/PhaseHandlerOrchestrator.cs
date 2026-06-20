@@ -30,6 +30,7 @@ public sealed class PhaseHandlerOrchestrator
     private readonly IPhaseRunRepository _repository;
     private readonly IPhaseApprovalNotifier? _approvalNotifier;
     private readonly string _portalBaseUrl;
+    private readonly IConnectorHealthChecker? _healthChecker;
     private readonly ConcurrentDictionary<string, PhaseHandlerRun> _runs = new();
 
     /// <summary>Fired on a background thread whenever a run's state changes (for live UI updates).</summary>
@@ -39,12 +40,14 @@ public sealed class PhaseHandlerOrchestrator
         Func<IPhaseProgressSink, Kernel> kernelFactory,
         IPhaseRunRepository? repository = null,
         IPhaseApprovalNotifier? approvalNotifier = null,
-        string portalBaseUrl = "http://localhost:5000")
+        string portalBaseUrl = "http://localhost:5000",
+        IConnectorHealthChecker? healthChecker = null)
     {
         _kernelFactory    = kernelFactory;
         _repository       = repository ?? NullPhaseRunRepository.Instance;
         _approvalNotifier = approvalNotifier;
         _portalBaseUrl    = portalBaseUrl.TrimEnd('/');
+        _healthChecker    = healthChecker;
     }
 
     // ── Public API ─────────────────────────────────────────────────────────────
@@ -105,6 +108,28 @@ public sealed class PhaseHandlerOrchestrator
     {
         try
         {
+            // Pre-flight: all four connectors must pass a live functional test before the run starts (FR-018).
+            // A 30-second wall-clock cap (SC-008) ensures the pipeline is never stalled by a hung connector.
+            if (_healthChecker is not null)
+            {
+                using var preflightCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var preflightResults = await _healthChecker.CheckAllAsync(preflightCts.Token);
+                var failures = preflightResults.Where(r => !r.IsSuccess).ToList();
+                if (failures.Count > 0)
+                {
+                    var failure = new PipelinePreflightFailure(failures.AsReadOnly());
+                    var reasons = failure.FailingConnectors
+                        .Select(r => $"{r.Type}: {r.Message}")
+                        .ToArray();
+                    var diagnostic = $"Pre-flight check failed — {string.Join("; ", reasons)}";
+                    var failed = run.State with { Status = PhaseRunStatus.Failed, FailureReason = diagnostic };
+                    run.UpdateState(failed);
+                    await _repository.UpsertRunAsync(failed);
+                    RunUpdated?.Invoke(run.RunId);
+                    return;
+                }
+            }
+
             var sink = new RecordingSink(run, () => RunUpdated?.Invoke(run.RunId), _repository);
             var kernel = _kernelFactory(sink);
 

@@ -4,12 +4,20 @@
 @inject PipelineOrchestrator Orchestrator
 @inject NavigationManager Nav
 
+<ConnectorConfigModal @ref="_configModal" />
+
 <div class="flex items-center justify-between mb-6">
     <h1 class="text-xl font-semibold text-gray-100">Threads</h1>
-    <a href="/new-ticket"
-       class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-sm rounded transition-colors">
-        + New Thread
-    </a>
+    <div class="flex items-center gap-2">
+        <button @onclick="OpenConfigModal" title="Connector configuration"
+                class="p-2 text-gray-400 hover:text-gray-200 hover:bg-gray-800 rounded transition-colors">
+            ⚙
+        </button>
+        <a href="/new-ticket"
+           class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-sm rounded transition-colors">
+            + New Thread
+        </a>
+    </div>
 </div>
 
 <!-- ── Search + filter bar ──────────────────────────────────────────────── -->
@@ -131,6 +139,10 @@ else
 
 @code {
     private const int PageSize = 20;
+
+    private ConnectorConfigModal _configModal = default!;
+
+    private async Task OpenConfigModal() => await _configModal.Open();
 
     private string _searchQuery = string.Empty;
     private string _statusFilter = string.Empty;

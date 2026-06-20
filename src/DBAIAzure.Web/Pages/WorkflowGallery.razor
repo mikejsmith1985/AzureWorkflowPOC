@@ -1,0 +1,195 @@
+@* Personal workflow gallery — a grid of saved WorkflowDefinition cards.
+   Owner-scoped: only shows workflows belonging to the current session user.
+   Features: live search (T059), SVG thumbnails (T062), and node-type summary chips on each card.
+   Routes: /workflow-gallery *@
+@page "/workflow-gallery"
+@inject IWorkflowRepository WorkflowRepository
+@inject NavigationManager Nav
+@inject WorkflowBuilderService BuilderService
+@inject IWorkflowThumbnailGenerator ThumbnailGenerator
+@using DBAIAzure.Core.Interfaces
+
+<PageTitle>Workflow Gallery — DBAIAzure</PageTitle>
+
+<div class="max-w-5xl mx-auto py-8 px-4">
+
+    @* Header *@
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-xl font-bold text-gray-100">My Workflows</h1>
+            <p class="text-sm text-gray-500 mt-0.5">Your saved workflow definitions</p>
+        </div>
+        <a href="/workflow-builder"
+           class="bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+           aria-label="Create a new workflow">
+            New Workflow
+        </a>
+    </div>
+
+    @* Search box — filters cards live as the user types (T059) *@
+    @if (!_isLoading && _workflows.Count > 0)
+    {
+        <div class="mb-5">
+            <input type="search"
+                   value="@_searchText"
+                   @oninput="OnSearchInput"
+                   placeholder="Search workflows by name or step type…"
+                   class="w-full max-w-sm bg-gray-800 border border-gray-700 rounded-lg px-3 py-2
+                          text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+                   aria-label="Filter workflows by name or step type" />
+            @if (!string.IsNullOrWhiteSpace(_searchText) && FilteredWorkflows.Count == 0)
+            {
+                <p class="text-xs text-gray-500 mt-2 flex items-center gap-2">
+                    <span>No workflows match "<span class="text-gray-300">@_searchText</span>".</span>
+                    @* FR-09.3: explicit Clear search button so the action is keyboard-accessible
+                       and visible regardless of browser support for the native type="search" clear control. *@
+                    <button @onclick="@(() => _searchText = string.Empty)"
+                            class="text-cyan-500 hover:text-cyan-300 underline text-xs transition-colors"
+                            aria-label="Clear search and show all workflows">
+                        Clear search
+                    </button>
+                </p>
+            }
+        </div>
+    }
+
+    @* Loading state *@
+    @if (_isLoading)
+    {
+        <div class="text-center py-16 text-gray-500 text-sm">Loading workflows…</div>
+    }
+    else if (_workflows.Count == 0)
+    {
+        @* Empty state *@
+        <div class="text-center py-20 flex flex-col items-center gap-4">
+            <span class="text-5xl" role="img" aria-label="empty">🗂️</span>
+            <div class="text-gray-400 text-base font-medium">No workflows yet</div>
+            <p class="text-gray-500 text-sm max-w-xs">
+                Build your first workflow by dragging steps onto the canvas.
+            </p>
+            <a href="/workflow-builder"
+               class="bg-cyan-700 hover:bg-cyan-600 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors mt-2"
+               aria-label="Open the workflow builder">
+                Start Building
+            </a>
+        </div>
+    }
+    else
+    {
+        @* Workflow grid — filters applied to the list (T060) *@
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            @foreach (var workflow in FilteredWorkflows)
+            {
+                <WorkflowGalleryCard Workflow="@workflow"
+                                     OnOpenRequested="@((id) => OpenWorkflow(id))"
+                                     OnDuplicateRequested="@DuplicateWorkflowAsync"
+                                     OnDeleteConfirmed="@DeleteWorkflowAsync" />
+            }
+        </div>
+    }
+
+    @* Error banner *@
+    @if (_errorMessage is not null)
+    {
+        <div class="mt-4 bg-red-900/40 border border-red-700/50 rounded-lg px-4 py-3 text-sm text-red-300"
+             role="alert">
+            @_errorMessage
+        </div>
+    }
+</div>
+
+@code {
+    private List<WorkflowDefinition> _workflows = new();
+    private bool _isLoading = true;
+    private string? _errorMessage;
+    private string _searchText = string.Empty;
+
+    // Stub owner ID — wired to real auth in a future auth phase.
+    private const string DemoOwnerId = "demo";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWorkflowsAsync();
+    }
+
+    // ── Search / filter (T060) ────────────────────────────────────────────────────
+
+    private List<WorkflowDefinition> FilteredWorkflows
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_searchText))
+                return _workflows;
+
+            var query = _searchText.Trim().ToLowerInvariant();
+            return _workflows.Where(w =>
+                (w.Name ?? string.Empty).ToLowerInvariant().Contains(query)
+                || w.Nodes.Any(n => n.Label.ToLowerInvariant().Contains(query)
+                                  || n.NodeType.ToString().ToLowerInvariant().Contains(query))
+            ).ToList();
+        }
+    }
+
+    private void OnSearchInput(ChangeEventArgs changeArgs)
+    {
+        _searchText = changeArgs.Value?.ToString() ?? string.Empty;
+    }
+
+    // ── Data loading ─────────────────────────────────────────────────────────────
+
+    private async Task LoadWorkflowsAsync()
+    {
+        _isLoading    = true;
+        _errorMessage = null;
+        try
+        {
+            var loaded = await WorkflowRepository.ListByOwnerAsync(DemoOwnerId);
+            // Generate SVG thumbnails for any workflow that doesn't have one yet (T062).
+            _workflows = loaded
+                .OrderByDescending(w => w.LastModifiedAt)
+                .Select(w => string.IsNullOrWhiteSpace(w.ThumbnailSvg)
+                    ? w with { ThumbnailSvg = ThumbnailGenerator.GenerateSvg(w) }
+                    : w)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Could not load workflows: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void OpenWorkflow(Guid id) =>
+        Nav.NavigateTo($"/workflow-builder/{id}");
+
+    private async Task DuplicateWorkflowAsync(Guid id)
+    {
+        var original = _workflows.FirstOrDefault(w => w.Id == id);
+        if (original is null) return;
+        try
+        {
+            await BuilderService.DuplicateAsync(original);
+            await LoadWorkflowsAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Duplicate failed: {ex.Message}";
+        }
+    }
+
+    private async Task DeleteWorkflowAsync(Guid id)
+    {
+        try
+        {
+            await BuilderService.DeleteAsync(id, DemoOwnerId);
+            _workflows.RemoveAll(w => w.Id == id);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Delete failed: {ex.Message}";
+        }
+    }
+}

@@ -1,0 +1,57 @@
+@* Unsaved-changes navigation guard modal — shown when the user tries to navigate away
+   from the builder while there are uncommitted changes on the canvas.
+   Three choices: save then continue, discard and continue, or stay on the page. *@
+
+@if (!IsOpen)
+{
+    return;
+}
+
+<div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+     role="dialog" aria-modal="true" aria-labelledby="unsaved-changes-title">
+    <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-80 flex flex-col gap-4 shadow-2xl">
+        <div>
+            <h2 id="unsaved-changes-title" class="text-base font-semibold text-gray-100">
+                You have unsaved changes.
+            </h2>
+            <p class="text-sm text-gray-400 mt-1">
+                Your latest changes have not been saved. What would you like to do?
+            </p>
+        </div>
+
+        <div class="flex flex-col gap-2">
+            <button @onclick="OnSave"
+                    class="w-full px-4 py-2 text-sm bg-cyan-700 hover:bg-cyan-600
+                           text-white rounded-lg transition-colors font-medium"
+                    aria-label="Save changes and then continue navigating">
+                Save &amp; Continue
+            </button>
+            <button @onclick="OnDiscard"
+                    class="w-full px-4 py-2 text-sm bg-gray-700 hover:bg-gray-600
+                           text-gray-200 hover:text-white rounded-lg transition-colors"
+                    aria-label="Discard changes and leave the page">
+                Discard Changes
+            </button>
+            <button @onclick="OnCancel"
+                    class="w-full px-4 py-2 text-sm text-gray-400 hover:text-gray-200
+                           transition-colors"
+                    aria-label="Cancel and stay on this page">
+                Cancel — keep editing
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    /// <summary>Controls whether this modal is visible.</summary>
+    [Parameter] public bool IsOpen { get; set; }
+
+    /// <summary>Raised when the user clicks "Save &amp; Continue" — caller should save then allow navigation.</summary>
+    [Parameter] public EventCallback OnSave { get; set; }
+
+    /// <summary>Raised when the user clicks "Discard Changes" — caller should clear the dirty flag and navigate.</summary>
+    [Parameter] public EventCallback OnDiscard { get; set; }
+
+    /// <summary>Raised when the user clicks "Cancel" — caller should close the modal and keep the user on the page.</summary>
+    [Parameter] public EventCallback OnCancel { get; set; }
+}
