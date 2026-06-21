@@ -144,6 +144,14 @@
     // Unsaved-changes nav guard modal (T039).
     private bool _isUnsavedChangesModalOpen;
     private LocationChangingContext? _pendingNavContext;
+    // Persistence/route binding: true once a DB row exists for the current workflow, and once the
+    // browser URL carries that workflow's id. New (example/scratch) workflows start unbound and are
+    // bound to /workflow-builder/{id} on their first successful save so edits survive navigation.
+    private bool _isWorkflowPersisted;
+    private bool _isRouteBound;
+    // One-shot flag: set immediately before our own programmatic URL rebind so the unsaved-changes
+    // nav guard lets that synthetic navigation through instead of popping the confirmation modal.
+    private bool _isProgrammaticNav;
 
     /// <summary>
     /// The Run button is only enabled when every node in the workflow has been configured
@@ -159,31 +167,54 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Load the owner's saved workflows once so we can both decide the landing behaviour and
+        // de-duplicate the default name of any new workflow against what already exists.
+        var existingWorkflows = await BuilderService.ListByOwnerAsync(DemoOwnerId);
+        _savedWorkflowCount    = existingWorkflows.Count;
+        var existingNames      = existingWorkflows.Select(existing => existing.Name);
+
         if (string.IsNullOrWhiteSpace(Id))
         {
-            // Count the user's saved workflows so we can show the first-run entry modal.
-            var existingWorkflows = await BuilderService.ListByOwnerAsync(DemoOwnerId);
-            _savedWorkflowCount  = existingWorkflows.Count;
-
             if (_savedWorkflowCount == 0)
             {
-                // No saved workflows: show the entry choice modal and leave the canvas blank.
+                // First run: no saved workflows. Show the entry-choice modal and leave the canvas blank.
                 _isEntryModalOpen = true;
                 _workflow = WorkflowDefinition.CreateNew("Untitled Workflow", DemoOwnerId);
             }
             else
             {
-                _workflow = BuildExampleWorkflow();
+                // Returning user on the bare builder URL: resume the most-recently-edited workflow
+                // rather than regenerating a throwaway example, so prior edits are never lost.
+                // The URL is rebound to this workflow's id after the first render (see OnAfterRenderAsync).
+                _workflow            = existingWorkflows.OrderByDescending(existing => existing.LastModifiedAt).First();
+                _lastSavedAt         = _workflow.LastModifiedAt;
+                _isWorkflowPersisted = true;
             }
+        }
+        else if (string.Equals(Id, "new", StringComparison.OrdinalIgnoreCase))
+        {
+            // Explicit "start a new workflow" entry point (Gallery → New Workflow).
+            _workflow = BuildExampleWorkflow() with { Name = MakeNameUnique("Example: Support Request Flow", existingNames) };
         }
         else if (Guid.TryParse(Id, out var workflowId))
         {
-            _workflow = await BuilderService.LoadAsync(workflowId, DemoOwnerId) ?? BuildExampleWorkflow();
-            _lastSavedAt = _workflow.LastModifiedAt;
+            var loaded = await BuilderService.LoadAsync(workflowId, DemoOwnerId);
+            if (loaded is not null)
+            {
+                _workflow            = loaded;
+                _lastSavedAt         = loaded.LastModifiedAt;
+                _isWorkflowPersisted = true;
+                _isRouteBound        = true;  // URL already carries the workflow id.
+            }
+            else
+            {
+                // Unknown id: fall back to a fresh, uniquely-named example treated as a new workflow.
+                _workflow = BuildExampleWorkflow() with { Name = MakeNameUnique("Example: Support Request Flow", existingNames) };
+            }
         }
         else
         {
-            _workflow = BuildExampleWorkflow();
+            _workflow = BuildExampleWorkflow() with { Name = MakeNameUnique("Example: Support Request Flow", existingNames) };
         }
 
         // Subscribe to auto-save events so the toolbar shows the timestamp.
@@ -199,12 +230,54 @@
 
     private void OnAutoSaved(DateTimeOffset savedAt)
     {
-        _lastSavedAt = savedAt;
-        InvokeAsync(StateHasChanged);
+        // Auto-save (and manual save) raise this. A successful save means the workflow now exists in
+        // the store, so reflect its id in the URL — otherwise a later navigation would regenerate a
+        // throwaway example and the persisted edits would never be shown again.
+        _lastSavedAt         = savedAt;
+        _isWorkflowPersisted = true;
+        _ = InvokeAsync(async () =>
+        {
+            await BindRouteToWorkflowAsync();
+            StateHasChanged();
+        });
+    }
+
+    /// <summary>
+    /// After the first render, bind the URL to a workflow that is already persisted but reached via the
+    /// bare /workflow-builder URL (the "resume most recent" path). This makes a browser reload reload the
+    /// same workflow instead of falling back to a freshly-generated example.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool isFirstRender)
+    {
+        if (isFirstRender && _isWorkflowPersisted && !_isRouteBound)
+            await BindRouteToWorkflowAsync();
+    }
+
+    /// <summary>
+    /// Rewrites the browser URL to /workflow-builder/{id} (replacing history, no reload) so the current
+    /// workflow is addressable and reloadable. The nav-guard bypass flag prevents this synthetic
+    /// navigation from triggering the unsaved-changes modal.
+    /// </summary>
+    private Task BindRouteToWorkflowAsync()
+    {
+        if (_workflow is null || _isRouteBound)
+            return Task.CompletedTask;
+
+        _isRouteBound      = true;
+        _isProgrammaticNav = true;
+        Nav.NavigateTo($"/workflow-builder/{_workflow.Id}", forceLoad: false, replace: true);
+        return Task.CompletedTask;
     }
 
     private ValueTask OnLocationChanging(LocationChangingContext context)
     {
+        // Let our own URL rebind through without prompting (consume the one-shot bypass).
+        if (_isProgrammaticNav)
+        {
+            _isProgrammaticNav = false;
+            return ValueTask.CompletedTask;
+        }
+
         if (!_hasUnsavedChanges)
             return ValueTask.CompletedTask;
 
@@ -214,6 +287,25 @@
         _isUnsavedChangesModalOpen = true;
         _ = InvokeAsync(StateHasChanged);
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Returns <paramref name="baseName"/> if no existing workflow already uses it, otherwise appends
+    /// the smallest " (n)" suffix that is free. Prevents the (OwnerId, Name) uniqueness conflict that
+    /// would otherwise make the first save of a second example/scratch workflow fail silently.
+    /// </summary>
+    private static string MakeNameUnique(string baseName, IEnumerable<string> existingNames)
+    {
+        var takenNames = new HashSet<string>(existingNames, StringComparer.OrdinalIgnoreCase);
+        if (!takenNames.Contains(baseName))
+            return baseName;
+
+        for (var suffix = 2; ; suffix++)
+        {
+            var candidate = $"{baseName} ({suffix})";
+            if (!takenNames.Contains(candidate))
+                return candidate;
+        }
     }
 
     // ── Example workflow ─────────────────────────────────────────────────────────
@@ -326,13 +418,24 @@
         StateHasChanged();
     }
 
-    private async Task OnSaveAsync()
+    private async Task OnSaveAsync() => await TrySaveAsync();
+
+    /// <summary>
+    /// Persists the current workflow and returns true on success. On success the dirty flag is cleared
+    /// and the URL is bound to the workflow id so the work is reloadable. Validation and name-conflict
+    /// failures surface as canvas toasts and return false (so callers can keep the user on the page).
+    /// </summary>
+    private async Task<bool> TrySaveAsync()
     {
-        if (_workflow is null) return;
+        if (_workflow is null) return false;
         try
         {
-            _workflow    = await BuilderService.SaveAsync(_workflow);
-            _lastSavedAt = BuilderService.LastSavedAt;
+            _workflow            = await BuilderService.SaveAsync(_workflow);
+            _lastSavedAt         = BuilderService.LastSavedAt;
+            _isWorkflowPersisted = true;
+            _hasUnsavedChanges   = false;
+            await BindRouteToWorkflowAsync();
+            return true;
         }
         catch (WorkflowValidationException ex)
         {
@@ -340,8 +443,20 @@
             // WorkflowCanvas already shows individual messages via its toast; here we log all.
             foreach (var message in ex.Messages)
                 _canvas?.ShowToast(message, isError: true);
+            return false;
         }
-        StateHasChanged();
+        catch (WorkflowNameConflictException)
+        {
+            // Another workflow already uses this name for this owner — guide the user to rename it.
+            _canvas?.ShowToast(
+                "A workflow with this name already exists — rename it from the toolbar before saving.",
+                isError: true);
+            return false;
+        }
+        finally
+        {
+            StateHasChanged();
+        }
     }
 
     private void OnTriggerPresenceChanged(bool isTriggerPresent)
@@ -471,10 +586,21 @@
 
     private async Task OnUnsavedChangesSave()
     {
-        await OnSaveAsync();
-        _hasUnsavedChanges         = false;
+        // Only proceed with the originally-requested navigation if the save actually succeeded;
+        // otherwise keep the modal open so the user can resolve the validation/conflict error.
+        var didSave = await TrySaveAsync();
+        if (!didSave)
+            return;
+
         _isUnsavedChangesModalOpen = false;
+        var pendingNav     = _pendingNavContext;
+        _pendingNavContext = null;
         StateHasChanged();
+
+        // Resume the navigation the user originally attempted; the dirty flag is now clear so the
+        // location-changing guard lets it through.
+        if (pendingNav is not null)
+            Nav.NavigateTo(pendingNav.TargetLocation);
     }
 
     private void OnUnsavedChangesCancel()

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — Node edits lost on navigation; builder now persists & resumes work
+
+Node text (and any other canvas edit) was saved to the database but to a workflow id the URL
+never pointed at, so navigating away and back showed a freshly-generated example and the edits
+appeared to "revert". Root cause and fixes in `Pages/WorkflowBuilder.razor` (+ `WorkflowGallery.razor`):
+
+- **Resume most recent on the bare URL** — opening `/workflow-builder` with no id now reopens the
+  most-recently-edited saved workflow instead of regenerating a throwaway example. First-time users
+  (no saved workflows) still get the entry-choice modal.
+- **Bind the URL to the workflow after it is persisted** — on the first successful save (manual or
+  auto-save), and when resuming a workflow reached via the bare URL, the page rewrites the address to
+  `/workflow-builder/{id}` (history-replace, no reload) so a browser refresh reloads the same work.
+- **`/workflow-builder/new`** is now the explicit "start a new workflow" entry point; the Gallery's
+  "New Workflow" button targets it. Bare `/workflow-builder` is reserved for resuming.
+- **Unsaved-changes dialog now completes the navigation** — its Save button previously persisted but
+  silently kept the user on the page; it now resumes the originally-requested navigation on success
+  and keeps the modal open if the save fails.
+- **New-workflow name de-duplication** — example/scratch workflows get a unique " (n)" suffix when a
+  name is already taken, preventing the `(OwnerId, Name)` uniqueness conflict that made the first save
+  of a second new workflow fail silently. Manual save now also surfaces that conflict as a toast.
+- E2E `Scenario9_RenamedLabel_PersistsAfterNavigatingAway` covers the regression; all 14
+  label-editing E2E tests and 298 unit tests pass.
+
 ### Fixed — Undo label revert not updating DOM (spec 006 T018)
 
 - `ApplyLabelChange` now calls `nodeModel.Refresh()` instead of `_diagram.Refresh()`.
