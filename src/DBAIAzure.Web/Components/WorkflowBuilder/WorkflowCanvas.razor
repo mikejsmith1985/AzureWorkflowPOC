@@ -167,6 +167,10 @@
     private System.Threading.CancellationTokenSource? _tooltipCts;
     private readonly HashSet<string> _tooltipCooldownNodeIds = new();
 
+    // Stores the per-node LabelCommitted lambda delegates so they can be unsubscribed in Dispose().
+    // Keyed by WorkflowNodeModel.Id (the diagram node ID, not WorkflowNode.Id).
+    private readonly Dictionary<string, Action<string, string>> _labelCommittedHandlers = new();
+
     // ── Undo / redo stack (no built-in in ZBD 3.0.x — custom implementation) ───
 
     private readonly Stack<ICanvasAction> _undoStack = new(capacity: 50);
@@ -745,8 +749,14 @@
         if (node is not WorkflowNodeModel nodeModel)
             return;
 
-        nodeModel.DoubleClicked       += OnNodeDoubleClicked;
+        nodeModel.DoubleClicked        += OnNodeDoubleClicked;
         nodeModel.ContextMenuRequested += OnContextMenuRequested;
+
+        // Store handler so Dispose() can unsubscribe — anonymous lambdas cannot be unsubscribed by reference.
+        Action<string, string> labelHandler = (prev, next) =>
+            OnLabelCommitted(new LabelCommitArgs(nodeModel.WorkflowNode.Id, prev, next));
+        _labelCommittedHandlers[nodeModel.Id] = labelHandler;
+        nodeModel.LabelCommitted += labelHandler;
 
         // Mark that the canvas has had at least one node — collapses the full welcome overlay
         // to the minimal "canvas is empty" label on subsequent removal (T018).
@@ -851,7 +861,10 @@
         {
             node.DoubleClicked        -= OnNodeDoubleClicked;
             node.ContextMenuRequested -= OnContextMenuRequested;
+            if (_labelCommittedHandlers.TryGetValue(node.Id, out var labelHandler))
+                node.LabelCommitted -= labelHandler;
         }
+        _labelCommittedHandlers.Clear();
         _toastCts?.Cancel();
         _toastCts?.Dispose();
         _hintCts?.Cancel();
@@ -945,6 +958,65 @@
             _node.IsIsolated = false;
             _node.Refresh();
         }
+    }
+
+    // ── Label rename command ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Undoable command that renames a node label on the canvas. Stores only the node ID
+    /// and the two label strings (not the full node record) to keep undo-stack memory minimal.
+    /// </summary>
+    private sealed class RenameLabelAction : ICanvasAction
+    {
+        private readonly WorkflowCanvas _canvas;
+        private readonly string         _nodeId;
+        private readonly string         _previousLabel;
+        private readonly string         _newLabel;
+
+        public RenameLabelAction(WorkflowCanvas canvas, string nodeId, string previousLabel, string newLabel)
+        {
+            _canvas        = canvas;
+            _nodeId        = nodeId;
+            _previousLabel = previousLabel;
+            _newLabel      = newLabel;
+        }
+
+        /// <summary>Applies the new label — called on initial commit and on redo.</summary>
+        public void Do()   => _canvas.ApplyLabelChange(_nodeId, _newLabel);
+
+        /// <summary>Restores the previous label — called on undo.</summary>
+        public void Undo() => _canvas.ApplyLabelChange(_nodeId, _previousLabel);
+    }
+
+    /// <summary>
+    /// Locates the node model by its WorkflowNode.Id and updates the Label via a record
+    /// with-expression, then refreshes the diagram so the renderer picks up the change.
+    /// </summary>
+    private void ApplyLabelChange(string nodeId, string newLabel)
+    {
+        var nodeModel = _diagram.Nodes
+            .OfType<WorkflowNodeModel>()
+            .FirstOrDefault(nm => nm.WorkflowNode.Id == nodeId);
+
+        if (nodeModel is null) return;
+
+        nodeModel.WorkflowNode = nodeModel.WorkflowNode with { Label = newLabel };
+        _diagram.Refresh();
+        _ = NotifyWorkflowChanged();
+    }
+
+    /// <summary>
+    /// Handles a committed label edit from WorkflowNodeRenderer (via the LabelCommitted event
+    /// on WorkflowNodeModel). If the label is unchanged this is a no-op; otherwise the change
+    /// is applied immediately and a RenameLabelAction is recorded for undo/redo.
+    /// </summary>
+    private void OnLabelCommitted(LabelCommitArgs args)
+    {
+        if (args.PreviousLabel == args.NewLabel) return;  // no-op guard — nothing changed
+
+        var action = new RenameLabelAction(this, args.NodeId, args.PreviousLabel, args.NewLabel);
+        action.Do();
+        RecordAction(action);
     }
 
     // ── Supporting types ─────────────────────────────────────────────────────────

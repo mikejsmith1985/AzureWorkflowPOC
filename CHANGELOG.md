@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — Node text editing in Workflow Builder (spec 006)
+
+Two-part fix for the bug where users could not type into workflow node fields because
+text input was silently reset by Blazor re-renders.
+
+**Part 1 — Config panel reset guard** (`WorkflowNodeConfigPanel.razor`):
+- Added `_lastInitialisedNodeId` field that guards `OnParametersSet()` from resetting
+  `_goalPrompt`, `_inputLabel`, and `_outputLabel` when the same node is re-rendered
+  (e.g. while the 200 ms goal-preview debounce fires a parent `StateHasChanged()`).
+- `OnCloseAsync()` clears the guard so re-opening the panel for the same node
+  correctly reinitialises fields from the saved node record.
+
+**Part 2 — Inline label editing** (`WorkflowNodeRenderer.razor`):
+- Node label `<span>` is now a dual-state span/input: double-clicking the label text
+  switches to an `<input>` field with the current label pre-filled.
+- `_labelBuffer` is a local field never written by `OnParametersSet` — it is fully
+  isolated from parent re-renders while the user is typing.
+- Committing with Enter or blurring the input calls `Node.RaiseLabelCommitted()`;
+  pressing Escape restores the pre-edit label without raising the committed event.
+- `@ondblclick:stopPropagation="true"` on the label container prevents the node-body
+  double-click handler (which opens the config panel) from firing when renaming.
+- Keyboard accessibility: `tabindex="0"` on the outer node div; `Enter` activates
+  inline editing when the node has keyboard focus.
+- Empty committed labels display a type-appropriate fallback ("AI Agent", "Notify",
+  etc.) rather than a blank header; the fallback is never stored or pre-filled.
+
+**New types** (`WorkflowDiagramModels.cs`):
+- `LabelCommitArgs readonly record struct` — carries `NodeId`, `PreviousLabel`,
+  `NewLabel` from the renderer's committed event to the canvas handler.
+- `LabelCommitted event Action<string, string>?` on `WorkflowNodeModel` (alongside
+  the existing `DoubleClicked` event) — the signalling channel that avoids the
+  EventCallback limitation when components are registered via `RegisterComponent`.
+- `RenameLabelAction : ICanvasAction` in `WorkflowCanvas.razor` — undoable rename
+  command that pairs with the existing `AddNodeAction`/`AddEdgeAction` undo stack.
+
+**New tests** (`tests/DBAIAzure.Tests/`):
+- `WorkflowNodeLabelEditTests.cs` — 8 pure domain tests covering rename Do/Undo,
+  no-op guard, edit state machine transitions, double-fire guard, re-edit value, and
+  empty label fallback.
+- `WorkflowNodeConfigPanelResetGuardTests.cs` — 5 pure domain tests covering the
+  same-node guard, different-node reset, close-then-reopen, null-node safety, and
+  undo order.
+
+**New E2E test stubs** (`tests/DBAIAzure.E2ETests/Tests/WorkflowNodeLabelEditTests.cs`):
+- 5 Playwright stubs (Scenarios 1–5 from `specs/006-fix-node-text-editing/quickstart.md`)
+  for config-panel reset guard, double-click rename, Escape cancel, Ctrl+Z undo, and
+  empty-label placeholder.
+
 ### Changed — E2E tests upgraded to real user interactions
 
 Replaced four "element presence" WorkflowBuilder tests with tests that physically click,
