@@ -91,6 +91,24 @@ public sealed class WorkflowBuilderTests : E2ETestBase
         await runBtn.WaitForAsync(new() { State = WaitForSelectorState.Visible });
     }
 
+    [Fact]
+    public async Task RootBuilderUrl_Loads_WithoutDatabaseError()
+    {
+        // Navigate to /workflow-builder (no id) — this triggers ListByOwnerAsync which
+        // queries the WorkflowDefinitions table. Catches table-name mismatches like the
+        // "no such table: Workflows" regression caused by EF Core convention vs raw SQL.
+        await NavigateAsync("/workflow-builder");
+
+        // If the DB query throws, Blazor renders an error page. Assert no unhandled error.
+        var bodyText = await Page.InnerTextAsync("body");
+        Assert.DoesNotContain("unhandled exception", bodyText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("no such table", bodyText, StringComparison.OrdinalIgnoreCase);
+
+        // The builder shell must be in the DOM (either modal or canvas, not an error page).
+        var shell = Page.Locator("div.workflow-builder-shell");
+        await shell.WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 15_000 });
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
     /// <summary>
