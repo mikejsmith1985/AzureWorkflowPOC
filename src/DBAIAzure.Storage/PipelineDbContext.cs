@@ -64,6 +64,10 @@ public class PipelineDbContext : DbContext
 
         modelBuilder.Entity<WorkflowDefinitionRecord>(entity =>
         {
+            // Map to "WorkflowDefinitions" — the name used by the idempotent raw-SQL migration
+            // in Program.cs. Without this, EF Core defaults to the DbSet property name "Workflows",
+            // which differs from the table created for databases that pre-date the Workflow Builder.
+            entity.ToTable("WorkflowDefinitions");
             entity.HasKey(r => r.Id);
             entity.Property(r => r.Id).ValueGeneratedNever();
             // Enforces the personal-gallery uniqueness rule: each user can have only one workflow with a given name.

@@ -42,7 +42,12 @@ non-developer.
 Tests use **xUnit** and run via `dotnet test`. Unit tests are 100% mocked (Moq or hand-rolled
 fakes), have no I/O, and run in milliseconds. Integration tests exercise real infrastructure
 (real Azure emulators/Storage, a real Semantic Kernel, a real HTTP listener) — never mocked
-drivers. Follow Red → Green → Refactor: the failing test is written before the implementation.
+drivers. E2E tests use **Playwright** (Microsoft.Playwright, headless Chromium) — launched via
+`scripts/run-e2e.ps1`, never by building the binary directly. The WebAppFixture starts the
+real Kestrel server on port 5099 and Playwright connects via genuine HTTP/SignalR. Every
+navigation tab and key interactive element MUST have a Playwright test before a feature is
+considered shippable. Follow Red → Green → Refactor: the failing test is written before the
+implementation.
 
 ## Article VI — Documentation Discipline
 

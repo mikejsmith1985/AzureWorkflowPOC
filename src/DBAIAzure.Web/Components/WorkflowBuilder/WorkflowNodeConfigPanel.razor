@@ -230,6 +230,11 @@
     private System.Threading.CancellationTokenSource? _goalPreviewDebounce;
     private bool _isFirstRenderComplete;
 
+    // Guards OnParametersSet() against resetting in-progress edits when the parent
+    // re-renders with the same node (e.g. the 200ms goal-preview debounce firing).
+    // Cleared in OnCloseAsync() so re-opening the panel for the same node reinitialises correctly.
+    private string? _lastInitialisedNodeId;
+
     // ── Lifecycle ────────────────────────────────────────────────────────────────
 
     protected override void OnParametersSet()
@@ -238,10 +243,16 @@
         _isFirstRenderComplete = false;
 
         if (Node is null) return;
+
+        // Guard: if the same node is already open (e.g. parent re-rendering due to the
+        // goal-preview debounce) preserve in-progress edits — do not reset fields.
+        if (Node.Id == _lastInitialisedNodeId) return;
+
         _goalPrompt  = Node.GoalPrompt  ?? string.Empty;
         _inputLabel  = Node.InputLabel  ?? string.Empty;
         _outputLabel = Node.OutputLabel ?? string.Empty;
         _showRequiredBanner = false;
+        _lastInitialisedNodeId = Node.Id;
 
         // Populate the Trigger-specific field from the JSON config blob.
         if (Node.NodeType == WorkflowNodeType.Trigger && !string.IsNullOrWhiteSpace(Node.FunctionConfig))
@@ -357,6 +368,8 @@
 
     private async Task OnCloseAsync()
     {
+        // Clear the guard so that re-opening the same node will reinitialise fields from the saved record.
+        _lastInitialisedNodeId = null;
         _showRequiredBanner = false;
         await OnCloseRequested.InvokeAsync();
     }

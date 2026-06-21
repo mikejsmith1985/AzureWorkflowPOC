@@ -7,6 +7,124 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — Undo label revert not updating DOM (spec 006 T018)
+
+- `ApplyLabelChange` now calls `nodeModel.Refresh()` instead of `_diagram.Refresh()`.
+  ZBD's per-node `Refresh()` sets the `_shouldRender` flag and calls `StateHasChanged()`
+  directly on the node's widget, guaranteeing a re-render when a label changes outside of
+  an active edit session (undo / redo). The diagram-level `Refresh()` lacked this guarantee
+  under ZBD 3.0.4.1's `NodeRenderer` optimisation.
+- Added `IsLabelEditing` flag on `WorkflowNodeModel`; ZBD keyboard shortcuts
+  (`Delete`/`Backspace`) now check this flag so typing in the label input never
+  accidentally deletes the node.
+- E2E test `Scenario4_LabelUndo_CtrlZ_RestoresPreviousLabel` now uses the toolbar Undo
+  button (more reliable than keyboard Ctrl+Z in Blazor Server SignalR tests) and waits for
+  DOM re-renders rather than fixed timeouts. All 31 E2E tests pass.
+
+### Fixed — Node text editing in Workflow Builder (spec 006)
+
+Two-part fix for the bug where users could not type into workflow node fields because
+text input was silently reset by Blazor re-renders.
+
+**Part 1 — Config panel reset guard** (`WorkflowNodeConfigPanel.razor`):
+- Added `_lastInitialisedNodeId` field that guards `OnParametersSet()` from resetting
+  `_goalPrompt`, `_inputLabel`, and `_outputLabel` when the same node is re-rendered
+  (e.g. while the 200 ms goal-preview debounce fires a parent `StateHasChanged()`).
+- `OnCloseAsync()` clears the guard so re-opening the panel for the same node
+  correctly reinitialises fields from the saved node record.
+
+**Part 2 — Inline label editing** (`WorkflowNodeRenderer.razor`):
+- Node label `<span>` is now a dual-state span/input: double-clicking the label text
+  switches to an `<input>` field with the current label pre-filled.
+- `_labelBuffer` is a local field never written by `OnParametersSet` — it is fully
+  isolated from parent re-renders while the user is typing.
+- Committing with Enter or blurring the input calls `Node.RaiseLabelCommitted()`;
+  pressing Escape restores the pre-edit label without raising the committed event.
+- `@ondblclick:stopPropagation="true"` on the label container prevents the node-body
+  double-click handler (which opens the config panel) from firing when renaming.
+- Keyboard accessibility: `tabindex="0"` on the outer node div; `Enter` activates
+  inline editing when the node has keyboard focus.
+- Empty committed labels display a type-appropriate fallback ("AI Agent", "Notify",
+  etc.) rather than a blank header; the fallback is never stored or pre-filled.
+
+**New types** (`WorkflowDiagramModels.cs`):
+- `LabelCommitArgs readonly record struct` — carries `NodeId`, `PreviousLabel`,
+  `NewLabel` from the renderer's committed event to the canvas handler.
+- `LabelCommitted event Action<string, string>?` on `WorkflowNodeModel` (alongside
+  the existing `DoubleClicked` event) — the signalling channel that avoids the
+  EventCallback limitation when components are registered via `RegisterComponent`.
+- `RenameLabelAction : ICanvasAction` in `WorkflowCanvas.razor` — undoable rename
+  command that pairs with the existing `AddNodeAction`/`AddEdgeAction` undo stack.
+
+**New tests** (`tests/DBAIAzure.Tests/`):
+- `WorkflowNodeLabelEditTests.cs` — 8 pure domain tests covering rename Do/Undo,
+  no-op guard, edit state machine transitions, double-fire guard, re-edit value, and
+  empty label fallback.
+- `WorkflowNodeConfigPanelResetGuardTests.cs` — 5 pure domain tests covering the
+  same-node guard, different-node reset, close-then-reopen, null-node safety, and
+  undo order.
+
+**New E2E test stubs** (`tests/DBAIAzure.E2ETests/Tests/WorkflowNodeLabelEditTests.cs`):
+- 5 Playwright stubs (Scenarios 1–5 from `specs/006-fix-node-text-editing/quickstart.md`)
+  for config-panel reset guard, double-click rename, Escape cancel, Ctrl+Z undo, and
+  empty-label placeholder.
+
+### Changed — E2E tests upgraded to real user interactions
+
+Replaced four "element presence" WorkflowBuilder tests with tests that physically click,
+type, and interact the way a real user would, then assert on the resulting state change:
+
+- `WorkflowName_ClickToRename_CommitsNewName` — clicks the name span, types "My Renamed
+  Workflow", presses Enter, asserts the span shows the new name.
+- `PaletteSearch_TypeKeyword_FiltersVisibleNodes` — types "trigger" in the palette search
+  box (100 ms debounce), asserts "Start / Trigger" remains visible while "Notify" is hidden.
+- `PaletteClickToPlace_AddsNewNodeToCanvas` — clicks "Add Reason & Decide node to canvas",
+  waits for a new `.workflow-node` div to appear in the diagram.
+- `RunButton_Click_OpensRunInputModal` — clicks the ▶ Run button, fills the scenario
+  textarea, clicks Cancel, asserts the modal closes.
+
+`ChatToggleButton_Click_OpensChatPanel` and `RootBuilderUrl_Loads_WithoutDatabaseError`
+retained unchanged.
+
+### Fixed — WorkflowDefinitions table name mismatch
+
+- `PipelineDbContext`: added `.ToTable("WorkflowDefinitions")` to the `WorkflowDefinitionRecord`
+  model configuration so EF Core queries the table name used by the raw-SQL idempotent migration,
+  not the DbSet property name `Workflows`. Databases created before the Visual Workflow Builder
+  feature landed had `WorkflowDefinitions` (from the raw SQL) but not `Workflows` (from EF Core
+  convention), causing `SqliteException: no such table: Workflows` on `/workflow-builder`.
+- Added E2E regression test `RootBuilderUrl_Loads_WithoutDatabaseError` that navigates to
+  `/workflow-builder` (the user-facing path) and asserts no unhandled database error, closing
+  the gap where all prior tests used `/workflow-builder/new` and bypassed `ListByOwnerAsync`.
+
+### Fixed — Playwright E2E Test Suite (all 17 tests now pass)
+
+- `WebAppFixture`: resolved user-local `.dotnet/dotnet.exe` instead of the system dotnet
+  at `C:\Program Files\dotnet`, which lacks the ASP.NET Core 8 runtime, causing all tests
+  to time out waiting for the app to start.
+- `WorkflowBuilderTests`: navigate to `/workflow-builder/new` (non-GUID id bypasses the
+  first-run entry choice modal and loads the example workflow directly); use
+  `Page.WaitForFunctionAsync` to check `getBoundingClientRect().height > 0` instead of
+  Playwright's static visibility heuristic, which races with Tailwind Play CDN's async CSS
+  injection via MutationObserver; corrected all CSS selectors to match actual rendered HTML
+  (`#workflow-canvas-drop-zone`, `.workflow-palette`, `.run-btn-ready`,
+  `span[aria-label='Rename workflow — click to edit']`, `button[aria-label='Open chat panel']`).
+- `NavigationTests`: same `/workflow-builder/new` + `WaitForFunctionAsync` canvas check.
+- `ThreadsPageTests`: fix connector-modal selector to `h2:has-text('Connector Configuration')`
+  (the modal renders a styled div without `role="dialog"`, not a `<dialog>` element).
+
+### Added — Playwright E2E Test Suite
+
+- New project `tests/DBAIAzure.E2ETests` with 17 Playwright tests covering every navigation
+  tab (Threads, Graph, New Ticket, Workflow Builder, Workflow Gallery), the canvas, node
+  palette, toolbar, chat toggle, connector gear icon, and run button.
+- `WebAppFixture` starts the real Blazor Server app on port 5099 via a child process so
+  Playwright connects through genuine HTTP/SignalR — no TestServer shortcuts.
+- `PlaywrightFixture` manages a shared headless Chromium browser; each test gets an isolated
+  `IBrowserContext`.
+- `scripts/run-e2e.ps1` — one-command build + browser install + test run.
+- Constitution Article V updated: Playwright replaces Cypress as the mandatory E2E framework.
+
 ### Added — Workflow Builder UX Master Review (`specs/005-workflow-ux-redesign`)
 
 All 10 UX improvements shipped on `feature/visual-workflow-builder`:
