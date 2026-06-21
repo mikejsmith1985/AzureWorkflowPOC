@@ -1,5 +1,6 @@
-// Validates the Visual Workflow Builder's key interactive elements.
-// If the canvas, palette, toolbar, or chat panel fail to render this suite catches it.
+// Validates the Visual Workflow Builder by simulating real user actions — clicking, typing,
+// and interacting with the canvas exactly as a user would. No test stops at "is this element
+// present?"; every test verifies that the interaction produces the expected state change.
 using DBAIAzure.E2ETests.Infrastructure;
 using Microsoft.Playwright;
 
@@ -7,104 +8,151 @@ namespace DBAIAzure.E2ETests.Tests;
 
 /// <summary>
 /// End-to-end tests for the Visual Workflow Builder page (/workflow-builder).
-/// Navigates to /workflow-builder/new so the example workflow loads directly,
-/// bypassing the first-run entry choice modal (which only shows for an empty DB).
-/// Covers canvas render, node palette, toolbar, chat toggle, and run button.
+/// Navigates to /workflow-builder/new so the 4-node example workflow loads directly,
+/// bypassing the first-run entry choice modal. Tests drive real user interactions and
+/// assert on visible state changes — not element presence alone.
 /// </summary>
 public sealed class WorkflowBuilderTests : E2ETestBase
 {
     // /workflow-builder/new — "new" is not a valid GUID so the page falls through to
-    // BuildExampleWorkflow(), which loads a 4-node example without the entry-choice modal.
+    // BuildExampleWorkflow(), which loads a 4-node example (all configured, CanRun=true)
+    // without querying the DB or showing the entry-choice modal.
     private const string BuilderUrl = "/workflow-builder/new";
 
     public WorkflowBuilderTests(WebAppFixture webApp, PlaywrightFixture playwright)
         : base(webApp, playwright) { }
 
     [Fact]
-    public async Task CanvasContainer_IsVisible_OnLoad()
+    public async Task WorkflowName_ClickToRename_CommitsNewName()
     {
+        // Simulates: click the name span → type a new name → press Enter → new name is shown.
         await NavigateAsync(BuilderUrl);
         await WaitForToolbarAsync();
 
-        // WorkflowCanvas.razor renders with id="workflow-canvas-drop-zone".
-        // Use a JS-evaluated dimension check so Tailwind Play CDN's async CSS injection
-        // does not cause a race with Playwright's static visibility heuristic.
+        // Click the display span — WorkflowToolbar.razor replaces it with an <input> for inline editing.
+        await Page.ClickAsync("span[aria-label='Rename workflow — click to edit']");
+
+        var nameInput = Page.Locator("input[aria-label='Edit workflow name']");
+        await nameInput.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+        await nameInput.FillAsync("My Renamed Workflow");
+        await nameInput.PressAsync("Enter");
+
+        // After Enter, the input collapses back to the display span with the committed name.
+        var nameSpan = Page.Locator("span[aria-label='Rename workflow — click to edit']");
+        await nameSpan.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+        Assert.Equal("My Renamed Workflow", (await nameSpan.InnerTextAsync()).Trim());
+    }
+
+    [Fact]
+    public async Task PaletteSearch_TypeKeyword_FiltersVisibleNodes()
+    {
+        // Simulates: type in the palette search box and confirm the list narrows to matching nodes.
+        await NavigateAsync(BuilderUrl);
+        await WaitForToolbarAsync();
+
+        // WorkflowNodePalette.razor debounces search input at 100 ms.
+        // Palette node labels: "Start / Trigger", "Reason & Decide", "Smart Branch", "Notify", etc.
+        var searchBox = Page.Locator("input[placeholder='Search nodes…']");
+        await searchBox.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        await searchBox.FillAsync("trigger");
+        await Page.WaitForTimeoutAsync(250);
+
+        // The "Start / Trigger" entry must remain visible after filtering.
+        var triggerButton = Page.Locator("button[aria-label='Add Start / Trigger node to canvas']");
+        await triggerButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+
+        // "Notify" has no match for "trigger" in label, subtitle, tooltip, or search tags.
+        var notifyButton = Page.Locator("button[aria-label='Add Notify node to canvas']");
+        Assert.False(await notifyButton.IsVisibleAsync(),
+            "Non-matching palette nodes should be hidden by the search filter.");
+    }
+
+    [Fact]
+    public async Task PaletteClickToPlace_AddsNewNodeToCanvas()
+    {
+        // Simulates: click an "Add … to canvas" palette button and confirm a new node tile appears.
+        await NavigateAsync(BuilderUrl);
+        await WaitForToolbarAsync();
+
+        // Ensure the canvas container has actual layout height before counting nodes.
+        // Blazor Server renders nodes in OnAfterRenderAsync, which may run after the toolbar
+        // becomes visible, so we read the baseline count after the canvas is painted.
         await Page.WaitForFunctionAsync(@"
             () => {
                 const el = document.getElementById('workflow-canvas-drop-zone');
                 return el !== null && el.getBoundingClientRect().height > 0;
             }");
+        var nodeCountBefore = await Page.Locator(".workflow-node").CountAsync();
+
+        // Click "Add Reason & Decide node to canvas" — multiple AgenticReason nodes can be placed freely.
+        // Avoid the Trigger button: the example workflow already has one, so clicking it shows a toast
+        // (PlaceNodeDefaultPositionAsync guards against duplicate triggers) without adding a node.
+        var addButton = Page.Locator("button[aria-label='Add Reason & Decide node to canvas']");
+        await addButton.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        await addButton.ClickAsync();
+
+        // A new .workflow-node element must appear in the diagram.
+        // 10 s timeout covers multi-cycle Blazor re-renders on slower machines.
+        await Page.WaitForFunctionAsync(
+            $"() => document.querySelectorAll('.workflow-node').length > {nodeCountBefore}",
+            null, new PageWaitForFunctionOptions { Timeout = 10_000 });
+
+        Assert.True(await Page.Locator(".workflow-node").CountAsync() > nodeCountBefore,
+            "A new .workflow-node tile must appear after a palette click-to-place.");
     }
 
     [Fact]
-    public async Task NodePalette_IsVisible_OnLoad()
+    public async Task RunButton_Click_OpensRunInputModal()
     {
+        // Simulates: click Run → fill scenario → cancel. Proves the run modal renders and accepts input.
         await NavigateAsync(BuilderUrl);
         await WaitForToolbarAsync();
 
-        // WorkflowNodePalette.razor renders a div.workflow-palette containing palette-entry items.
-        var palette = Page.Locator(".workflow-palette").First;
-        await palette.WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 10_000 });
+        // Example workflow has CanRun=true — the Run button carries class "run-btn-ready".
+        var runButton = Page.Locator(".run-btn-ready");
+        await runButton.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        await runButton.ClickAsync();
 
-        // At least one draggable palette entry must be present.
-        var entry = Page.Locator("div.palette-entry").First;
-        await entry.WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 5_000 });
-    }
+        // WorkflowRunInputModal.razor renders role="dialog" aria-modal="true" with h2 "Run Workflow".
+        var modal = Page.Locator("div[role='dialog'][aria-modal='true']");
+        await modal.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+        await Assertions.Expect(modal.Locator("h2")).ToHaveTextAsync("Run Workflow");
 
-    [Fact]
-    public async Task Toolbar_WorkflowNameInput_IsVisible()
-    {
-        await NavigateAsync(BuilderUrl);
-        await WaitForToolbarAsync();
+        // The scenario textarea must be present and accept text input.
+        var scenarioTextarea = modal.Locator("textarea#scenario-input");
+        await scenarioTextarea.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        await scenarioTextarea.FillAsync("A P1 outage from a customer whose database is down.");
 
-        // The toolbar shows the workflow name as a clickable span in display mode.
-        // aria-label="Rename workflow — click to edit" is set on that span.
-        var nameSpan = Page.Locator("span[aria-label='Rename workflow — click to edit']").First;
-        await nameSpan.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
+        // Cancel closes the modal without triggering any run.
+        await modal.Locator("button[aria-label='Cancel run']").ClickAsync();
+        await modal.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 5_000 });
     }
 
     [Fact]
     public async Task ChatToggleButton_Click_OpensChatPanel()
     {
+        // Simulates: click the chat toggle button and confirm the chat panel slides open.
         await NavigateAsync(BuilderUrl);
         await WaitForToolbarAsync();
 
-        // The toolbar has a chat toggle button; aria-label is "Open chat panel" when closed.
-        var toggle = Page.Locator("button[aria-label='Open chat panel']").First;
-        await toggle.WaitForAsync(new() { State = WaitForSelectorState.Visible });
-        await toggle.ClickAsync();
+        await Page.ClickAsync("button[aria-label='Open chat panel']");
 
-        // After clicking, the chat panel <aside> becomes visible.
-        var chatPanel = Page.Locator("aside.workflow-chat-panel").First;
-        await chatPanel.WaitForAsync(new() { State = WaitForSelectorState.Visible });
-    }
-
-    [Fact]
-    public async Task RunButton_IsPresent_OnLoad()
-    {
-        await NavigateAsync(BuilderUrl);
-        await WaitForToolbarAsync();
-
-        // The example workflow has all nodes configured, so CanRun = true and
-        // the Run button has class "run-btn-ready". It must be present in the toolbar.
-        var runBtn = Page.Locator(".workflow-toolbar .run-btn-ready").First;
-        await runBtn.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        var chatPanel = Page.Locator("aside.workflow-chat-panel");
+        await chatPanel.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
     }
 
     [Fact]
     public async Task RootBuilderUrl_Loads_WithoutDatabaseError()
     {
-        // Navigate to /workflow-builder (no id) — this triggers ListByOwnerAsync which
-        // queries the WorkflowDefinitions table. Catches table-name mismatches like the
-        // "no such table: Workflows" regression caused by EF Core convention vs raw SQL.
+        // Navigate to /workflow-builder (no id) — triggers ListByOwnerAsync → queries WorkflowDefinitions.
+        // Catches the "no such table: Workflows" regression (EF Core name vs raw SQL migration name).
         await NavigateAsync("/workflow-builder");
 
-        // If the DB query throws, Blazor renders an error page. Assert no unhandled error.
         var bodyText = await Page.InnerTextAsync("body");
         Assert.DoesNotContain("unhandled exception", bodyText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("no such table", bodyText, StringComparison.OrdinalIgnoreCase);
 
-        // The builder shell must be in the DOM (either modal or canvas, not an error page).
+        // Either the entry-choice modal or the canvas shell must be in the DOM — not an error page.
         var shell = Page.Locator("div.workflow-builder-shell");
         await shell.WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 15_000 });
     }
@@ -112,8 +160,8 @@ public sealed class WorkflowBuilderTests : E2ETestBase
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Waits for the toolbar to be visible, confirming Blazor has completed its first
-    /// interactive render pass. Must be called before asserting any page element.
+    /// Waits for the toolbar to be visible, confirming Blazor's first interactive render pass
+    /// completed over SignalR. Must be called before any interaction test proceeds.
     /// </summary>
     private async Task WaitForToolbarAsync()
     {

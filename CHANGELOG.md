@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — E2E tests upgraded to real user interactions
+
+Replaced four "element presence" WorkflowBuilder tests with tests that physically click,
+type, and interact the way a real user would, then assert on the resulting state change:
+
+- `WorkflowName_ClickToRename_CommitsNewName` — clicks the name span, types "My Renamed
+  Workflow", presses Enter, asserts the span shows the new name.
+- `PaletteSearch_TypeKeyword_FiltersVisibleNodes` — types "trigger" in the palette search
+  box (100 ms debounce), asserts "Start / Trigger" remains visible while "Notify" is hidden.
+- `PaletteClickToPlace_AddsNewNodeToCanvas` — clicks "Add Reason & Decide node to canvas",
+  waits for a new `.workflow-node` div to appear in the diagram.
+- `RunButton_Click_OpensRunInputModal` — clicks the ▶ Run button, fills the scenario
+  textarea, clicks Cancel, asserts the modal closes.
+
+`ChatToggleButton_Click_OpensChatPanel` and `RootBuilderUrl_Loads_WithoutDatabaseError`
+retained unchanged.
+
 ### Fixed — WorkflowDefinitions table name mismatch
 
 - `PipelineDbContext`: added `.ToTable("WorkflowDefinitions")` to the `WorkflowDefinitionRecord`
