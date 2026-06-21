@@ -397,6 +397,56 @@ public sealed class WorkflowNodeLabelEditTests : E2ETestBase
         Assert.True(nodeCountAfter > 0, "The example workflow nodes must still be present after re-navigation.");
     }
 
+    // ── Scenario 9: Rename persists across navigation (resume most recent) ────────
+
+    [Fact]
+    public async Task Scenario9_RenamedLabel_PersistsAfterNavigatingAway()
+    {
+        // Reproduces the reported bug: rename a node, save, navigate away, and the rename must
+        // survive. Bare /workflow-builder must reopen the most-recently-edited workflow instead
+        // of regenerating a throwaway example, so the committed label is still present.
+        // A unique label avoids collision with workflows left by earlier test runs in the shared DB.
+        var uniqueLabel = "Persisted Step " + Guid.NewGuid().ToString("N")[..8];
+
+        await NavigateAsync(BuilderUrl);
+        await WaitForToolbarAsync();
+
+        // Rename an EXISTING, already-connected example node (not a fresh one) so the workflow stays
+        // structurally valid and the save is accepted — this mirrors the real-world repro of editing
+        // the default workflow's node text.
+        await Page.WaitForFunctionAsync(@"
+            () => document.querySelectorAll('.workflow-node').length > 0");
+
+        var targetNode = Page.Locator(".workflow-node").First;
+        var labelSpan  = targetNode.Locator(".node-label-text, [data-testid='node-label']").First;
+        var labelInput = targetNode.Locator("input.node-label-input, input[aria-label*='label' i]").First;
+
+        await labelSpan.DblClickAsync();
+        await labelInput.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 3_000 });
+        await labelInput.FillAsync(uniqueLabel);
+        await labelInput.PressAsync("Enter");
+        await labelSpan.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 3_000 });
+
+        // Save explicitly (Ctrl+S equivalent) and wait for the "Auto-saved" timestamp to confirm persistence.
+        var saveButton = Page.Locator("button[aria-label='Save workflow (Ctrl+S)']");
+        await saveButton.ClickAsync();
+        await Page.Locator("text=Auto-saved").First
+            .WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+
+        // Navigate away to the bare builder URL — this must resume the most-recent (just-saved) workflow.
+        await NavigateAsync("/workflow-builder");
+        await WaitForToolbarAsync();
+
+        // The renamed label must still be present on the resumed canvas.
+        await Page.WaitForFunctionAsync(
+            @"(expected) => Array.from(document.querySelectorAll('[data-testid=""node-label""]'))
+                       .some(el => el.textContent.trim() === expected)",
+            uniqueLabel, new() { Timeout = 5_000 });
+
+        var resumedLabels = await Page.Locator("[data-testid='node-label']").AllInnerTextsAsync();
+        Assert.Contains(uniqueLabel, resumedLabels.Select(text => text.Trim()));
+    }
+
     // ── Shared helper ─────────────────────────────────────────────────────────────
 
     private async Task WaitForToolbarAsync()
