@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — Undo label revert not updating DOM (spec 006 T018)
+
+- `ApplyLabelChange` now calls `nodeModel.Refresh()` instead of `_diagram.Refresh()`.
+  ZBD's per-node `Refresh()` sets the `_shouldRender` flag and calls `StateHasChanged()`
+  directly on the node's widget, guaranteeing a re-render when a label changes outside of
+  an active edit session (undo / redo). The diagram-level `Refresh()` lacked this guarantee
+  under ZBD 3.0.4.1's `NodeRenderer` optimisation.
+- Added `IsLabelEditing` flag on `WorkflowNodeModel`; ZBD keyboard shortcuts
+  (`Delete`/`Backspace`) now check this flag so typing in the label input never
+  accidentally deletes the node.
+- E2E test `Scenario4_LabelUndo_CtrlZ_RestoresPreviousLabel` now uses the toolbar Undo
+  button (more reliable than keyboard Ctrl+Z in Blazor Server SignalR tests) and waits for
+  DOM re-renders rather than fixed timeouts. All 31 E2E tests pass.
+
 ### Fixed — Node text editing in Workflow Builder (spec 006)
 
 Two-part fix for the bug where users could not type into workflow node fields because

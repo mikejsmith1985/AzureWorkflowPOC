@@ -142,6 +142,7 @@
         _previousLabelAtEditStart = Node.WorkflowNode.Label;
         _labelBuffer              = _previousLabelAtEditStart;
         _isEditingLabel           = true;
+        Node.IsLabelEditing       = true;
         InvokeAsync(async () =>
         {
             await Task.Yield();  // let Blazor render the input element
@@ -168,14 +169,16 @@
     private void CommitLabel()
     {
         if (!_isEditingLabel) return;  // double-fire guard
-        _isEditingLabel = false;
+        _isEditingLabel     = false;
+        Node.IsLabelEditing = false;
         Node.RaiseLabelCommitted(_previousLabelAtEditStart, _labelBuffer);
     }
 
     /// <summary>Cancels the edit and restores the display span without firing a commit event.</summary>
     private void CancelLabel()
     {
-        _isEditingLabel = false;
+        _isEditingLabel     = false;
+        Node.IsLabelEditing = false;
     }
 
     /// <summary>

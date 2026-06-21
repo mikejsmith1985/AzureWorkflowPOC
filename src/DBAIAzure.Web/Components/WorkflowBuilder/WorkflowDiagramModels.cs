@@ -33,6 +33,14 @@ public sealed class WorkflowNodeModel : NodeModel
     /// Reset when a new edge is added to this node.
     /// </summary>
     public bool IsIsolated { get; set; }
+
+    /// <summary>
+    /// True while the user is actively editing this node's label via the inline input.
+    /// Set by WorkflowNodeRenderer on StartLabelEdit and cleared on CommitLabel/CancelLabel.
+    /// WorkflowCanvas reads this flag to suppress the Delete/Backspace keyboard shortcut so
+    /// typing in the input does not accidentally delete the node from the canvas.
+    /// </summary>
+    public bool IsLabelEditing { get; set; }
     /// <summary>
     /// Initialises the diagram node at the given canvas position and retains the
     /// domain record so that property panels and serialisation paths can read it

@@ -200,9 +200,11 @@
         _diagram.SelectionChanged   += OnSelectionChanged;
 
         // Replace the built-in Delete/Backspace handler with our custom one that supports undo.
+        // Guard: skip deletion when any node label is being edited so that Delete/Backspace typed
+        // in the label input does not also delete the node from the canvas.
         var kbShortcuts = _diagram.GetBehavior<KeyboardShortcutsBehavior>()!;
-        kbShortcuts.SetShortcut("Delete",    false, false, false, async (diagram) => { HandleDeleteSelected(); await ValueTask.CompletedTask; });
-        kbShortcuts.SetShortcut("Backspace", false, false, false, async (diagram) => { HandleDeleteSelected(); await ValueTask.CompletedTask; });
+        kbShortcuts.SetShortcut("Delete",    false, false, false, async (diagram) => { if (!AnyNodeLabelEditing()) HandleDeleteSelected(); await ValueTask.CompletedTask; });
+        kbShortcuts.SetShortcut("Backspace", false, false, false, async (diagram) => { if (!AnyNodeLabelEditing()) HandleDeleteSelected(); await ValueTask.CompletedTask; });
 
         // Sync keyboard undo/redo shortcuts.
         kbShortcuts.SetShortcut("z", false, false, true, (diagram) => { Undo(); return ValueTask.CompletedTask; });
@@ -455,6 +457,14 @@
 
     /// <summary>
     /// Deletes all currently selected nodes with undo support.
+    /// <summary>
+    /// Returns true when any node on the canvas currently has its inline label input open.
+    /// Used by the Delete/Backspace keyboard shortcuts to avoid accidentally deleting a node
+    /// while the user is editing its label.
+    /// </summary>
+    private bool AnyNodeLabelEditing() =>
+        _diagram.Nodes.OfType<WorkflowNodeModel>().Any(nm => nm.IsLabelEditing);
+
     /// After deletion, any former neighbours that have zero remaining connections
     /// receive the amber "island" badge to alert the user.
     /// Replaces the library's KeyboardShortcutsDefaults.DeleteSelection so we can
@@ -1001,7 +1011,10 @@
         if (nodeModel is null) return;
 
         nodeModel.WorkflowNode = nodeModel.WorkflowNode with { Label = newLabel };
-        _diagram.Refresh();
+        // nodeModel.Refresh() sets _shouldRender=true on ZBD's NodeWidget and calls StateHasChanged()
+        // on the specific node renderer — this is the reliable path when the label changes outside of
+        // an active edit session (e.g. undo/redo) and CommitLabel()'s own StateHasChanged() hasn't run.
+        nodeModel.Refresh();
         _ = NotifyWorkflowChanged();
     }
 
