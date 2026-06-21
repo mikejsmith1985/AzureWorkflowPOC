@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — WorkflowDefinitions table name mismatch
+
+- `PipelineDbContext`: added `.ToTable("WorkflowDefinitions")` to the `WorkflowDefinitionRecord`
+  model configuration so EF Core queries the table name used by the raw-SQL idempotent migration,
+  not the DbSet property name `Workflows`. Databases created before the Visual Workflow Builder
+  feature landed had `WorkflowDefinitions` (from the raw SQL) but not `Workflows` (from EF Core
+  convention), causing `SqliteException: no such table: Workflows` on `/workflow-builder`.
+- Added E2E regression test `RootBuilderUrl_Loads_WithoutDatabaseError` that navigates to
+  `/workflow-builder` (the user-facing path) and asserts no unhandled database error, closing
+  the gap where all prior tests used `/workflow-builder/new` and bypassed `ListByOwnerAsync`.
+
 ### Fixed — Playwright E2E Test Suite (all 17 tests now pass)
 
 - `WebAppFixture`: resolved user-local `.dotnet/dotnet.exe` instead of the system dotnet
