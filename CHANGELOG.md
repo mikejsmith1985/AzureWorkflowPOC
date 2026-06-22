@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Node Realization: turn plain-language workflows into production-ready ones (spec 007)
+
+A new **"Make it real"** flow converts a plain-language workflow into runnable, production-ready
+configuration. The assistant proposes per-node configuration, the user reviews and accepts it, and the
+workflow reports an honest production-readiness verdict and runs from the accepted configuration. This
+is User Story 1 (the MVP) of spec `007-node-realization`.
+
+- **Per-node realized config** — each node type has a typed configuration record (agent instruction +
+  model + output shape; notify connector/recipient/message; route conditions + default; transform
+  mappings; data read/write; approval prompt/options; trigger initial-data shape). All are stored in the
+  existing `WorkflowNode.FunctionConfig` as a versioned envelope via `NodeConfigSerializer`, so no schema
+  migration is needed.
+- **`WorkflowRealizationService`** — proposes configuration for each node using schema-bound forced
+  tool-use (`IStructuredCompletionService`), so the model returns structured config, never free text
+  (Article VII). Proposing is read-only; `AcceptProposal` is a separate, deterministic, single-node
+  mutation that records an intent hash for out-of-date detection.
+- **`WorkflowReadinessService`** — evaluates production readiness: structural validity, per-node
+  intrinsic validity, cross-node consistency, and live connector health. Validation of realized config
+  lives here (the Run gate), keeping `WorkflowValidator` structural-only so plain-language drafts still
+  save.
+- **Builder UI** — a "Make it real" toolbar action, a streaming review panel with a single explicit
+  "Accept all" confirmation, a production-readiness indicator, and a green "realized" badge on each node.
+- **Runtime executes from realized config** — each step receives its node's configuration as Semantic
+  Kernel step state (`AddStepFromType<TStep, TState>`). Agentic steps run the realized instruction;
+  notify steps resolve the bound connector (secrets fetched at execution, never in config — Article IX);
+  branch steps now route correctly (this fixed a pre-existing bug where the visual-workflow orchestrator
+  never populated route port labels, so branch nodes always failed); the trigger read-path reads
+  `TriggerNodeConfig`, back-compatible with the legacy `{initialDataDescription}` blob.
+- **Secrets discipline** — proposals, prompts, and `FunctionConfig` never carry secrets; only
+  `ConnectorType` references (Article IX).
+- Tests (TDD): unit coverage for config round-trip, proposal ordering/no-mutation, single-node accept +
+  provenance, and readiness ready/blocked/needs-input; an end-to-end runtime test proving the realized
+  instruction reaches the step through the real local process runtime; and a Playwright Scenario A
+  (`make-it-real → accept → readiness verdict → runnable`) verified green against the live app with a
+  real Anthropic key.
+
 ### Fixed — Saved edits silently reverted by stale auto-save (data loss)
 
 A saved workflow edit could be overwritten seconds later and revert to an older state, so "Save"
