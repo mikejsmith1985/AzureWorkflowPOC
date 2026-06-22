@@ -33,8 +33,10 @@ is User Story 1 (the MVP) of spec `007-node-realization`.
   Kernel step state (`AddStepFromType<TStep, TState>`). Agentic steps run the realized instruction;
   notify steps resolve the bound connector (secrets fetched at execution, never in config — Article IX);
   branch steps now route correctly (this fixed a pre-existing bug where the visual-workflow orchestrator
-  never populated route port labels, so branch nodes always failed); the trigger read-path reads
-  `TriggerNodeConfig`, back-compatible with the legacy `{initialDataDescription}` blob.
+  never populated route port labels, so branch nodes always failed); transform steps apply the realized
+  field mappings to structured (JSON) payloads; data steps resolve the bound connector and apply the
+  configured operation; the trigger read-path reads `TriggerNodeConfig`, back-compatible with the legacy
+  `{initialDataDescription}` blob.
 - **Secrets discipline** — proposals, prompts, and `FunctionConfig` never carry secrets; only
   `ConnectorType` references (Article IX).
 - Tests (TDD): unit coverage for config round-trip, proposal ordering/no-mutation, single-node accept +

@@ -72,9 +72,9 @@ public sealed class WorkflowRuntimeBuilder
             {
                 WorkflowNodeType.AgenticReason    => builder.AddStepFromType<AgenticNodeStep, NodeRuntimeConfig>(BuildNodeState(node)),
                 WorkflowNodeType.FunctionRoute    => builder.AddStepFromType<FunctionRouteStep, NodeRuntimeConfig>(BuildNodeState(node)),
-                WorkflowNodeType.FunctionTransform => builder.AddStepFromType<FunctionTransformStep>(),
+                WorkflowNodeType.FunctionTransform => builder.AddStepFromType<FunctionTransformStep, NodeRuntimeConfig>(BuildNodeState(node)),
                 WorkflowNodeType.FunctionNotify   => builder.AddStepFromType<FunctionNotifyStep, NodeRuntimeConfig>(BuildNodeState(node)),
-                WorkflowNodeType.FunctionData     => builder.AddStepFromType<FunctionDataStep>(),
+                WorkflowNodeType.FunctionData     => builder.AddStepFromType<FunctionDataStep, NodeRuntimeConfig>(BuildNodeState(node)),
                 WorkflowNodeType.HumanApproval    => builder.AddStepFromType<HumanApprovalStep, NodeRuntimeConfig>(BuildNodeState(node)),
 
                 // Guard: the enum may grow in future. Fail fast rather than silently skip so
