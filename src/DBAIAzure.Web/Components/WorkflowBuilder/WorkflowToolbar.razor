@@ -119,6 +119,7 @@
     @* Make it real — converts plain-language nodes into production-ready config (spec 007) *@
     <button @onclick="OnMakeItRealClicked"
             disabled="@(IsRealizing || !CanRealize)"
+            data-testid="make-it-real"
             class="toolbar-btn @(IsRealizing || !CanRealize ? "opacity-40 cursor-not-allowed text-gray-500" : "text-amber-300 hover:text-amber-200")"
             aria-label="Make it real — turn plain-language steps into production-ready configuration"
             title="Make it real">
@@ -130,6 +131,7 @@
     {
         <span class="flex items-center gap-1 text-xs @(IsProductionReady.Value ? "text-green-400" : "text-amber-400")"
               role="status" aria-live="polite"
+              data-testid="readiness-indicator"
               title="@(IsProductionReady.Value ? "Ready for production" : "Not ready for production")">
             <span class="w-2 h-2 rounded-full @(IsProductionReady.Value ? "bg-green-400" : "bg-amber-400")"></span>
             @(IsProductionReady.Value ? "Ready" : "Not ready")

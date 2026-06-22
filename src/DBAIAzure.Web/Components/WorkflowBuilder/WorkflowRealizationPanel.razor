@@ -7,7 +7,8 @@
 @if (IsOpen)
 {
     <div class="realization-panel w-96 bg-gray-900 border-l border-gray-800 flex flex-col h-full"
-         role="complementary" aria-label="Make it real — review proposals">
+         role="complementary" aria-label="Make it real — review proposals"
+         data-testid="realization-panel">
 
         @* ── Header ─────────────────────────────────────────────────────────────── *@
         <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
@@ -35,6 +36,7 @@
             @foreach (var proposal in Proposals)
             {
                 <div class="rounded-md border border-gray-800 bg-gray-850 p-3"
+                     data-testid="realization-proposal"
                      aria-label="@($"Proposal for node {proposal.NodeId}")">
                     <div class="flex items-center justify-between mb-1">
                         <span class="text-xs font-medium text-gray-200">@FriendlyType(proposal.NodeType)</span>
@@ -63,6 +65,7 @@
             {
                 <button @onclick="() => _isConfirming = true"
                         disabled="@(IsBusy || AcceptableCount == 0)"
+                        data-testid="accept-all"
                         class="w-full px-3 py-1.5 rounded-md text-sm font-medium
                                @(IsBusy || AcceptableCount == 0
                                    ? "bg-gray-700 text-gray-500 cursor-not-allowed"
@@ -76,6 +79,7 @@
                 <p class="text-xs text-gray-300">Apply @AcceptableCount proposal(s) to your workflow?</p>
                 <div class="flex gap-2">
                     <button @onclick="ConfirmAcceptAll"
+                            data-testid="accept-all-confirm"
                             class="flex-1 px-3 py-1.5 rounded-md text-sm bg-green-600 hover:bg-green-500 text-white"
                             aria-label="Confirm — apply all proposals">
                         Confirm
