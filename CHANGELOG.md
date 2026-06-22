@@ -29,6 +29,14 @@ is User Story 1 (the MVP) of spec `007-node-realization`.
   save.
 - **Builder UI** — a "Make it real" toolbar action, a streaming review panel with a single explicit
   "Accept all" confirmation, a production-readiness indicator, and a green "realized" badge on each node.
+- **Review & adjust (US2)** — each proposal can be accepted, **edited in plain language** (no raw
+  code/schema — the node type's primary field), rejected, or **regenerated** (re-proposed for that one
+  node). Single-node acceptance is deterministic and touches only its own node.
+- **Out-of-date detection (US2)** — when a realized node's plain-language intent (label, goal, or
+  connected edges) changes, its accepted config no longer matches what was asked; the node is reported
+  out-of-date and the workflow is no longer production-ready, via a content-based intent hash recorded
+  at acceptance (not a timestamp, so unrelated re-saves never raise a false signal). Readiness re-checks
+  on a meaningful edit only — pure position drags don't trigger a connector-health round-trip.
 - **Runtime executes from realized config** — each step receives its node's configuration as Semantic
   Kernel step state (`AddStepFromType<TStep, TState>`). Agentic steps run the realized instruction;
   notify steps resolve the bound connector (secrets fetched at execution, never in config — Article IX);

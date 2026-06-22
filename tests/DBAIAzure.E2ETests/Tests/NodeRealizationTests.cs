@@ -68,6 +68,39 @@ public sealed class NodeRealizationTests : E2ETestBase
         Assert.True(await runButton.IsEnabledAsync(), "The Run button must be enabled once the workflow is realized.");
     }
 
+    [Fact]
+    public async Task EditThenAccept_AppliesEditedProposal_AndRemovesItFromReview()
+    {
+        // US2 Scenario B (interactive element, Article V): a single proposal can be edited in plain
+        // language and accepted, which applies it to its node and removes its card from the review list.
+        await NavigateAsync(BuilderUrl);
+        await WaitForToolbarAsync();
+
+        await Page.Locator("[data-testid='make-it-real']").ClickAsync();
+        await Page.Locator("[data-testid='realization-panel']")
+            .WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
+
+        // Wait until proposing finishes (Accept-all enabled means every node has a proposal).
+        await Assertions.Expect(Page.Locator("[data-testid='accept-all']"))
+            .ToBeEnabledAsync(new() { Timeout = RealizationTimeoutMs });
+
+        var proposalsBefore = await Page.Locator("[data-testid='realization-proposal']").CountAsync();
+
+        // Open the inline editor on the first editable proposal, change the text, and save+accept.
+        var firstEdit = Page.Locator("[data-testid='proposal-edit']").First;
+        await firstEdit.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
+        await firstEdit.ClickAsync();
+
+        var editor = Page.Locator("[data-testid='proposal-edit-input']");
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+        await editor.FillAsync("Edited in plain language by the Scenario B test.");
+        await Page.Locator("[data-testid='proposal-edit-save']").ClickAsync();
+
+        // The edited proposal is applied to its node and removed from the review list.
+        await Assertions.Expect(Page.Locator("[data-testid='realization-proposal']"))
+            .ToHaveCountAsync(proposalsBefore - 1, new() { Timeout = 20_000 });
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
     /// <summary>Waits for the toolbar to be visible, confirming Blazor's first interactive render completed.</summary>
