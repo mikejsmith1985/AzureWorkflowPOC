@@ -12,6 +12,8 @@
 @inject IJSRuntime JSRuntime
 @inject IWorkflowExecutionOrchestrator ExecutionOrchestrator
 @inject IWorkflowCodeDiffService CodeDiffService
+@inject IWorkflowRealizationService RealizationService
+@inject IWorkflowReadinessService ReadinessService
 @using DBAIAzure.Core.Exceptions
 @using DBAIAzure.Core.Interfaces
 
@@ -37,10 +39,14 @@
                      OnSaveClicked="@OnSaveAsync"
                      OnChatToggleClicked="@OnChatToggleClicked"
                      OnSettingsClicked="@OnSettingsClicked"
+                     OnMakeItRealClicked="@OnMakeItRealClicked"
                      OnRunClicked="@OnRunClicked"
                      OnStopClicked="@OnStopClicked"
                      OnNameChanged="@OnWorkflowNameChanged"
                      OnShortcutsToggleClicked="@OnShortcutsToggleClicked"
+                     IsRealizing="@_isRealizing"
+                     CanRealize="@CanRealize"
+                     IsProductionReady="@(_readinessReport?.IsProductionReady)"
                      IsRunning="@(_activeRunId is not null)" />
 
     @* ── Body row ──────────────────────────────────────────────────────────────── *@
@@ -83,6 +89,13 @@
                                ExecutionTimeoutMinutes="@(_workflow?.Settings?.ExecutionTimeoutMinutes ?? 5)"
                                OnTimeoutSaved="@OnTimeoutSaved"
                                OnCloseRequested="@(() => _isSettingsOpen = false)" />
+
+        @* Realization review panel — opens when the user clicks "Make it real" (spec 007) *@
+        <WorkflowRealizationPanel IsOpen="@_isRealizationPanelOpen"
+                                  IsBusy="@_isRealizing"
+                                  Proposals="@_realizationProposals"
+                                  OnAcceptAll="@OnAcceptAllRealization"
+                                  OnCloseRequested="@(() => { _isRealizationPanelOpen = false; })" />
 
         @* Chat panel — opens as a right sidebar when IsChatOpen is true *@
         <WorkflowChatPanel @ref="_chatPanel"
@@ -152,6 +165,17 @@
     // One-shot flag: set immediately before our own programmatic URL rebind so the unsaved-changes
     // nav guard lets that synthetic navigation through instead of popping the confirmation modal.
     private bool _isProgrammaticNav;
+
+    // ── Node realization (spec 007) ───────────────────────────────────────────────
+    // Proposals streamed from the assistant during a "Make it real" pass, the panel's open state,
+    // a busy flag while proposing, and the most recent readiness evaluation (null until first run).
+    private List<RealizationProposal> _realizationProposals = new();
+    private bool _isRealizationPanelOpen;
+    private bool _isRealizing;
+    private WorkflowReadinessReport? _readinessReport;
+
+    /// <summary>"Make it real" is offered whenever the workflow has at least one node to realize.</summary>
+    private bool CanRealize => _workflow is { Nodes.Count: > 0 };
 
     /// <summary>
     /// The Run button is only enabled when every node in the workflow has been configured
@@ -512,6 +536,82 @@
             },
         };
         StateHasChanged();
+    }
+
+    // ── Node realization handlers (spec 007) ──────────────────────────────────────
+
+    /// <summary>
+    /// Runs a whole-workflow "Make it real" pass: asks the assistant to propose executable config for
+    /// every node, streaming each proposal into the review panel as it arrives. Proposing never mutates
+    /// the workflow — the user applies the results explicitly from the panel.
+    /// </summary>
+    private async Task OnMakeItRealClicked()
+    {
+        if (_workflow is null || _isRealizing) return;
+
+        _isRealizing            = true;
+        _isRealizationPanelOpen = true;
+        _realizationProposals   = new();
+        StateHasChanged();
+
+        try
+        {
+            var proposals = await RealizationService.ProposeAllAsync(_workflow, proposal =>
+            {
+                _realizationProposals.Add(proposal);
+                _ = InvokeAsync(StateHasChanged);
+            });
+            _realizationProposals = proposals.ToList();
+        }
+        catch (Exception ex)
+        {
+            _canvas?.ShowToast($"Couldn't prepare proposals: {ex.Message}", isError: true);
+        }
+        finally
+        {
+            _isRealizing = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Applies every acceptable proposal to its node, persists the result, and re-evaluates production
+    /// readiness. Each acceptance is deterministic and touches only its own node; an intrinsically
+    /// invalid proposal is skipped and surfaced by the readiness report rather than aborting the batch.
+    /// </summary>
+    private async Task OnAcceptAllRealization()
+    {
+        if (_workflow is null) return;
+
+        var updatedWorkflow = _workflow;
+        foreach (var proposal in _realizationProposals
+            .Where(candidate => candidate.Status == NodeRealizationStatus.Proposed && candidate.ProposedConfig is not null))
+        {
+            try
+            {
+                updatedWorkflow = RealizationService.AcceptProposal(updatedWorkflow, proposal, proposal.ProposedConfig!);
+            }
+            catch (ArgumentException)
+            {
+                // A proposal that fails intrinsic validation on apply is left unrealized; the
+                // readiness report below explains why the node still needs attention.
+            }
+        }
+
+        _workflow          = updatedWorkflow;
+        _hasUnsavedChanges = true;
+        await TrySaveAsync();
+        await EvaluateReadinessAsync();
+
+        _isRealizationPanelOpen = false;
+        StateHasChanged();
+    }
+
+    /// <summary>Evaluates and stores the workflow's production readiness so the toolbar can reflect it.</summary>
+    private async Task EvaluateReadinessAsync()
+    {
+        if (_workflow is null) return;
+        _readinessReport = await ReadinessService.EvaluateAsync(_workflow);
     }
 
     private void OnRunClicked() => _isRunModalOpen = true;

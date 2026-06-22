@@ -26,6 +26,17 @@
         </div>
     }
 
+    @* Green "realized" check — shown once a node has accepted production-ready config (spec 007).
+       Trigger nodes are entry markers and are not surfaced as realized here. *@
+    @if (Node.WorkflowNode.IsConfigured && Node.WorkflowNode.NodeType != WorkflowNodeType.Trigger)
+    {
+        <div class="absolute -top-2 -right-2 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center"
+             title="This step has been made production-ready"
+             aria-label="Step is realized and production-ready">
+            <span class="text-white text-xs font-bold leading-none">✓</span>
+        </div>
+    }
+
     @* Island badge — shown after a neighbouring node is deleted and this node becomes unconnected *@
     @if (Node.IsIsolated)
     {

@@ -1,0 +1,155 @@
+@* Right-hand review panel that lists the assistant's per-node realization proposals in plain language
+   and lets the user accept them all with a single explicit confirmation (US1). Per-proposal review
+   controls (edit/reject/regenerate) are layered on in US2. *@
+
+@using DBAIAzure.Core.Models
+
+@if (IsOpen)
+{
+    <div class="realization-panel w-96 bg-gray-900 border-l border-gray-800 flex flex-col h-full"
+         role="complementary" aria-label="Make it real — review proposals">
+
+        @* ── Header ─────────────────────────────────────────────────────────────── *@
+        <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+            <h2 class="text-sm font-semibold text-gray-100">Make it real — review</h2>
+            <button @onclick="OnCloseRequested"
+                    class="text-gray-400 hover:text-gray-200 text-lg leading-none"
+                    aria-label="Close the realization review panel"
+                    title="Close">×</button>
+        </div>
+
+        @* ── Body ───────────────────────────────────────────────────────────────── *@
+        <div class="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+            @if (IsBusy)
+            {
+                <p class="text-xs text-cyan-400" role="status" aria-live="polite">
+                    Turning your steps into production-ready configuration…
+                </p>
+            }
+
+            @if (Proposals.Count == 0 && !IsBusy)
+            {
+                <p class="text-xs text-gray-500">No proposals yet.</p>
+            }
+
+            @foreach (var proposal in Proposals)
+            {
+                <div class="rounded-md border border-gray-800 bg-gray-850 p-3"
+                     aria-label="@($"Proposal for node {proposal.NodeId}")">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-xs font-medium text-gray-200">@FriendlyType(proposal.NodeType)</span>
+                        <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded @StatusClass(proposal.Status)">
+                            @FriendlyStatus(proposal.Status)
+                        </span>
+                    </div>
+                    <p class="text-xs text-gray-400 leading-snug">@proposal.PlainLanguageSummary</p>
+                    @if (!string.IsNullOrWhiteSpace(proposal.BlockingReason))
+                    {
+                        <p class="text-[11px] text-amber-400 mt-1">@proposal.BlockingReason</p>
+                    }
+                </div>
+            }
+        </div>
+
+        @* ── Footer: single explicit Accept-all confirmation ────────────────────── *@
+        <div class="px-4 py-3 border-t border-gray-800 space-y-2">
+            @if (AcceptableCount > 0)
+            {
+                <p class="text-[11px] text-gray-500">
+                    @AcceptableCount of @Proposals.Count step(s) are ready to apply.
+                </p>
+            }
+            @if (!_isConfirming)
+            {
+                <button @onclick="() => _isConfirming = true"
+                        disabled="@(IsBusy || AcceptableCount == 0)"
+                        class="w-full px-3 py-1.5 rounded-md text-sm font-medium
+                               @(IsBusy || AcceptableCount == 0
+                                   ? "bg-gray-700 text-gray-500 cursor-not-allowed"
+                                   : "bg-cyan-600 hover:bg-cyan-500 text-white")"
+                        aria-label="Accept all proposals">
+                    Accept all
+                </button>
+            }
+            else
+            {
+                <p class="text-xs text-gray-300">Apply @AcceptableCount proposal(s) to your workflow?</p>
+                <div class="flex gap-2">
+                    <button @onclick="ConfirmAcceptAll"
+                            class="flex-1 px-3 py-1.5 rounded-md text-sm bg-green-600 hover:bg-green-500 text-white"
+                            aria-label="Confirm — apply all proposals">
+                        Confirm
+                    </button>
+                    <button @onclick="() => _isConfirming = false"
+                            class="flex-1 px-3 py-1.5 rounded-md text-sm bg-gray-700 hover:bg-gray-600 text-gray-200"
+                            aria-label="Cancel applying proposals">
+                        Cancel
+                    </button>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Whether the panel is visible.</summary>
+    [Parameter] public bool IsOpen { get; set; }
+
+    /// <summary>True while proposals are still being generated, so the UI shows progress and disables apply.</summary>
+    [Parameter] public bool IsBusy { get; set; }
+
+    /// <summary>The proposals to review, in graph order.</summary>
+    [Parameter] public IReadOnlyList<RealizationProposal> Proposals { get; set; } = Array.Empty<RealizationProposal>();
+
+    /// <summary>Raised when the user confirms applying every acceptable proposal.</summary>
+    [Parameter] public EventCallback OnAcceptAll { get; set; }
+
+    /// <summary>Raised when the user closes the panel.</summary>
+    [Parameter] public EventCallback OnCloseRequested { get; set; }
+
+    // Two-step confirm so a single accidental click never mutates the workflow.
+    private bool _isConfirming;
+
+    /// <summary>How many proposals carry an applicable configuration (Proposed state with a config).</summary>
+    private int AcceptableCount =>
+        Proposals.Count(proposal =>
+            proposal.Status == NodeRealizationStatus.Proposed && proposal.ProposedConfig is not null);
+
+    private async Task ConfirmAcceptAll()
+    {
+        _isConfirming = false;
+        await OnAcceptAll.InvokeAsync();
+    }
+
+    // ── Plain-language display helpers ────────────────────────────────────────────
+
+    private static string FriendlyType(WorkflowNodeType nodeType) => nodeType switch
+    {
+        WorkflowNodeType.Trigger          => "Trigger",
+        WorkflowNodeType.AgenticReason    => "AI step",
+        WorkflowNodeType.FunctionRoute    => "Branch",
+        WorkflowNodeType.FunctionTransform => "Transform",
+        WorkflowNodeType.FunctionNotify   => "Notify",
+        WorkflowNodeType.FunctionData     => "Data",
+        WorkflowNodeType.HumanApproval    => "Approval",
+        _                                 => nodeType.ToString(),
+    };
+
+    private static string FriendlyStatus(NodeRealizationStatus status) => status switch
+    {
+        NodeRealizationStatus.Proposed   => "Ready",
+        NodeRealizationStatus.Realized   => "Realized",
+        NodeRealizationStatus.Blocked    => "Blocked",
+        NodeRealizationStatus.NeedsInput => "Needs input",
+        NodeRealizationStatus.OutOfDate  => "Out of date",
+        _                                => "Draft",
+    };
+
+    private static string StatusClass(NodeRealizationStatus status) => status switch
+    {
+        NodeRealizationStatus.Proposed or NodeRealizationStatus.Realized => "bg-green-900 text-green-300",
+        NodeRealizationStatus.Blocked                                    => "bg-red-900 text-red-300",
+        NodeRealizationStatus.NeedsInput or NodeRealizationStatus.OutOfDate => "bg-amber-900 text-amber-300",
+        _                                                                => "bg-gray-700 text-gray-300",
+    };
+}
