@@ -66,14 +66,16 @@ public sealed class WorkflowRuntimeBuilder
 
         foreach (var node in workflow.Nodes)
         {
+            // Stateful steps receive their node's realized config as SK step state so each instance
+            // executes from its own configuration (Article VII — framework-native per-step state).
             var stepBuilder = node.NodeType switch
             {
-                WorkflowNodeType.AgenticReason    => builder.AddStepFromType<AgenticNodeStep>(),
-                WorkflowNodeType.FunctionRoute    => builder.AddStepFromType<FunctionRouteStep>(),
+                WorkflowNodeType.AgenticReason    => builder.AddStepFromType<AgenticNodeStep, NodeRuntimeConfig>(BuildNodeState(node)),
+                WorkflowNodeType.FunctionRoute    => builder.AddStepFromType<FunctionRouteStep, NodeRuntimeConfig>(BuildNodeState(node)),
                 WorkflowNodeType.FunctionTransform => builder.AddStepFromType<FunctionTransformStep>(),
-                WorkflowNodeType.FunctionNotify   => builder.AddStepFromType<FunctionNotifyStep>(),
+                WorkflowNodeType.FunctionNotify   => builder.AddStepFromType<FunctionNotifyStep, NodeRuntimeConfig>(BuildNodeState(node)),
                 WorkflowNodeType.FunctionData     => builder.AddStepFromType<FunctionDataStep>(),
-                WorkflowNodeType.HumanApproval    => builder.AddStepFromType<HumanApprovalStep>(),
+                WorkflowNodeType.HumanApproval    => builder.AddStepFromType<HumanApprovalStep, NodeRuntimeConfig>(BuildNodeState(node)),
 
                 // Guard: the enum may grow in future. Fail fast rather than silently skip so
                 // the caller knows the builder needs updating when a new node type is added.
@@ -188,6 +190,18 @@ public sealed class WorkflowRuntimeBuilder
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds the per-node runtime state handed to a stateful step: its id, plain-language goal,
+    /// realized configuration envelope, and output-port labels (used by branch steps for routing).
+    /// </summary>
+    private static NodeRuntimeConfig BuildNodeState(WorkflowNode node) => new()
+    {
+        NodeId           = node.Id,
+        GoalPrompt       = node.GoalPrompt,
+        FunctionConfig   = node.FunctionConfig,
+        OutputPortLabels = node.OutputPorts.Select(port => port.Label).ToList(),
+    };
 
     /// <summary>
     /// Resolves the human-readable label for the output port identified by

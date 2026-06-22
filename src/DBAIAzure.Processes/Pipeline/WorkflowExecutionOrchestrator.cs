@@ -5,6 +5,7 @@
 using System.Collections.Concurrent;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Models.NodeConfig;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 
@@ -201,25 +202,20 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
                     ?? workflow.Nodes.FirstOrDefault(n => n.NodeType != WorkflowNodeType.Trigger)?.Id
                     ?? string.Empty;
 
-                // Merge the Trigger's GoalPrompt and initialDataDescription into the input
-                // payload so the first runnable step receives the workflow intent as context.
-                if (!string.IsNullOrWhiteSpace(triggerNode.GoalPrompt))
+                // Merge the Trigger's GoalPrompt and initial-data description into the input payload so
+                // the first runnable step receives the workflow intent as context. The description is
+                // read via the realized TriggerNodeConfig when present, falling back to the legacy blob.
+                var initialDataDescription = ReadTriggerInitialData(triggerNode.FunctionConfig);
+                var triggerContext = triggerNode.GoalPrompt ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(initialDataDescription))
                 {
-                    var triggerContext = triggerNode.GoalPrompt;
-                    if (!string.IsNullOrWhiteSpace(triggerNode.FunctionConfig))
-                    {
-                        try
-                        {
-                            using var configDoc = System.Text.Json.JsonDocument.Parse(triggerNode.FunctionConfig);
-                            if (configDoc.RootElement.TryGetProperty("initialDataDescription", out var descProp)
-                                && !string.IsNullOrWhiteSpace(descProp.GetString()))
-                            {
-                                triggerContext += $"\n\nAvailable data: {descProp.GetString()}";
-                            }
-                        }
-                        catch { }
-                    }
+                    triggerContext = string.IsNullOrWhiteSpace(triggerContext)
+                        ? $"Available data: {initialDataDescription}"
+                        : $"{triggerContext}\n\nAvailable data: {initialDataDescription}";
+                }
 
+                if (!string.IsNullOrWhiteSpace(triggerContext))
+                {
                     structuredInput = string.IsNullOrWhiteSpace(structuredInput)
                         ? triggerContext
                         : $"{triggerContext}\n\n{structuredInput}";
@@ -325,6 +321,34 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Reads the trigger's initial-data description, preferring the realized
+    /// <see cref="TriggerNodeConfig"/> and falling back to the legacy <c>{initialDataDescription}</c>
+    /// blob so workflows authored before realization continue to run unchanged (FR-15.6).
+    /// </summary>
+    private static string? ReadTriggerInitialData(string? functionConfig)
+    {
+        if (string.IsNullOrWhiteSpace(functionConfig))
+            return null;
+
+        var realized = NodeConfigSerializer.ReadConfig<TriggerNodeConfig>(functionConfig);
+        if (realized is not null && !string.IsNullOrWhiteSpace(realized.InitialDataDescription))
+            return realized.InitialDataDescription;
+
+        // Legacy path: the pre-realization trigger stored the description as a flat property.
+        try
+        {
+            using var configDoc = System.Text.Json.JsonDocument.Parse(functionConfig);
+            if (configDoc.RootElement.TryGetProperty("initialDataDescription", out var descProp))
+                return descProp.GetString();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Unparseable legacy blob — treat as no description rather than failing the run.
+        }
+        return null;
+    }
 
     /// <summary>
     /// Fires <see cref="RunUpdated"/> for the given run, but only if at least
