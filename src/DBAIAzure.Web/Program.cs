@@ -213,6 +213,16 @@ builder.Services.AddSingleton<IWorkflowCodeDiffService, WorkflowCodeDiffService>
 // WorkflowBuilderService is scoped (one instance per session / per page).
 builder.Services.AddScoped<WorkflowBuilderService>();
 
+// ── Node Realization services (spec 007) ───────────────────────────────────────
+// Schema-bound LLM output for turning plain-language nodes into executable config (Article VII).
+// AnthropicChatCompletionService implements IStructuredCompletionService; registered at the app root
+// (the existing IStructuredCompletionService lives only inside the per-run pipeline kernel).
+builder.Services.AddSingleton<IStructuredCompletionService>(
+    new AnthropicChatCompletionService(anthropicKey, anthropicModel));
+// Scoped to mirror WorkflowBuilderService — one realization/readiness instance per session.
+builder.Services.AddScoped<IWorkflowRealizationService, WorkflowRealizationService>();
+builder.Services.AddScoped<IWorkflowReadinessService, WorkflowReadinessService>();
+
 // WorkflowExecutionOrchestrator: singleton that owns all visual-workflow run lifecycles.
 // Accepts a Func<Kernel> so it can re-read LLM credentials from the DB on each run (hot-reload).
 builder.Services.AddSingleton<IWorkflowExecutionOrchestrator>(sp =>
