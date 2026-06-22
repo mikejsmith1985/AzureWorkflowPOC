@@ -2,6 +2,7 @@
 // is realized, intrinsically valid, cross-node consistent (VAL-007), and its connectors are healthy
 // (VAL-006). Uses the real structural validator + a fake health checker — no I/O (Article V).
 
+using System.Collections.Generic;
 using DBAIAzure.Core.Models;
 using DBAIAzure.Core.Models.NodeConfig;
 using DBAIAzure.Core.Validation;
@@ -83,6 +84,40 @@ public sealed class WorkflowReadinessServiceTests
 
         Assert.False(report.IsProductionReady);
         Assert.Equal(NodeRealizationStatus.NeedsInput, report.Nodes.Single(node => node.NodeId == notifyId).Status);
+    }
+
+    [Fact]
+    public async Task Realized_node_flips_to_out_of_date_when_its_intent_changes()
+    {
+        // R6 / Scenario E: a node realized against one intent, then re-worded, is reported out-of-date.
+        var workflow = FullyRealized();
+        var agentId  = workflow.Nodes.Single(node => node.NodeType == WorkflowNodeType.AgenticReason).Id;
+        var agent    = workflow.Nodes.Single(node => node.Id == agentId);
+
+        // Record provenance matching the node's CURRENT intent, exactly as AcceptProposal would.
+        var recordedHash = WorkflowIntentHasher.ComputeIntentHash(agent, workflow);
+        var withProvenance = workflow with
+        {
+            Settings = workflow.Settings with
+            {
+                RealizationProvenance = new Dictionary<string, string> { [agentId] = recordedHash },
+            },
+        };
+
+        // Baseline: intent unchanged → the node is Realized, not out-of-date.
+        var baseline = await BuildService(ConnectorType.Teams).EvaluateAsync(withProvenance);
+        Assert.Equal(NodeRealizationStatus.Realized, baseline.Nodes.Single(node => node.NodeId == agentId).Status);
+
+        // Re-word the node's goal → its intent hash changes → it must flip to OutOfDate.
+        var mutatedNodes = withProvenance.Nodes
+            .Select(node => node.Id == agentId ? node with { GoalPrompt = "A completely different goal." } : node)
+            .ToList();
+        var mutated = withProvenance with { Nodes = mutatedNodes };
+
+        var report = await BuildService(ConnectorType.Teams).EvaluateAsync(mutated);
+
+        Assert.Equal(NodeRealizationStatus.OutOfDate, report.Nodes.Single(node => node.NodeId == agentId).Status);
+        Assert.False(report.IsProductionReady);
     }
 
     [Fact]

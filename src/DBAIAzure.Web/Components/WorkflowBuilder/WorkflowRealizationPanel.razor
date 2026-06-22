@@ -3,6 +3,7 @@
    controls (edit/reject/regenerate) are layered on in US2. *@
 
 @using DBAIAzure.Core.Models
+@using DBAIAzure.Core.Models.NodeConfig
 
 @if (IsOpen)
 {
@@ -48,6 +49,54 @@
                     @if (!string.IsNullOrWhiteSpace(proposal.BlockingReason))
                     {
                         <p class="text-[11px] text-amber-400 mt-1">@proposal.BlockingReason</p>
+                    }
+
+                    @* Inline plain-language editor (no raw code/schema) for this proposal. *@
+                    @if (_editingNodeId == proposal.NodeId)
+                    {
+                        <textarea @bind="_editBuffer"
+                                  data-testid="proposal-edit-input"
+                                  class="w-full mt-2 text-xs bg-gray-950 border border-gray-700 rounded p-2 text-gray-200
+                                         focus:outline-none focus:border-cyan-500"
+                                  rows="3"
+                                  aria-label="Edit this step in plain language"></textarea>
+                        <div class="flex gap-2 mt-1">
+                            <button @onclick="() => SaveEdit(proposal)"
+                                    data-testid="proposal-edit-save"
+                                    class="flex-1 px-2 py-1 rounded text-[11px] bg-green-700 hover:bg-green-600 text-white"
+                                    aria-label="Save edit and accept this step">Save &amp; accept</button>
+                            <button @onclick="() => _editingNodeId = null"
+                                    class="flex-1 px-2 py-1 rounded text-[11px] bg-gray-700 hover:bg-gray-600 text-gray-200"
+                                    aria-label="Cancel editing this step">Cancel</button>
+                        </div>
+                    }
+                    else
+                    {
+                        @* Per-proposal review controls (US2): Accept / Edit / Reject / Regenerate. *@
+                        <div class="flex flex-wrap gap-1.5 mt-2">
+                            @if (proposal.Status == NodeRealizationStatus.Proposed && proposal.ProposedConfig is not null)
+                            {
+                                <button @onclick="() => OnAcceptOne.InvokeAsync(proposal)"
+                                        data-testid="proposal-accept"
+                                        class="px-2 py-0.5 rounded text-[11px] bg-cyan-700 hover:bg-cyan-600 text-white"
+                                        aria-label="Accept this step">Accept</button>
+                                @if (PrimaryEditableText(proposal) is not null)
+                                {
+                                    <button @onclick="() => BeginEdit(proposal)"
+                                            data-testid="proposal-edit"
+                                            class="px-2 py-0.5 rounded text-[11px] bg-gray-700 hover:bg-gray-600 text-gray-200"
+                                            aria-label="Edit this step before accepting">Edit</button>
+                                }
+                            }
+                            <button @onclick="() => OnRejectOne.InvokeAsync(proposal)"
+                                    data-testid="proposal-reject"
+                                    class="px-2 py-0.5 rounded text-[11px] bg-gray-700 hover:bg-gray-600 text-gray-200"
+                                    aria-label="Reject this step">Reject</button>
+                            <button @onclick="() => OnRegenerateOne.InvokeAsync(proposal)"
+                                    data-testid="proposal-regenerate"
+                                    class="px-2 py-0.5 rounded text-[11px] bg-gray-700 hover:bg-gray-600 text-gray-200"
+                                    aria-label="Ask for a different proposal for this step">Regenerate</button>
+                        </div>
                     }
                 </div>
             }
@@ -108,11 +157,79 @@
     /// <summary>Raised when the user confirms applying every acceptable proposal.</summary>
     [Parameter] public EventCallback OnAcceptAll { get; set; }
 
+    /// <summary>Raised when the user accepts a single proposal as-is.</summary>
+    [Parameter] public EventCallback<RealizationProposal> OnAcceptOne { get; set; }
+
+    /// <summary>Raised when the user rejects a single proposal (its node keeps its prior state).</summary>
+    [Parameter] public EventCallback<RealizationProposal> OnRejectOne { get; set; }
+
+    /// <summary>Raised when the user asks for a fresh proposal for a single node.</summary>
+    [Parameter] public EventCallback<RealizationProposal> OnRegenerateOne { get; set; }
+
+    /// <summary>Raised when the user accepts a single proposal after editing its plain-language text.</summary>
+    [Parameter] public EventCallback<ProposalEdit> OnEditAccept { get; set; }
+
     /// <summary>Raised when the user closes the panel.</summary>
     [Parameter] public EventCallback OnCloseRequested { get; set; }
 
+    /// <summary>Carries an edited proposal and the new plain-language text the user typed.</summary>
+    public sealed record ProposalEdit(RealizationProposal Proposal, string EditedText);
+
     // Two-step confirm so a single accidental click never mutates the workflow.
     private bool _isConfirming;
+
+    // The node currently being edited inline, and the working text for that edit.
+    private string? _editingNodeId;
+    private string  _editBuffer = string.Empty;
+
+    private void BeginEdit(RealizationProposal proposal)
+    {
+        _editingNodeId = proposal.NodeId;
+        _editBuffer    = PrimaryEditableText(proposal) ?? string.Empty;
+    }
+
+    private async Task SaveEdit(RealizationProposal proposal)
+    {
+        var editedText = _editBuffer;
+        _editingNodeId = null;
+        await OnEditAccept.InvokeAsync(new ProposalEdit(proposal, editedText));
+    }
+
+    /// <summary>
+    /// The single plain-language field a user may edit for this proposal, or null for node types whose
+    /// configuration is structural (route/transform/data) and not safely editable as free text.
+    /// </summary>
+    private static string? PrimaryEditableText(RealizationProposal proposal)
+    {
+        var configJson = proposal.ProposedConfig?.ConfigJson;
+        if (string.IsNullOrWhiteSpace(configJson))
+            return null;
+
+        return proposal.NodeType switch
+        {
+            WorkflowNodeType.AgenticReason => ReadString(configJson, "instruction"),
+            WorkflowNodeType.FunctionNotify => ReadString(configJson, "messageTemplate"),
+            WorkflowNodeType.HumanApproval => ReadString(configJson, "promptShown"),
+            WorkflowNodeType.Trigger        => ReadString(configJson, "initialDataDescription"),
+            _                               => null,
+        };
+    }
+
+    /// <summary>Reads a string property from a config JSON object (Web camelCase), or null if absent.</summary>
+    private static string? ReadString(string configJson, string propertyName)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(configJson);
+            return document.RootElement.TryGetProperty(propertyName, out var value)
+                ? value.GetString()
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>How many proposals carry an applicable configuration (Proposed state with a config).</summary>
     private int AcceptableCount =>

@@ -108,6 +108,33 @@ public sealed class WorkflowRealizationServiceTests
     }
 
     [Fact]
+    public async Task AcceptProposal_applies_an_edited_config_to_only_the_target_node()
+    {
+        // US2 edit-then-accept: an edited envelope is what gets persisted, and only on the target node.
+        var workflow = RealizationTestWorkflows.TriggerAgentNotify();
+        var service  = BuildService(out _);
+        var agentId  = workflow.Nodes.Single(node => node.NodeType == WorkflowNodeType.AgenticReason).Id;
+        var proposal = await service.ProposeNodeAsync(workflow, agentId);
+
+        // The user edits the instruction in plain language before accepting.
+        var editedJson = NodeConfigSerializer.ToFunctionConfig(
+            WorkflowNodeType.AgenticReason,
+            new AgentNodeConfig { Instruction = "EDITED_INSTRUCTION", ModelRef = "claude-test-model" });
+        var editedEnvelope = NodeConfigSerializer.ReadEnvelope(editedJson)!;
+
+        var accepted = service.AcceptProposal(workflow, proposal, editedEnvelope);
+
+        var restored = NodeConfigSerializer.ReadConfig<AgentNodeConfig>(
+            accepted.Nodes.Single(node => node.Id == agentId).FunctionConfig);
+        Assert.Equal("EDITED_INSTRUCTION", restored!.Instruction);
+
+        // No other node was touched.
+        foreach (var original in workflow.Nodes.Where(node => node.Id != agentId))
+            Assert.Equal(original.FunctionConfig,
+                accepted.Nodes.Single(node => node.Id == original.Id).FunctionConfig);
+    }
+
+    [Fact]
     public async Task AcceptProposal_rejects_an_intrinsically_invalid_config()
     {
         var workflow = RealizationTestWorkflows.TriggerAgentNotify();

@@ -16,6 +16,8 @@
 @inject IWorkflowReadinessService ReadinessService
 @using DBAIAzure.Core.Exceptions
 @using DBAIAzure.Core.Interfaces
+@using DBAIAzure.Core.Models.NodeConfig
+@using System.Text.Json.Nodes
 
 <PageTitle>@(string.IsNullOrWhiteSpace(_workflow?.Name) ? "Workflow Builder" : _workflow!.Name) — DBAIAzure</PageTitle>
 
@@ -95,6 +97,10 @@
                                   IsBusy="@_isRealizing"
                                   Proposals="@_realizationProposals"
                                   OnAcceptAll="@OnAcceptAllRealization"
+                                  OnAcceptOne="@OnAcceptOneRealization"
+                                  OnRejectOne="@OnRejectOneRealization"
+                                  OnRegenerateOne="@OnRegenerateOneRealization"
+                                  OnEditAccept="@OnEditAcceptRealization"
                                   OnCloseRequested="@(() => { _isRealizationPanelOpen = false; })" />
 
         @* Chat panel — opens as a right sidebar when IsChatOpen is true *@
@@ -173,6 +179,9 @@
     private bool _isRealizationPanelOpen;
     private bool _isRealizing;
     private WorkflowReadinessReport? _readinessReport;
+    // Signature of realized nodes' intent hashes at the last readiness evaluation; used to skip a
+    // re-evaluation (and its connector-health round-trip) when a canvas edit didn't change any intent.
+    private string? _lastIntentSignature;
 
     /// <summary>"Make it real" is offered whenever the workflow has at least one node to realize.</summary>
     private bool CanRealize => _workflow is { Nodes.Count: > 0 };
@@ -432,7 +441,7 @@
             await _canvas.PlaceNodeDefaultPositionAsync(nodeType);
     }
 
-    private void OnWorkflowChanged(WorkflowDefinition updatedDefinition)
+    private async Task OnWorkflowChanged(WorkflowDefinition updatedDefinition)
     {
         _workflow = updatedDefinition;
         _hasUnsavedChanges = true;
@@ -440,7 +449,29 @@
         _hasCanvasChangedSinceCodeGen = true;
         _chatPanel?.NotifyWorkflowChanged();
         StateHasChanged();
+
+        // Once a workflow has been realized, re-check readiness when (and only when) an edit changes a
+        // realized node's plain-language intent, so it surfaces as out-of-date (R6 / T040). Gating on the
+        // intent signature avoids a connector-health round-trip on pure position drags.
+        if (_readinessReport is not null)
+            await ReevaluateReadinessIfIntentChangedAsync();
     }
+
+    /// <summary>Re-evaluates readiness only if a realized node's intent hash changed since the last evaluation.</summary>
+    private async Task ReevaluateReadinessIfIntentChangedAsync()
+    {
+        if (_workflow is null) return;
+        var signature = ComputeIntentSignature(_workflow);
+        if (signature == _lastIntentSignature) return;
+        await EvaluateReadinessAsync();
+        StateHasChanged();
+    }
+
+    /// <summary>A stable signature of every realized node's intent hash — changes only on a meaningful edit.</summary>
+    private static string ComputeIntentSignature(WorkflowDefinition workflow) =>
+        string.Join("|", workflow.Nodes
+            .Where(node => node.IsConfigured)
+            .Select(node => DBAIAzure.Core.Validation.WorkflowIntentHasher.ComputeIntentHash(node, workflow)));
 
     private async Task OnSaveAsync() => await TrySaveAsync();
 
@@ -607,11 +638,114 @@
         StateHasChanged();
     }
 
+    /// <summary>Accepts a single proposal as-is, applies it, persists, and re-evaluates readiness (US2).</summary>
+    private async Task OnAcceptOneRealization(RealizationProposal proposal)
+    {
+        if (proposal.ProposedConfig is null) return;
+        await ApplyProposalAsync(proposal, proposal.ProposedConfig);
+    }
+
+    /// <summary>Rejects a single proposal: its node keeps its prior state and the card is removed (US2).</summary>
+    private void OnRejectOneRealization(RealizationProposal proposal)
+    {
+        _realizationProposals.RemoveAll(candidate => candidate.NodeId == proposal.NodeId);
+        if (_realizationProposals.Count == 0) _isRealizationPanelOpen = false;
+        StateHasChanged();
+    }
+
+    /// <summary>Asks the assistant for a fresh proposal for one node, replacing the old card (US2).</summary>
+    private async Task OnRegenerateOneRealization(RealizationProposal proposal)
+    {
+        if (_workflow is null || _isRealizing) return;
+        _isRealizing = true;
+        StateHasChanged();
+        try
+        {
+            var fresh = await RealizationService.ProposeNodeAsync(_workflow, proposal.NodeId);
+            var index = _realizationProposals.FindIndex(candidate => candidate.NodeId == proposal.NodeId);
+            if (index >= 0) _realizationProposals[index] = fresh;
+            else _realizationProposals.Add(fresh);
+        }
+        catch (Exception ex)
+        {
+            _canvas?.ShowToast($"Couldn't regenerate that step: {ex.Message}", isError: true);
+        }
+        finally
+        {
+            _isRealizing = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Accepts a single proposal after the user edited its plain-language text (US2).</summary>
+    private async Task OnEditAcceptRealization(WorkflowRealizationPanel.ProposalEdit edit)
+    {
+        if (edit.Proposal.ProposedConfig is null) return;
+        var editedConfig = ApplyPrimaryText(edit.Proposal, edit.EditedText);
+        await ApplyProposalAsync(edit.Proposal, editedConfig);
+    }
+
+    /// <summary>Applies one accepted config to its node, persists, re-evaluates readiness, removes the card.</summary>
+    private async Task ApplyProposalAsync(RealizationProposal proposal, RealizedNodeConfigEnvelope config)
+    {
+        if (_workflow is null) return;
+        try
+        {
+            _workflow          = RealizationService.AcceptProposal(_workflow, proposal, config);
+            _hasUnsavedChanges = true;
+            _realizationProposals.RemoveAll(candidate => candidate.NodeId == proposal.NodeId);
+            await TrySaveAsync();
+            await EvaluateReadinessAsync();
+            if (_realizationProposals.Count == 0) _isRealizationPanelOpen = false;
+        }
+        catch (ArgumentException ex)
+        {
+            // Rejected by intrinsic validation (e.g. an edit emptied a required field) — keep the card.
+            _canvas?.ShowToast($"Couldn't apply that step: {ex.Message}", isError: true);
+        }
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Rebuilds a proposal's config envelope with the user's edited plain-language text written into the
+    /// node type's primary field. Structural node types (route/transform/data) are not text-editable and
+    /// are returned unchanged.
+    /// </summary>
+    private static RealizedNodeConfigEnvelope ApplyPrimaryText(RealizationProposal proposal, string editedText)
+    {
+        var envelope = proposal.ProposedConfig!;
+        var property = proposal.NodeType switch
+        {
+            WorkflowNodeType.AgenticReason  => "instruction",
+            WorkflowNodeType.FunctionNotify => "messageTemplate",
+            WorkflowNodeType.HumanApproval  => "promptShown",
+            WorkflowNodeType.Trigger        => "initialDataDescription",
+            _                               => null,
+        };
+        if (property is null) return envelope;
+
+        try
+        {
+            if (JsonNode.Parse(envelope.ConfigJson) is JsonObject configObject)
+            {
+                configObject[property] = editedText;
+                return envelope with { ConfigJson = configObject.ToJsonString() };
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Unparseable config — fall through and accept the original envelope unchanged.
+        }
+        return envelope;
+    }
+
     /// <summary>Evaluates and stores the workflow's production readiness so the toolbar can reflect it.</summary>
     private async Task EvaluateReadinessAsync()
     {
         if (_workflow is null) return;
-        _readinessReport = await ReadinessService.EvaluateAsync(_workflow);
+        _readinessReport     = await ReadinessService.EvaluateAsync(_workflow);
+        // Seed the intent signature so later canvas edits only re-evaluate on a real intent change.
+        _lastIntentSignature = ComputeIntentSignature(_workflow);
     }
 
     private void OnRunClicked() => _isRunModalOpen = true;

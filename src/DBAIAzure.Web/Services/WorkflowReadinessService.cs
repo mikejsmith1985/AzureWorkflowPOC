@@ -5,6 +5,7 @@
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
 using DBAIAzure.Core.Models.NodeConfig;
+using DBAIAzure.Core.Validation;
 
 namespace DBAIAzure.Web.Services;
 
@@ -89,7 +90,29 @@ public sealed class WorkflowReadinessService : IWorkflowReadinessService
         if (crossNodeErrors.Count > 0)
             return new NodeReadiness { NodeId = node.Id, Status = NodeRealizationStatus.NeedsInput, Reasons = crossNodeErrors };
 
+        // R6: the node is fully realized, but if its plain-language intent changed after realization its
+        // accepted config no longer matches what the user asked for — flag it out-of-date (Scenario E).
+        if (IsOutOfDate(node, workflow))
+            return Readiness(node, NodeRealizationStatus.OutOfDate,
+                "This step's wording changed after it was set up — review and re-make it real.");
+
         return new NodeReadiness { NodeId = node.Id, Status = NodeRealizationStatus.Realized };
+    }
+
+    /// <summary>
+    /// True when the node was realized against a different plain-language intent than it now carries.
+    /// Compares the node's current intent hash with the one recorded at acceptance in
+    /// <see cref="WorkflowSettings.RealizationProvenance"/>. A node with no recorded provenance (e.g.
+    /// realized before provenance tracking) is never flagged, so legacy workflows are not disturbed.
+    /// </summary>
+    private static bool IsOutOfDate(WorkflowNode node, WorkflowDefinition workflow)
+    {
+        if (!workflow.Settings.RealizationProvenance.TryGetValue(node.Id, out var recordedHash)
+            || string.IsNullOrEmpty(recordedHash))
+            return false;
+
+        var currentHash = WorkflowIntentHasher.ComputeIntentHash(node, workflow);
+        return !string.Equals(currentHash, recordedHash, StringComparison.Ordinal);
     }
 
     /// <summary>The connectors a realized node depends on, derived from its type-specific config.</summary>
