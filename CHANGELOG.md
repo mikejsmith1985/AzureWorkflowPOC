@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — Saved edits silently reverted by stale auto-save (data loss)
+
+A saved workflow edit could be overwritten seconds later and revert to an older state, so "Save"
+appeared not to work. `WorkflowBuilderService` is scoped per Blazor circuit and runs a 60-second
+`System.Threading.Timer` for auto-save, but Blazor Server retains disconnected circuits for ~3
+minutes — during which the timer kept firing `SaveAsync` with that circuit's stale captured
+`_workflow`, clobbering newer saves made from another circuit (e.g. after a reload or in a second
+tab). Reproduced and fixed:
+
+- **Content-signature change detection** — `WorkflowBuilderService` now fingerprints the content it
+  last persisted (name, nodes, edges, settings, generated code, chat) and the auto-save timer
+  **skips when nothing has changed**. A stale circuit can no longer re-save its old snapshot over a
+  newer save. The baseline is seeded from the loaded workflow so an untouched workflow is never
+  needlessly re-saved (which would also wrongly bump its `LastModifiedAt` for the "resume most
+  recent" sort).
+- The auto-save interval is now injectable (defaults to 60 s) so the behaviour is unit-testable.
+- Regression tests: `AutoSave_DoesNotResave_WhenContentUnchanged` and
+  `AutoSave_PersistsOnEdit_ThenStopsResaving`. The `DBAIAzure.Tests` project now references
+  `DBAIAzure.Web` so the service is tested directly (previously only constants were asserted).
+- Verified live: the clobber scenario that previously reverted a save now keeps it
+  (`NEW survived? true`).
+
 ### Fixed — Node edits lost on navigation; builder now persists & resumes work
 
 Node text (and any other canvas edit) was saved to the database but to a workflow id the URL

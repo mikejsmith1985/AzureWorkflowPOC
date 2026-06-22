@@ -219,7 +219,7 @@
 
         // Subscribe to auto-save events so the toolbar shows the timestamp.
         BuilderService.WorkflowSaved += OnAutoSaved;
-        BuilderService.StartAutoSave(() => Task.FromResult<WorkflowDefinition?>(_workflow));
+        BuilderService.StartAutoSave(() => Task.FromResult<WorkflowDefinition?>(_workflow), _workflow);
 
         // Subscribe to execution orchestrator state changes.
         ExecutionOrchestrator.RunUpdated += OnRunUpdated;

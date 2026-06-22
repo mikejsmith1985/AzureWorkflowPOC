@@ -25,7 +25,14 @@
     <PackageReference Include="System.Configuration.ConfigurationManager" Version="8.0.0" />
   </ItemGroup>
 
+  <!-- Referencing the Blazor Server app (Sdk.Web) to unit-test WorkflowBuilderService requires the
+       ASP.NET Core shared framework so its transitive types resolve. -->
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DBAIAzure.Web\DBAIAzure.Web.csproj" />
     <ProjectReference Include="..\..\src\DBAIAzure.Core\DBAIAzure.Core.csproj" />
     <ProjectReference Include="..\..\src\DBAIAzure.Processes\DBAIAzure.Processes.csproj" />
     <ProjectReference Include="..\..\src\DBAIAzure.Storage\DBAIAzure.Storage.csproj" />
