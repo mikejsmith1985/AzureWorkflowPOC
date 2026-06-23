@@ -237,6 +237,58 @@ public sealed class WorkflowBuilderService : IDisposable
         return Convert.ToHexString(hash);
     }
 
+    /// <summary>
+    /// Converts a <see cref="WorkflowGenerationResult"/> into canvas nodes and edges
+    /// and replaces the existing graph in <paramref name="workflow"/>, returning the updated
+    /// definition. The caller must save the returned definition to persist it.
+    /// Only called when <see cref="WorkflowGenerationResult.ClarifyingQuestion"/> is null.
+    /// </summary>
+    public WorkflowDefinition ApplyGenerationResult(
+        WorkflowDefinition workflow,
+        WorkflowGenerationResult result)
+    {
+        var nodeIdMap = new Dictionary<string, string>();
+        var nodes     = new List<WorkflowNode>();
+
+        for (var idx = 0; idx < result.Nodes.Count; idx++)
+        {
+            var gn       = result.Nodes[idx];
+            var nodeType = Enum.TryParse<WorkflowNodeType>(gn.NodeType, ignoreCase: true, out var parsed)
+                ? parsed
+                : WorkflowNodeType.AgenticReason;
+
+            // Use the typed factory to get correct port topology per node type.
+            var label      = string.IsNullOrWhiteSpace(gn.Label) ? nodeType.ToString() : gn.Label;
+            var node       = WorkflowNode.CreateNew(nodeType, label);
+            var positioned = node with
+            {
+                GoalPrompt = gn.GoalPrompt,
+                PositionX  = 120.0,             // vertical stack; UI re-positions on first open
+                PositionY  = 80.0 + idx * 110,
+            };
+
+            nodeIdMap[gn.Id] = positioned.Id;
+            nodes.Add(positioned);
+        }
+
+        var edges = result.Edges
+            .Where(e => nodeIdMap.ContainsKey(e.SourceNodeId) && nodeIdMap.ContainsKey(e.TargetNodeId))
+            .Select(e =>
+            {
+                var src = nodes.First(n => n.Id == nodeIdMap[e.SourceNodeId]);
+                var tgt = nodes.First(n => n.Id == nodeIdMap[e.TargetNodeId]);
+
+                var srcPort = src.OutputPorts.FirstOrDefault()?.Id ?? "out";
+                var tgtPort = tgt.InputPorts.FirstOrDefault()?.Id  ?? "in";
+
+                return WorkflowEdge.CreateNew(src.Id, srcPort, tgt.Id, tgtPort, "→");
+            })
+            .ToList()
+            .AsReadOnly();
+
+        return workflow with { Nodes = nodes.AsReadOnly(), Edges = edges };
+    }
+
     /// <inheritdoc/>
     public void Dispose()
     {

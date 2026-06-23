@@ -1,6 +1,4 @@
-// WorkflowDesignSkillService — Semantic Kernel plugin that conducts a structured
-// design-review conversation before code generation, ensuring the LLM has enough
-// context about each node's intended behaviour.
+// WorkflowDesignSkillService — Semantic Kernel plugin for design review and whole-workflow generation.
 
 #pragma warning disable SKEXP0001
 
@@ -8,6 +6,7 @@ using DBAIAzure.Core.Models;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using System.ComponentModel;
+using System.Text.Json;
 
 namespace DBAIAzure.Web.Services;
 
@@ -80,6 +79,116 @@ public sealed class WorkflowDesignSkillService
     public WorkflowSettings DeferQuestion(WorkflowSettings settings, string questionKey)
     {
         return RecordAnswer(settings, questionKey, UserDeferredSentinel);
+    }
+
+    // ── Whole-workflow chat generation (FR-23, US6) ────────────────────────────
+
+    /// <summary>
+    /// Generates a complete workflow graph from a plain-language description.
+    /// If the description is ambiguous, returns a <see cref="WorkflowGenerationResult"/> with
+    /// <c>ClarifyingQuestion</c> set and empty node/edge lists — the caller must present the
+    /// question to the user before re-invoking with a more specific description.
+    /// </summary>
+    public async Task<WorkflowGenerationResult> GenerateWorkflowAsync(
+        string description,
+        CancellationToken ct = default)
+    {
+        var history = new ChatHistory();
+        history.AddSystemMessage(BuildGenerationSystemPrompt());
+        history.AddUserMessage(description);
+
+        try
+        {
+            var response = await _chatService
+                .GetChatMessageContentAsync(history, cancellationToken: ct)
+                .ConfigureAwait(false);
+
+            return ParseGenerationResponse(response.Content ?? string.Empty);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Workflow generation failed for description: {Length} chars", description.Length);
+            return new WorkflowGenerationResult(
+                Nodes: Array.Empty<GeneratedNode>(),
+                Edges: Array.Empty<GeneratedEdge>(),
+                ClarifyingQuestion: "I had trouble generating the workflow. Could you describe what the workflow should do in one or two sentences?");
+        }
+    }
+
+    private static string BuildGenerationSystemPrompt() =>
+        """
+        You are a workflow design assistant for an agentic pipeline builder.
+        Given a plain-language description of a workflow, output a JSON object representing
+        the workflow graph. Use ONLY these node types: Trigger, AgenticReason, FunctionRoute,
+        FunctionTransform, FunctionNotify, FunctionData, HumanApproval.
+
+        If the description is too vague or ambiguous to produce a reliable graph, output:
+        {"clarifyingQuestion": "<one question>"}
+
+        Otherwise output:
+        {
+          "nodes": [{"id": "n1", "nodeType": "Trigger", "label": "...", "goalPrompt": "..."}],
+          "edges": [{"sourceNodeId": "n1", "targetNodeId": "n2"}]
+        }
+
+        Every workflow must start with exactly one Trigger node. Labels should be short and action-oriented.
+        GoalPrompt should be a brief description of what the node achieves.
+        Return valid JSON only — no markdown, no explanation.
+        """;
+
+    private static WorkflowGenerationResult ParseGenerationResponse(string content)
+    {
+        content = content.Trim();
+
+        // Strip markdown code fences if the LLM wrapped the JSON.
+        if (content.StartsWith("```"))
+        {
+            var firstNewLine = content.IndexOf('\n');
+            var lastFence    = content.LastIndexOf("```");
+            if (firstNewLine >= 0 && lastFence > firstNewLine)
+                content = content[(firstNewLine + 1)..lastFence].Trim();
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(content);
+
+            if (doc.RootElement.TryGetProperty("clarifyingQuestion", out var cq))
+                return new WorkflowGenerationResult(Array.Empty<GeneratedNode>(), Array.Empty<GeneratedEdge>(), cq.GetString());
+
+            var nodes = new List<GeneratedNode>();
+            if (doc.RootElement.TryGetProperty("nodes", out var nodesEl))
+            {
+                foreach (var n in nodesEl.EnumerateArray())
+                {
+                    nodes.Add(new GeneratedNode(
+                        Id:         n.GetProperty("id").GetString() ?? Guid.NewGuid().ToString("N")[..4],
+                        NodeType:   n.GetProperty("nodeType").GetString() ?? "AgenticReason",
+                        Label:      n.TryGetProperty("label", out var l)      ? l.GetString() ?? string.Empty : string.Empty,
+                        GoalPrompt: n.TryGetProperty("goalPrompt", out var gp) ? gp.GetString()                : null));
+                }
+            }
+
+            var edges = new List<GeneratedEdge>();
+            if (doc.RootElement.TryGetProperty("edges", out var edgesEl))
+            {
+                foreach (var e in edgesEl.EnumerateArray())
+                {
+                    edges.Add(new GeneratedEdge(
+                        SourceNodeId: e.GetProperty("sourceNodeId").GetString() ?? string.Empty,
+                        TargetNodeId: e.GetProperty("targetNodeId").GetString() ?? string.Empty));
+                }
+            }
+
+            return new WorkflowGenerationResult(nodes.AsReadOnly(), edges.AsReadOnly(), null);
+        }
+        catch (JsonException)
+        {
+            return new WorkflowGenerationResult(
+                Array.Empty<GeneratedNode>(),
+                Array.Empty<GeneratedEdge>(),
+                "I couldn't parse the workflow. Could you describe it differently?");
+        }
     }
 
     // ── KernelFunction ──────────────────────────────────────────────────────────
