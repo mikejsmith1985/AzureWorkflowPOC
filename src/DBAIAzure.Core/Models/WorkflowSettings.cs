@@ -29,4 +29,14 @@ public sealed record WorkflowSettings
     /// <c>null</c> when no run has been attempted yet in any session.
     /// </summary>
     public string? LastRunInputDescription { get; init; }
+
+    /// <summary>
+    /// Realization provenance, keyed by node id: the intent hash captured when each node was last
+    /// realized (label + goal + connected-edge signature). At load time the current intent hash is
+    /// recomputed and compared; a mismatch means the node's intent changed after realization and it
+    /// is reported as out-of-date. Persisted alongside the other settings so the signal survives
+    /// reloads without bumping the node's own state.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> RealizationProvenance { get; init; } =
+        new Dictionary<string, string>().AsReadOnly();
 }

@@ -16,6 +16,7 @@
     {
         <div class="absolute -top-2 -right-2 w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center"
              title="This node needs configuration"
+             data-testid="node-unconfigured-badge"
              aria-label="Node requires configuration">
             <span class="text-white text-xs font-bold leading-none">!</span>
         </div>
@@ -23,6 +24,17 @@
         <div class="absolute -bottom-5 right-0 text-xs text-amber-400 font-medium whitespace-nowrap pointer-events-none select-none"
              aria-label="Double-click to set up this step">
             Set up →
+        </div>
+    }
+
+    @* Green "realized" check — shown once a node has accepted production-ready config (spec 007).
+       Trigger nodes are entry markers and are not surfaced as realized here. *@
+    @if (Node.WorkflowNode.IsConfigured && Node.WorkflowNode.NodeType != WorkflowNodeType.Trigger)
+    {
+        <div class="absolute -top-2 -right-2 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center"
+             title="This step has been made production-ready"
+             aria-label="Step is realized and production-ready">
+            <span class="text-white text-xs font-bold leading-none">✓</span>
         </div>
     }
 

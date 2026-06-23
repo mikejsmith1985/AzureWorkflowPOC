@@ -83,13 +83,20 @@
         </div>
     }
 
-    @* Right-click context menu for node deletion *@
+    @* Right-click context menu for node actions: realize, delete, dismiss *@
     @if (_contextMenu.IsVisible)
     {
-        <div class="absolute z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[140px]"
+        <div class="absolute z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]"
              style="left: @(_contextMenu.CanvasX)px; top: @(_contextMenu.CanvasY)px"
              role="menu"
              aria-label="Node actions">
+            <button class="w-full text-left px-4 py-2 text-sm text-cyan-400 hover:bg-cyan-900/30 transition-colors"
+                    role="menuitem"
+                    tabindex="0"
+                    data-testid="context-menu-realize-node"
+                    @onclick="OnContextMenuRealizeClicked">
+                ✨ Realize this node
+            </button>
             <button class="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-900/30 transition-colors"
                     role="menuitem"
                     tabindex="0"
@@ -138,6 +145,12 @@
     /// Used by the parent page to show the "double-click to configure" single-click tooltip.
     /// </summary>
     [Parameter] public EventCallback<string> OnNodeSingleClicked { get; set; }
+
+    /// <summary>
+    /// Raised when the user chooses "Realize this node" from the right-click context menu.
+    /// Carries the domain node so the parent page can call ProposeNodeAsync for just that node.
+    /// </summary>
+    [Parameter] public EventCallback<WorkflowNode> OnRealizeNodeRequested { get; set; }
 
     // ── Diagram state ────────────────────────────────────────────────────────────
 
@@ -595,6 +608,19 @@
 
         _ = FireTriggerPresenceChanged();
         _ = NotifyWorkflowChanged();
+    }
+
+    private void OnContextMenuRealizeClicked()
+    {
+        if (_contextMenuTarget is null)
+        {
+            OnContextMenuDismiss();
+            return;
+        }
+
+        var node = _contextMenuTarget.WorkflowNode;
+        OnContextMenuDismiss();
+        _ = OnRealizeNodeRequested.InvokeAsync(node);
     }
 
     private void OnContextMenuDismiss()

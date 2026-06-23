@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Node Realization: turn plain-language workflows into production-ready ones (spec 007)
+
+A new **"Make it real"** flow converts a plain-language workflow into runnable, production-ready
+configuration. The assistant proposes per-node configuration, the user reviews and accepts it, and the
+workflow reports an honest production-readiness verdict and runs from the accepted configuration. This
+is User Story 1 (the MVP) of spec `007-node-realization`.
+
+- **Per-node realized config** — each node type has a typed configuration record (agent instruction +
+  model + output shape; notify connector/recipient/message; route conditions + default; transform
+  mappings; data read/write; approval prompt/options; trigger initial-data shape). All are stored in the
+  existing `WorkflowNode.FunctionConfig` as a versioned envelope via `NodeConfigSerializer`, so no schema
+  migration is needed.
+- **`WorkflowRealizationService`** — proposes configuration for each node using schema-bound forced
+  tool-use (`IStructuredCompletionService`), so the model returns structured config, never free text
+  (Article VII). Proposing is read-only; `AcceptProposal` is a separate, deterministic, single-node
+  mutation that records an intent hash for out-of-date detection.
+- **`WorkflowReadinessService`** — evaluates production readiness: structural validity, per-node
+  intrinsic validity, cross-node consistency, and live connector health. Validation of realized config
+  lives here (the Run gate), keeping `WorkflowValidator` structural-only so plain-language drafts still
+  save.
+- **Builder UI** — a "Make it real" toolbar action, a streaming review panel with a single explicit
+  "Accept all" confirmation, a production-readiness indicator, and a green "realized" badge on each node.
+- **Review & adjust (US2)** — each proposal can be accepted, **edited in plain language** (no raw
+  code/schema — the node type's primary field), rejected, or **regenerated** (re-proposed for that one
+  node). Single-node acceptance is deterministic and touches only its own node.
+- **Out-of-date detection (US2)** — when a realized node's plain-language intent (label, goal, or
+  connected edges) changes, its accepted config no longer matches what was asked; the node is reported
+  out-of-date and the workflow is no longer production-ready, via a content-based intent hash recorded
+  at acceptance (not a timestamp, so unrelated re-saves never raise a false signal). Readiness re-checks
+  on a meaningful edit only — pure position drags don't trigger a connector-health round-trip.
+- **Runtime executes from realized config** — each step receives its node's configuration as Semantic
+  Kernel step state (`AddStepFromType<TStep, TState>`). Agentic steps run the realized instruction;
+  notify steps resolve the bound connector (secrets fetched at execution, never in config — Article IX);
+  branch steps now route correctly (this fixed a pre-existing bug where the visual-workflow orchestrator
+  never populated route port labels, so branch nodes always failed); transform steps apply the realized
+  field mappings to structured (JSON) payloads; data steps resolve the bound connector and apply the
+  configured operation; the trigger read-path reads `TriggerNodeConfig`, back-compatible with the legacy
+  `{initialDataDescription}` blob.
+- **Secrets discipline** — proposals, prompts, and `FunctionConfig` never carry secrets; only
+  `ConnectorType` references (Article IX).
+- **Per-node "Realize this node" (US3)** — right-clicking any canvas node opens a context menu with a
+  "Realize this node" action that calls `ProposeNodeAsync` for exactly that node and opens the review
+  panel scoped to one proposal. Other nodes are untouched. After acceptance, readiness is re-evaluated.
+  Enables incremental realization: add a new node to an already-realized workflow and realize only it.
+- **Honest Blocked gating when connectors are unconfigured (US4)** — `ProposeNotifyAsync` and
+  `ProposeDataAsync` now check the connector repository before calling the LLM. When no connector of
+  the required category (messaging or data) is configured, they return a `Blocked` proposal immediately
+  with a plain-language reason naming the missing connector type — no LLM call is wasted. The `CanRun`
+  gate was extended to require `IsProductionReady` from the readiness report, so a workflow whose nodes
+  are configured but whose connectors are unhealthy cannot be run. The toolbar's disabled-Run label now
+  shows the specific blocking reason from the readiness report (e.g. "This step needs a connector
+  (Teams) that has not been configured yet") rather than the generic "Set up all steps first".
+- Tests (TDD): unit coverage for config round-trip, proposal ordering/no-mutation, single-node accept +
+  provenance, out-of-date detection, partially-realized single-node isolation (T041), readiness
+  ready/blocked/needs-input/blocking-reason content (T044), and Blocked proposal when no messaging
+  connector is configured (T044/T047); an end-to-end runtime test proving the realized instruction
+  reaches the step through the real local process runtime; and Playwright Scenarios A (make-it-real →
+  accept → readiness verdict → Run state mirrors verdict), B (edit-then-accept, proposal count
+  decreases), C (per-node context-menu realize → exactly 1 proposal card → readiness re-evaluated),
+  and D (Run button and readiness indicator are coherent; specific blocking reason shown when not ready)
+  verified green against the live app with a real Anthropic key.
+
 ### Fixed — Saved edits silently reverted by stale auto-save (data loss)
 
 A saved workflow edit could be overwritten seconds later and revert to an older state, so "Save"
