@@ -33,12 +33,12 @@ US1 and US2 are P0 blockers — all other stories depend on the foundational per
 
 **Purpose**: Packages, folder scaffolding, and configuration keys.
 
-- [ ] T001 Add NuGet packages to solution: `Microsoft.Bot.Connector.Authentication` (Teams JWT), `Microsoft.Graph` (Graph API Adaptive Cards), `Microsoft.ApplicationInsights.AspNetCore` (Azure Monitor), `Microsoft.EntityFrameworkCore.SqlServer` (Azure SQL provider) — update relevant `.csproj` files.
-- [ ] T002 [P] Create folder `src/DBAIAzure.Core/Configuration/` (namespace `DBAIAzure.Core.Configuration`).
-- [ ] T003 [P] Create folder `src/DBAIAzure.Web/Rules/` (namespace `DBAIAzure.Web.Rules`) for DoR rule implementations.
-- [ ] T004 [P] Create folder `src/DBAIAzure.Web/Hubs/` (namespace `DBAIAzure.Web.Hubs`) for SignalR hubs.
-- [ ] T005 [P] Create folder `src/DBAIAzure.Web/Controllers/` (namespace `DBAIAzure.Web.Controllers`) for webhook controller.
-- [ ] T006 [P] Add config keys to `src/DBAIAzure.Web/appsettings.json`: `Storage:ConnectionString` (null by default — triggers SQL Server provider when set), `RetentionDays` (default 30), `DorRules:DisabledRuleNames` (empty array).
+- [X] T001 Add NuGet packages to solution: `Microsoft.Bot.Connector.Authentication` (Teams JWT), `Microsoft.Graph` (Graph API Adaptive Cards), `Microsoft.ApplicationInsights.AspNetCore` (Azure Monitor), `Microsoft.EntityFrameworkCore.SqlServer` (Azure SQL provider) — update relevant `.csproj` files.
+- [X] T002 [P] Create folder `src/DBAIAzure.Core/Configuration/` (namespace `DBAIAzure.Core.Configuration`).
+- [X] T003 [P] Create folder `src/DBAIAzure.Web/Rules/` (namespace `DBAIAzure.Web.Rules`) for DoR rule implementations.
+- [X] T004 [P] Create folder `src/DBAIAzure.Web/Hubs/` (namespace `DBAIAzure.Web.Hubs`) for SignalR hubs.
+- [X] T005 [P] Create folder `src/DBAIAzure.Web/Controllers/` (namespace `DBAIAzure.Web.Controllers`) for webhook controller.
+- [X] T006 [P] Add config keys to `src/DBAIAzure.Web/appsettings.json`: `Storage:ConnectionString` (null by default — triggers SQL Server provider when set), `RetentionDays` (default 30), `DorRules:DisabledRuleNames` (empty array).
 
 ---
 
@@ -50,29 +50,29 @@ US1 and US2 are P0 blockers — all other stories depend on the foundational per
 
 ### Domain Models
 
-- [ ] T007 [P] Create `WorkflowEventType` enum (StepStarted, StepCompleted, StepFailed, StepSkipped, LlmCallCompleted, RunPaused, RunResumed) in `src/DBAIAzure.Core/Models/WorkflowEventType.cs`.
-- [ ] T008 [P] Create `WorkflowRunRecord` record (RunId, WorkflowId, WorkflowName, Status, TriggeredBy, StartedAt, SuspendedAt?, ResumedAt?, CompletedAt?, FailureReason?) in `src/DBAIAzure.Core/Models/WorkflowRunRecord.cs` per data-model.md.
-- [ ] T009 [P] Create `WorkflowExecutionEvent` record (EventId, RunId, NodeId, NodeLabel, EventType, OccurredAt, DurationMs?, Outcome?, LlmModelName?, LlmInputTokens?, LlmOutputTokens?) in `src/DBAIAzure.Core/Models/WorkflowExecutionEvent.cs` per data-model.md.
-- [ ] T010 [P] Create `HitlPendingItem` record (RunId, WorkflowName, NodeLabel, Question, ApproverChain, CurrentApproverIndex, SuspendedAt, TimeoutAt?, EscalationPolicy) in `src/DBAIAzure.Core/Models/HitlPendingItem.cs` per data-model.md.
-- [ ] T011 [P] Create `DorRuleResult` record (Passed, RuleName, FailureReason?) in `src/DBAIAzure.Core/Models/DorRuleResult.cs`.
-- [ ] T012 [P] Create `WorkflowGenerationResult` record (Nodes: GeneratedNode[], Edges: GeneratedEdge[], ClarifyingQuestion?) plus `GeneratedNode` (Id, NodeType, Label, GoalPrompt?) and `GeneratedEdge` (SourceNodeId, TargetNodeId) in `src/DBAIAzure.Core/Models/WorkflowGenerationResult.cs`.
-- [ ] T013 [P] Create `DorRuleSettings` record (DisabledRuleNames: string[]) in `src/DBAIAzure.Core/Configuration/DorRuleSettings.cs`; bind to `"DorRules"` config section.
+- [X] T007 [P] Create `WorkflowEventType` enum (StepStarted, StepCompleted, StepFailed, StepSkipped, LlmCallCompleted, RunPaused, RunResumed) in `src/DBAIAzure.Core/Models/WorkflowEventType.cs`.
+- [X] T008 [P] Create `WorkflowRunRecord` record (RunId, WorkflowId, WorkflowName, Status, TriggeredBy, StartedAt, SuspendedAt?, ResumedAt?, CompletedAt?, FailureReason?) in `src/DBAIAzure.Core/Models/WorkflowRunRecord.cs` per data-model.md.
+- [X] T009 [P] Create `WorkflowExecutionEvent` record (EventId, RunId, NodeId, NodeLabel, EventType, OccurredAt, DurationMs?, Outcome?, LlmModelName?, LlmInputTokens?, LlmOutputTokens?) in `src/DBAIAzure.Core/Models/WorkflowExecutionEvent.cs` per data-model.md.
+- [X] T010 [P] Create `HitlPendingItem` record (RunId, WorkflowName, NodeLabel, Question, ApproverChain, CurrentApproverIndex, SuspendedAt, TimeoutAt?, EscalationPolicy) in `src/DBAIAzure.Core/Models/HitlPendingItem.cs` per data-model.md.
+- [X] T011 [P] Create `DorRuleResult` record (Passed, RuleName, FailureReason?) in `src/DBAIAzure.Core/Models/DorRuleResult.cs`.
+- [X] T012 [P] Create `WorkflowGenerationResult` record (Nodes: GeneratedNode[], Edges: GeneratedEdge[], ClarifyingQuestion?) plus `GeneratedNode` (Id, NodeType, Label, GoalPrompt?) and `GeneratedEdge` (SourceNodeId, TargetNodeId) in `src/DBAIAzure.Core/Models/WorkflowGenerationResult.cs`.
+- [X] T013 [P] Create `DorRuleSettings` record (DisabledRuleNames: string[]) in `src/DBAIAzure.Core/Configuration/DorRuleSettings.cs`; bind to `"DorRules"` config section.
 
 ### Interfaces
 
-- [ ] T014 [P] Create `IWorkflowRunRepository` interface (CreateAsync, UpdateAsync, GetAsync, ListByStatusAsync, ListAsync, PurgeTerminalRunsOlderThanAsync) in `src/DBAIAzure.Core/Interfaces/IWorkflowRunRepository.cs` per contracts/iworkflow-run-repository.md.
-- [ ] T015 [P] Create `IWorkflowObserver` interface (RecordEventAsync) in `src/DBAIAzure.Core/Interfaces/IWorkflowObserver.cs` per contracts/iworkflow-observer.md.
-- [ ] T016 [P] Create `IWorkflowApprovalNotifier` interface (NotifyAsync, EscalateAsync) in `src/DBAIAzure.Core/Interfaces/IWorkflowApprovalNotifier.cs` per contracts/iworkflow-approval-notifier.md.
-- [ ] T017 [P] Create `IWorkflowReadinessRule` interface (RuleName, Description, CheckAsync) in `src/DBAIAzure.Core/Interfaces/IWorkflowReadinessRule.cs` per contracts/iworkflow-readiness-rule.md.
-- [ ] T018 [P] Create `IWorkflowPreRunValidator` interface (ValidateAsync) in `src/DBAIAzure.Core/Interfaces/IWorkflowPreRunValidator.cs` per contracts/iworkflow-readiness-rule.md.
+- [X] T014 [P] Create `IWorkflowRunRepository` interface (CreateAsync, UpdateAsync, GetAsync, ListByStatusAsync, ListAsync, PurgeTerminalRunsOlderThanAsync) in `src/DBAIAzure.Core/Interfaces/IWorkflowRunRepository.cs` per contracts/iworkflow-run-repository.md.
+- [X] T015 [P] Create `IWorkflowObserver` interface (RecordEventAsync) in `src/DBAIAzure.Core/Interfaces/IWorkflowObserver.cs` per contracts/iworkflow-observer.md.
+- [X] T016 [P] Create `IWorkflowApprovalNotifier` interface (NotifyAsync, EscalateAsync) in `src/DBAIAzure.Core/Interfaces/IWorkflowApprovalNotifier.cs` per contracts/iworkflow-approval-notifier.md.
+- [X] T017 [P] Create `IWorkflowReadinessRule` interface (RuleName, Description, CheckAsync) in `src/DBAIAzure.Core/Interfaces/IWorkflowReadinessRule.cs` per contracts/iworkflow-readiness-rule.md.
+- [X] T018 [P] Create `IWorkflowPreRunValidator` interface (ValidateAsync) in `src/DBAIAzure.Core/Interfaces/IWorkflowPreRunValidator.cs` per contracts/iworkflow-readiness-rule.md.
 
 ### EF Core Entities & Migration
 
-- [ ] T019 [P] Create `WorkflowRunEntity` class (RunId PK, WorkflowId indexed, WorkflowName, Status indexed, TriggeredBy, StartedAt, SuspendedAt?, ResumedAt?, CompletedAt?, FailureReason?) in `src/DBAIAzure.Storage/Entities/WorkflowRunEntity.cs` per data-model.md EF config.
-- [ ] T020 [P] Create `WorkflowExecutionEventEntity` class (EventId PK Guid, RunId FK indexed, NodeId, NodeLabel, EventType, OccurredAt indexed, DurationMs?, Outcome?, LlmModelName?, LlmInputTokens?, LlmOutputTokens?) in `src/DBAIAzure.Storage/Entities/WorkflowExecutionEventEntity.cs` per data-model.md; composite index on (RunId, OccurredAt).
-- [ ] T021 Extend `PipelineDbContext` with `DbSet<WorkflowRunEntity> WorkflowRuns` and `DbSet<WorkflowExecutionEventEntity> WorkflowExecutionEvents` including cascade delete from WorkflowRuns → WorkflowExecutionEvents, in `src/DBAIAzure.Storage/PipelineDbContext.cs`.
+- [X] T019 [P] Create `WorkflowRunEntity` class (RunId PK, WorkflowId indexed, WorkflowName, Status indexed, TriggeredBy, StartedAt, SuspendedAt?, ResumedAt?, CompletedAt?, FailureReason?) in `src/DBAIAzure.Storage/Entities/WorkflowRunEntity.cs` per data-model.md EF config.
+- [X] T020 [P] Create `WorkflowExecutionEventEntity` class (EventId PK Guid, RunId FK indexed, NodeId, NodeLabel, EventType, OccurredAt indexed, DurationMs?, Outcome?, LlmModelName?, LlmInputTokens?, LlmOutputTokens?) in `src/DBAIAzure.Storage/Entities/WorkflowExecutionEventEntity.cs` per data-model.md; composite index on (RunId, OccurredAt).
+- [X] T021 Extend `PipelineDbContext` with `DbSet<WorkflowRunEntity> WorkflowRuns` and `DbSet<WorkflowExecutionEventEntity> WorkflowExecutionEvents` including cascade delete from WorkflowRuns → WorkflowExecutionEvents, in `src/DBAIAzure.Storage/PipelineDbContext.cs`.
 - [ ] T022 Add EF Core migration `008_AddWorkflowRunsAndEvents` via `dotnet ef migrations add 008_AddWorkflowRunsAndEvents --project src/DBAIAzure.Storage --startup-project src/DBAIAzure.Web`; verify generated migration creates both tables with correct indexes.
-- [ ] T023 Update `Program.cs` provider-selection: if `Storage:ConnectionString` is present use `UseSqlServer(connectionString)`; otherwise fall back to `UseSqlite(sqlitePath)`; call `dbContext.Database.MigrateAsync()` at startup so new tables are created automatically in `src/DBAIAzure.Web/Program.cs`.
+- [X] T023 Update `Program.cs` provider-selection: if `Storage:ConnectionString` is present use `UseSqlServer(connectionString)`; otherwise fall back to `UseSqlite(sqlitePath)`; call `dbContext.Database.MigrateAsync()` at startup so new tables are created automatically in `src/DBAIAzure.Web/Program.cs`.
 
 **Checkpoint**: Foundational types ready — user story implementation can begin.
 
@@ -95,11 +95,11 @@ open `/review-queue` and confirm the paused run is listed with correct data (qui
 
 ### Implementation
 
-- [ ] T028 [US1] Implement `EfWorkflowRunRepository` (IWorkflowRunRepository backed by EF Core; inject `IDbContextFactory<PipelineDbContext>`) in `src/DBAIAzure.Storage/Repositories/EfWorkflowRunRepository.cs`.
-- [ ] T029 [US1] Inject `IWorkflowRunRepository` into `WorkflowExecutionOrchestrator` constructor in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
-- [ ] T030 [US1] Call `CreateAsync` in `StartRunAsync` immediately after adding to `_runs`; call `UpdateAsync` on every status transition (Running→Paused, →Completed, →Failed, →TimedOut, →Cancelled) — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
+- [X] T028 [US1] Implement `EfWorkflowRunRepository` (IWorkflowRunRepository backed by EF Core; inject `IDbContextFactory<PipelineDbContext>`) in `src/DBAIAzure.Storage/Repositories/EfWorkflowRunRepository.cs`.
+- [X] T029 [US1] Inject `IWorkflowRunRepository` into `WorkflowExecutionOrchestrator` constructor in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
+- [X] T030 [US1] Call `CreateAsync` in `StartRunAsync` immediately after adding to `_runs`; call `UpdateAsync` on every status transition (Running→Paused, →Completed, →Failed, →TimedOut, →Cancelled) — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
 - [ ] T031 [US1] Add startup rehydration: on `IHostedService.StartAsync` (or `Program.cs` after DI build), call `IWorkflowRunRepository.ListByStatusAsync(Paused)` and for each result add a `WorkflowRunState` to `_runs` with a fresh `ApprovalTcs`, so `SubmitApproval` can resolve it — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs` or a dedicated startup service.
-- [ ] T032 [US1] Register `IWorkflowRunRepository → EfWorkflowRunRepository` (scoped) in `src/DBAIAzure.Web/Program.cs`.
+- [X] T032 [US1] Register `IWorkflowRunRepository → EfWorkflowRunRepository` (scoped) in `src/DBAIAzure.Web/Program.cs`.
 
 ---
 
@@ -120,13 +120,13 @@ click Approve; confirm workflow reaches Completed (quickstart Scenario 2).
 
 ### Implementation
 
-- [ ] T037 [US2] Implement `WorkflowApprovalTeamsNotifier` (send Adaptive Card via `GraphServiceClient.Users[upn].Chats.PostAsync` or channel message; embed `runId` + decision in `Action.Submit` data) in `src/DBAIAzure.Web/Services/WorkflowApprovalTeamsNotifier.cs`.
-- [ ] T038 [US2] Implement `WorkflowRunHub` (SignalR hub with `SendRunUpdate(runId, status)` method; group per runId) in `src/DBAIAzure.Web/Hubs/WorkflowRunHub.cs`.
-- [ ] T039 [US2] Implement `TeamsWebhookController` (minimal API controller; validate JWT via `BotFrameworkAuthentication`; parse `runId` + approved from action data; call `SubmitApproval`) in `src/DBAIAzure.Web/Controllers/TeamsWebhookController.cs`.
-- [ ] T040 [US2] Wire `IWorkflowApprovalNotifier.NotifyAsync` into `WorkflowExecutionOrchestrator.ExecuteRunAsync` immediately after the run transitions to `Paused`; log and swallow notification failures — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
+- [X] T037 [US2] Implement `WorkflowApprovalTeamsNotifier` (send Adaptive Card via `GraphServiceClient.Users[upn].Chats.PostAsync` or channel message; embed `runId` + decision in `Action.Submit` data) in `src/DBAIAzure.Web/Services/WorkflowApprovalTeamsNotifier.cs`.
+- [X] T038 [US2] Implement `WorkflowRunHub` (SignalR hub with `SendRunUpdate(runId, status)` method; group per runId) in `src/DBAIAzure.Web/Hubs/WorkflowRunHub.cs`.
+- [X] T039 [US2] Implement `TeamsWebhookController` (minimal API controller; validate JWT via `BotFrameworkAuthentication`; parse `runId` + approved from action data; call `SubmitApproval`) in `src/DBAIAzure.Web/Controllers/TeamsWebhookController.cs`.
+- [X] T040 [US2] Wire `IWorkflowApprovalNotifier.NotifyAsync` into `WorkflowExecutionOrchestrator.ExecuteRunAsync` immediately after the run transitions to `Paused`; log and swallow notification failures — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
 - [ ] T041 [US2] Implement escalation timeout loop in `WorkflowExecutionOrchestrator`: after suspension, start a timer; on expiry check `EscalationPolicy` — call `EscalateAsync` (advance `CurrentApproverIndex`) or auto-resolve the `ApprovalTcs` per policy; repeat until chain exhausted or decision received — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
-- [ ] T042 [US2] Update `ApprovalNodeConfig` to include `ApproverChain: string[]`, `TimeoutMinutes: int`, `EscalationPolicy: string` in `src/DBAIAzure.Core/Models/NodeConfig/ApprovalNodeConfig.cs` (aligns with data-model.md HitlPendingItem).
-- [ ] T043 [US2] Register `IWorkflowApprovalNotifier → WorkflowApprovalTeamsNotifier`, `WorkflowRunHub`, and `TeamsWebhookController` (via `MapControllers`) in `src/DBAIAzure.Web/Program.cs`; add `services.AddControllers()` and `app.MapControllers()`.
+- [X] T042 [US2] Update `ApprovalNodeConfig` to include `ApproverChain: string[]`, `TimeoutMinutes: int`, `EscalationPolicy: string` in `src/DBAIAzure.Core/Models/NodeConfig/ApprovalNodeConfig.cs` (aligns with data-model.md HitlPendingItem).
+- [X] T043 [US2] Register `IWorkflowApprovalNotifier → WorkflowApprovalTeamsNotifier`, `WorkflowRunHub`, and `TeamsWebhookController` (via `MapControllers`) in `src/DBAIAzure.Web/Program.cs`; add `services.AddControllers()` and `app.MapControllers()`.
 
 ---
 
@@ -145,10 +145,10 @@ decision; confirm it leaves pending and enters Resolved without manual refresh (
 
 ### Implementation
 
-- [ ] T046 [US3] Implement `ReviewQueue.razor` page at route `/review-queue`; list `HitlPendingItem` projections from `IWorkflowRunRepository`; Approve/Reject buttons call `SubmitApproval`; Resolved section shows terminal items with outcome + timestamp — in `src/DBAIAzure.Web/Pages/ReviewQueue.razor`.
+- [X] T046 [US3] Implement `ReviewQueue.razor` page at route `/review-queue`; list `HitlPendingItem` projections from `IWorkflowRunRepository`; Approve/Reject buttons call `SubmitApproval`; Resolved section shows terminal items with outcome + timestamp — in `src/DBAIAzure.Web/Pages/ReviewQueue.razor`.
 - [ ] T047 [US3] Subscribe `ReviewQueue.razor` to `WorkflowRunHub` via `HubConnection`; on `RunStatusChanged` event re-query and re-render without user action — in `src/DBAIAzure.Web/Pages/ReviewQueue.razor`.
 - [ ] T048 [US3] Extend `WorkflowExecutionOrchestrator` to invoke `WorkflowRunHub.SendRunUpdate(runId, status)` (via `IHubContext<WorkflowRunHub>`) on every status transition — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
-- [ ] T049 [US3] Add **Review Queue** nav link to `src/DBAIAzure.Web/Shared/MainLayout.razor` and `src/DBAIAzure.Web/Shared/WorkflowBuilderLayout.razor`.
+- [X] T049 [US3] Add **Review Queue** nav link to `src/DBAIAzure.Web/Shared/MainLayout.razor` and `src/DBAIAzure.Web/Shared/WorkflowBuilderLayout.razor`.
 
 ---
 
@@ -168,15 +168,15 @@ row shows model name and token counts (quickstart Scenario 4).
 
 ### Implementation
 
-- [ ] T053 [US4] Implement `SqlWorkflowObserver` (IWorkflowObserver; writes to `WorkflowExecutionEvents` via `IDbContextFactory<PipelineDbContext>`; catches and logs all exceptions) in `src/DBAIAzure.Web/Services/SqlWorkflowObserver.cs`.
-- [ ] T054 [US4] Implement `SignalRWorkflowObserver` (IWorkflowObserver; pushes event to `WorkflowRunHub` via `IHubContext`; fire-and-forget) in `src/DBAIAzure.Web/Services/SignalRWorkflowObserver.cs`.
-- [ ] T055 [US4] Implement `AzureMonitorWorkflowObserver` (IWorkflowObserver; calls `TelemetryClient.TrackEvent` with event properties; conditionally registered) in `src/DBAIAzure.Web/Services/AzureMonitorWorkflowObserver.cs`.
+- [X] T053 [US4] Implement `SqlWorkflowObserver` (IWorkflowObserver; writes to `WorkflowExecutionEvents` via `IDbContextFactory<PipelineDbContext>`; catches and logs all exceptions) in `src/DBAIAzure.Web/Services/SqlWorkflowObserver.cs`.
+- [X] T054 [US4] Implement `SignalRWorkflowObserver` (IWorkflowObserver; pushes event to `WorkflowRunHub` via `IHubContext`; fire-and-forget) in `src/DBAIAzure.Web/Services/SignalRWorkflowObserver.cs`.
+- [X] T055 [US4] Implement `AzureMonitorWorkflowObserver` (IWorkflowObserver; calls `TelemetryClient.TrackEvent` with event properties; conditionally registered) in `src/DBAIAzure.Web/Services/AzureMonitorWorkflowObserver.cs`.
 - [ ] T056 [US4] Implement SK `WorkflowFunctionInvocationFilter` (IFunctionInvocationFilter; captures model id and usage tokens from `FunctionResult`; emits `LlmCallCompleted` via `IEnumerable<IWorkflowObserver>`) in `src/DBAIAzure.Web/Services/WorkflowFunctionInvocationFilter.cs`.
-- [ ] T057 [US4] Register observers: `services.AddScoped<IWorkflowObserver, SqlWorkflowObserver>()`, `services.AddScoped<IWorkflowObserver, SignalRWorkflowObserver>()`, conditional Azure Monitor registration, and `WorkflowFunctionInvocationFilter` on kernel factory — in `src/DBAIAzure.Web/Program.cs`.
+- [X] T057 [US4] Register observers: `services.AddScoped<IWorkflowObserver, SqlWorkflowObserver>()`, `services.AddScoped<IWorkflowObserver, SignalRWorkflowObserver>()`, conditional Azure Monitor registration, and `WorkflowFunctionInvocationFilter` on kernel factory — in `src/DBAIAzure.Web/Program.cs`.
 - [ ] T058 [US4] Wire observer fan-out into `WorkflowExecutionOrchestrator`: emit `StepStarted`/`StepCompleted`/`StepFailed` events per node state transition by resolving `IEnumerable<IWorkflowObserver>` — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
-- [ ] T059 [US4] Implement `RunHistory.razor` at route `/runs`: paginated table of `WorkflowRunRecord` (workflow name, status badge, duration, triggered-by, started-at); filter controls for status and date range — in `src/DBAIAzure.Web/Pages/RunHistory.razor`.
-- [ ] T060 [US4] Implement `RunHistoryDetail.razor` at route `/runs/{runId}`: chronological timeline of `WorkflowExecutionEvent` rows; AI steps show model + token counts; error steps show `Outcome` in plain language — in `src/DBAIAzure.Web/Pages/RunHistoryDetail.razor`.
-- [ ] T061 [US4] Add **Run History** nav link to `src/DBAIAzure.Web/Shared/MainLayout.razor` and `src/DBAIAzure.Web/Shared/WorkflowBuilderLayout.razor`.
+- [X] T059 [US4] Implement `RunHistory.razor` at route `/runs`: paginated table of `WorkflowRunRecord` (workflow name, status badge, duration, triggered-by, started-at); filter controls for status and date range — in `src/DBAIAzure.Web/Pages/RunHistory.razor`.
+- [X] T060 [US4] Implement `RunHistoryDetail.razor` at route `/runs/{runId}`: chronological timeline of `WorkflowExecutionEvent` rows; AI steps show model + token counts; error steps show `Outcome` in plain language — in `src/DBAIAzure.Web/Pages/RunHistoryDetail.razor`.
+- [X] T061 [US4] Add **Run History** nav link to `src/DBAIAzure.Web/Shared/MainLayout.razor` and `src/DBAIAzure.Web/Shared/WorkflowBuilderLayout.razor`.
 
 ---
 
@@ -217,9 +217,9 @@ fully wired; realize and run without additional manual steps (quickstart Scenari
 
 ### Implementation
 
-- [ ] T070 [US6] Define `WorkflowGenerationResult` JSON schema for `IStructuredCompletionService` (GeneratedNode array with id/nodeType/label/goalPrompt, GeneratedEdge array with sourceNodeId/targetNodeId, optional clarifyingQuestion) in `src/DBAIAzure.Web/Services/WorkflowGenerationSchema.cs`.
-- [ ] T071 [US6] Add `GenerateWorkflowAsync(string description, CancellationToken)` method to `WorkflowDesignSkillService` (calls `IStructuredCompletionService.GetStructuredAsync<WorkflowGenerationResult>`; maps result to `WorkflowDefinition` nodes + edges; returns null on clarifying question path) in `src/DBAIAzure.Web/Services/WorkflowDesignSkillService.cs` (EXTEND).
-- [ ] T072 [US6] Add chat-generation UI to `WorkflowBuilder.razor`: text input + **Generate Workflow** button in the chat panel; on submit call `GenerateWorkflowAsync`; if result has `ClarifyingQuestion` display it; else render nodes + edges on canvas via `WorkflowBuilderService` — in `src/DBAIAzure.Web/Pages/WorkflowBuilder.razor` (EXTEND).
+- [X] T070 [US6] Define `WorkflowGenerationResult` JSON schema for `IStructuredCompletionService` (GeneratedNode array with id/nodeType/label/goalPrompt, GeneratedEdge array with sourceNodeId/targetNodeId, optional clarifyingQuestion) in `src/DBAIAzure.Web/Services/WorkflowGenerationSchema.cs`.
+- [X] T071 [US6] Add `GenerateWorkflowAsync(string description, CancellationToken)` method to `WorkflowDesignSkillService` (calls `IStructuredCompletionService.GetStructuredAsync<WorkflowGenerationResult>`; maps result to `WorkflowDefinition` nodes + edges; returns null on clarifying question path) in `src/DBAIAzure.Web/Services/WorkflowDesignSkillService.cs` (EXTEND).
+- [X] T072 [US6] Add chat-generation UI to `WorkflowBuilder.razor`: text input + **Generate Workflow** button in the chat panel; on submit call `GenerateWorkflowAsync`; if result has `ClarifyingQuestion` display it; else render nodes + edges on canvas via `WorkflowBuilderService` — in `src/DBAIAzure.Web/Pages/WorkflowBuilder.razor` (EXTEND).
 
 ---
 
@@ -241,29 +241,29 @@ plain-language reason; realize all nodes; confirm Run proceeds (quickstart Scena
 
 ### Implementation
 
-- [ ] T078 [P] [US7] Implement `TriggerNodePresentRule` in `src/DBAIAzure.Web/Rules/TriggerNodePresentRule.cs`.
-- [ ] T079 [P] [US7] Implement `AllNodesRealizedRule` in `src/DBAIAzure.Web/Rules/AllNodesRealizedRule.cs`.
-- [ ] T080 [P] [US7] Implement `ConnectorsHealthyRule` (resolves `IConnectorHealthChecker` from DI; checks all connectors bound to realized nodes) in `src/DBAIAzure.Web/Rules/ConnectorsHealthyRule.cs`.
-- [ ] T081 [P] [US7] Implement `ApprovalNodesConfiguredRule` in `src/DBAIAzure.Web/Rules/ApprovalNodesConfiguredRule.cs`.
-- [ ] T082 [US7] Implement `WorkflowPreRunValidator` (resolves `IEnumerable<IWorkflowReadinessRule>`; respects `IOptionsMonitor<DorRuleSettings>`; returns results with failing rules first) in `src/DBAIAzure.Web/Services/WorkflowPreRunValidator.cs`.
-- [ ] T083 [US7] Register rules and validator: `services.AddScoped<IWorkflowReadinessRule, TriggerNodePresentRule>()` × 4 rules + `services.AddScoped<IWorkflowPreRunValidator, WorkflowPreRunValidator>()` + `services.Configure<DorRuleSettings>(...)` — in `src/DBAIAzure.Web/Program.cs`.
-- [ ] T084 [US7] Inject `IWorkflowPreRunValidator` into `WorkflowBuilder.razor`; call `ValidateAsync` before enabling Run button; render failing rule reasons as a blocking list above the button — in `src/DBAIAzure.Web/Pages/WorkflowBuilder.razor` (EXTEND).
+- [X] T078 [P] [US7] Implement `TriggerNodePresentRule` in `src/DBAIAzure.Web/Rules/TriggerNodePresentRule.cs`.
+- [X] T079 [P] [US7] Implement `AllNodesRealizedRule` in `src/DBAIAzure.Web/Rules/AllNodesRealizedRule.cs`.
+- [X] T080 [P] [US7] Implement `ConnectorsHealthyRule` (resolves `IConnectorHealthChecker` from DI; checks all connectors bound to realized nodes) in `src/DBAIAzure.Web/Rules/ConnectorsHealthyRule.cs`.
+- [X] T081 [P] [US7] Implement `ApprovalNodesConfiguredRule` in `src/DBAIAzure.Web/Rules/ApprovalNodesConfiguredRule.cs`.
+- [X] T082 [US7] Implement `WorkflowPreRunValidator` (resolves `IEnumerable<IWorkflowReadinessRule>`; respects `IOptionsMonitor<DorRuleSettings>`; returns results with failing rules first) in `src/DBAIAzure.Web/Services/WorkflowPreRunValidator.cs`.
+- [X] T083 [US7] Register rules and validator: `services.AddScoped<IWorkflowReadinessRule, TriggerNodePresentRule>()` × 4 rules + `services.AddScoped<IWorkflowPreRunValidator, WorkflowPreRunValidator>()` + `services.Configure<DorRuleSettings>(...)` — in `src/DBAIAzure.Web/Program.cs`.
+- [X] T084 [US7] Inject `IWorkflowPreRunValidator` into `WorkflowBuilder.razor`; call `ValidateAsync` before enabling Run button; render failing rule reasons as a blocking list above the button — in `src/DBAIAzure.Web/Pages/WorkflowBuilder.razor` (EXTEND).
 
 ---
 
 ## Final Phase: Polish & Cross-cutting Concerns
 
-- [ ] T085 [P] Implement retention `IHostedService` (`WorkflowRunRetentionService`) that runs daily and calls `IWorkflowRunRepository.PurgeTerminalRunsOlderThanAsync(DateTimeOffset.UtcNow - TimeSpan.FromDays(retentionDays))`; `retentionDays` read from `IConfiguration["RetentionDays"]` (default 30) — in `src/DBAIAzure.Web/Services/WorkflowRunRetentionService.cs`.
-- [ ] T086 [P] Register `WorkflowRunRetentionService` as `services.AddHostedService<WorkflowRunRetentionService>()` in `src/DBAIAzure.Web/Program.cs`.
+- [X] T085 [P] Implement retention `IHostedService` (`WorkflowRunRetentionService`) that runs daily and calls `IWorkflowRunRepository.PurgeTerminalRunsOlderThanAsync(DateTimeOffset.UtcNow - TimeSpan.FromDays(retentionDays))`; `retentionDays` read from `IConfiguration["RetentionDays"]` (default 30) — in `src/DBAIAzure.Web/Services/WorkflowRunRetentionService.cs`.
+- [X] T086 [P] Register `WorkflowRunRetentionService` as `services.AddHostedService<WorkflowRunRetentionService>()` in `src/DBAIAzure.Web/Program.cs`.
 - [ ] T087 [P] E2E Playwright test `ReviewQueueTests.OperatorApprovalFlow`: launch app, run workflow to approval pause, open `/review-queue`, confirm paused item, click Approve, confirm queue updates to Resolved and run reaches Completed — in `tests/DBAIAzure.E2ETests/Tests/ReviewQueueTests.cs`.
-- [ ] T088 [P] E2E Playwright test `RunHistoryTests.RunListAndDrillDown`: complete a workflow, open `/runs`, confirm run row exists with correct status badge, click through to `/runs/{id}`, confirm step timeline is populated with at least one event row — in `tests/DBAIAzure.E2ETests/Tests/RunHistoryTests.cs`.
-- [ ] T089 [P] E2E Playwright test `RunHistoryTests.AiStepShowsTokenCounts`: run a workflow containing one AI node, open `/runs/{id}`, assert the AI step row shows non-empty model name and input/output token count columns — in `tests/DBAIAzure.E2ETests/Tests/RunHistoryTests.cs`.
+- [X] T088 [P] E2E Playwright test `RunHistoryTests.RunListAndDrillDown`: complete a workflow, open `/runs`, confirm run row exists with correct status badge, click through to `/runs/{id}`, confirm step timeline is populated with at least one event row — in `tests/DBAIAzure.E2ETests/Tests/RunHistoryTests.cs`.
+- [X] T089 [P] E2E Playwright test `RunHistoryTests.AiStepShowsTokenCounts`: run a workflow containing one AI node, open `/runs/{id}`, assert the AI step row shows non-empty model name and input/output token count columns — in `tests/DBAIAzure.E2ETests/Tests/RunHistoryTests.cs`.
 - [ ] T090 [P] E2E Playwright test `ConnectorSettingsTests.AddHealthCheckDelete`: navigate to `/settings/connectors`, add an Azure DevOps connector entry (using test credentials from user secrets), trigger health check, assert Healthy badge appears, delete the connector, assert list is empty — in `tests/DBAIAzure.E2ETests/Tests/ConnectorSettingsTests.cs`.
 - [ ] T091 [P] [US5] Create `IConnectorAdapter` interface (ConnectorType, ExecuteAsync, HealthCheckAsync) in `src/DBAIAzure.Core/Interfaces/IConnectorAdapter.cs`; implement `AzureDevOpsConnectorAdapter` (create work item only) in `src/DBAIAzure.Connectors/AzureDevOpsConnectorAdapter.cs`; implement `TeamsConnectorAdapter` (send message) in `src/DBAIAzure.Connectors/TeamsConnectorAdapter.cs`.
 - [ ] T092 [US5] Update `WorkflowRealizationService` to resolve connector bindings by name: when realizing a node of type `Notify`, `Data`, or `Approval`, query `IConnectorConfigRepository` for a healthy connector of the matching type; if none found, set node status to `Blocked` with message "No healthy connector of required type configured" — in `src/DBAIAzure.Web/Services/WorkflowRealizationService.cs` (EXTEND spec-007 service).
-- [ ] T093 [P] [US4] Implement `WorkflowPromptRenderFilter` (IPromptRenderFilter; logs SHA-256 hash of rendered prompt to `ILogger<WorkflowPromptRenderFilter>` — never the prompt text itself; emits no observer event in V1; serves as a registered placeholder for future prompt-logging per Article IX) in `src/DBAIAzure.Web/Services/WorkflowPromptRenderFilter.cs`; register on kernel factory in `src/DBAIAzure.Web/Program.cs`.
+- [X] T093 [P] [US4] Implement `WorkflowPromptRenderFilter` (IPromptRenderFilter; logs SHA-256 hash of rendered prompt to `ILogger<WorkflowPromptRenderFilter>` — never the prompt text itself; emits no observer event in V1; serves as a registered placeholder for future prompt-logging per Article IX) in `src/DBAIAzure.Web/Services/WorkflowPromptRenderFilter.cs`; register on kernel factory in `src/DBAIAzure.Web/Program.cs`.
 - [ ] T094 [P] [US5] Integration test: `ConnectorCredentialSecurityTests.CredentialNeverPersistedToDatabase` — save a connector config with a known test-only PAT string, query all EF Core entity tables, assert the PAT string does not appear in any stored column value — in `tests/DBAIAzure.Tests/ConnectorCredentialSecurityTests.cs`.
-- [ ] T095 Update `CHANGELOG.md` with feature entry under `[Unreleased]`: run persistence, HITL Teams loop, Review Queue, Execution History + LLM tracing, Connector Config UI, whole-workflow chat generation, Definition of Ready validation.
+- [X] T095 Update `CHANGELOG.md` with feature entry under `[Unreleased]`: run persistence, HITL Teams loop, Review Queue, Execution History + LLM tracing, Connector Config UI, whole-workflow chat generation, Definition of Ready validation.
 
 ---
 

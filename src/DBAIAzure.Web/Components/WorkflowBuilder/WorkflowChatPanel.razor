@@ -151,6 +151,29 @@
         }
     </div>
 
+    @* Whole-workflow generation from description (shown when canvas is empty) *@
+    @if (Workflow?.Nodes.Count == 0 && _isLlmAvailable)
+    {
+        <div class="shrink-0 border-t border-gray-800 px-3 py-3 flex flex-col gap-2">
+            <span class="text-xs text-gray-400 font-semibold">Generate from description</span>
+            <textarea @bind="_generateDescription"
+                      @bind:event="oninput"
+                      rows="2"
+                      placeholder="Describe what the workflow should do…"
+                      disabled="@_isGenerating"
+                      class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-sm
+                             text-gray-100 placeholder-gray-500 resize-none focus:outline-none
+                             focus:border-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      aria-label="Describe the workflow to generate"></textarea>
+            <button @onclick="GenerateWorkflowFromDescriptionAsync"
+                    disabled="@(!_isLlmAvailable || _isGenerating || string.IsNullOrWhiteSpace(_generateDescription))"
+                    class="bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40 text-white rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                    aria-label="Generate workflow nodes and edges from description">
+                @(_isGenerating ? "Generating…" : "Generate Workflow")
+            </button>
+        </div>
+    }
+
     @* Input area *@
     <div class="shrink-0 border-t border-gray-800 px-3 py-3 flex flex-col gap-2">
         @if (Workflow?.Nodes.Count > 0 && _messages.Count == 0)
@@ -211,11 +234,19 @@
     /// <summary>Injected code diff service — used to compute a compact diff for regeneration (T052).</summary>
     [Parameter] public IWorkflowCodeDiffService? DiffService { get; set; }
 
+    /// <summary>
+    /// Raised when the user describes a whole workflow and generation succeeds with no
+    /// clarifying question. The parent page should call <c>WorkflowBuilderService.ApplyGenerationResult</c>
+    /// and save the updated definition.
+    /// </summary>
+    [Parameter] public EventCallback<WorkflowGenerationResult> OnGenerationResultReady { get; set; }
+
     // ── Local state ─────────────────────────────────────────────────────────────
 
     private readonly List<WorkflowChatMessage> _messages = new();
     private readonly System.Text.StringBuilder _streamingBuffer = new();
     private string _inputText = string.Empty;
+    private string _generateDescription = string.Empty;
     private bool _isGenerating;
     private bool _isLlmAvailable = true;
     private bool _showWorkflowChangedBanner;
@@ -248,6 +279,53 @@
     {
         _isLlmAvailable = isAvailable;
         InvokeAsync(StateHasChanged);
+    }
+
+    // ── Whole-workflow generation from description ────────────────────────────────
+
+    private async Task GenerateWorkflowFromDescriptionAsync()
+    {
+        var description = _generateDescription.Trim();
+        if (string.IsNullOrWhiteSpace(description) || _isGenerating) return;
+
+        _isGenerating = true;
+        _messages.Add(new WorkflowChatMessage(ChatRole.User, description, false, DateTimeOffset.UtcNow));
+        StateHasChanged();
+
+        try
+        {
+            var result = await DesignSkillService.GenerateWorkflowAsync(description);
+
+            if (!string.IsNullOrWhiteSpace(result.ClarifyingQuestion))
+            {
+                _messages.Add(new WorkflowChatMessage(
+                    ChatRole.Assistant, result.ClarifyingQuestion, false, DateTimeOffset.UtcNow));
+            }
+            else
+            {
+                _messages.Add(new WorkflowChatMessage(
+                    ChatRole.Assistant,
+                    $"Generated {result.Nodes.Count} node(s) and {result.Edges.Count} edge(s). Applying to canvas…",
+                    false,
+                    DateTimeOffset.UtcNow));
+
+                await OnGenerationResultReady.InvokeAsync(result);
+                _generateDescription = string.Empty;
+            }
+        }
+        catch (Exception)
+        {
+            _messages.Add(new WorkflowChatMessage(
+                ChatRole.Assistant,
+                "Generation failed. Try rephrasing your description.",
+                false,
+                DateTimeOffset.UtcNow));
+        }
+        finally
+        {
+            _isGenerating = false;
+            StateHasChanged();
+        }
     }
 
     // ── Code generation ──────────────────────────────────────────────────────────
