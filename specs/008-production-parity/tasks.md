@@ -88,10 +88,10 @@ open `/review-queue` and confirm the paused run is listed with correct data (qui
 
 ### Tests (write first, confirm failing)
 
-- [ ] T024 [P] [US1] Unit: `EfWorkflowRunRepository.CreateAsync` writes a record; `GetAsync` returns it with matching fields — in `tests/DBAIAzure.Tests/WorkflowRunRepositoryTests.cs` (in-memory EF Core SQLite provider).
-- [ ] T025 [P] [US1] Unit: `ListByStatusAsync(Paused)` returns only Paused runs, ordered by StartedAt descending — in `tests/DBAIAzure.Tests/WorkflowRunRepositoryTests.cs`.
-- [ ] T026 [P] [US1] Unit: `PurgeTerminalRunsOlderThanAsync` deletes Completed/Failed/TimedOut/Cancelled runs past cutoff; never touches Paused or Running runs — in `tests/DBAIAzure.Tests/WorkflowRunRepositoryTests.cs`.
-- [ ] T027 [P] [US1] Integration: full round-trip — start run, pause, dispose DbContext, re-create context, assert Paused record exists — in `tests/DBAIAzure.Tests/WorkflowRunRepositoryIntegrationTests.cs`.
+- [X] T024 [P] [US1] Unit: `EfWorkflowRunRepository.CreateAsync` writes a record; `GetAsync` returns it with matching fields — in `tests/DBAIAzure.Tests/WorkflowRunRepositoryTests.cs` (in-memory EF Core SQLite provider).
+- [X] T025 [P] [US1] Unit: `ListByStatusAsync(Paused)` returns only Paused runs, ordered by StartedAt descending — in `tests/DBAIAzure.Tests/WorkflowRunRepositoryTests.cs`.
+- [X] T026 [P] [US1] Unit: `PurgeTerminalRunsOlderThanAsync` deletes Completed/Failed/TimedOut/Cancelled runs past cutoff; never touches Paused or Running runs — in `tests/DBAIAzure.Tests/WorkflowRunRepositoryTests.cs`.
+- [X] T027 [P] [US1] Integration: full round-trip — start run, pause, dispose DbContext, re-create context, assert Paused record exists — in `tests/DBAIAzure.Tests/WorkflowRunRepositoryIntegrationTests.cs`.
 
 ### Implementation
 
@@ -162,9 +162,9 @@ row shows model name and token counts (quickstart Scenario 4).
 
 ### Tests (write first, confirm failing)
 
-- [ ] T050 [P] [US4] Unit: `SqlWorkflowObserver.RecordEventAsync` writes a `WorkflowExecutionEventEntity` to the DB; swallows exceptions rather than propagating — in `tests/DBAIAzure.Tests/WorkflowObserverTests.cs`.
-- [ ] T051 [P] [US4] Unit: SK `IFunctionInvocationFilter` implementation emits a `LlmCallCompleted` event with non-null `LlmModelName`, `LlmInputTokens`, `LlmOutputTokens` — mock `IFunctionInvocationContext` in `tests/DBAIAzure.Tests/WorkflowObserverTests.cs`.
-- [ ] T052 [P] [US4] Unit: observer fan-out — when first observer throws, second observer still receives the event — in `tests/DBAIAzure.Tests/WorkflowObserverTests.cs`.
+- [X] T050 [P] [US4] Unit: `SqlWorkflowObserver.RecordEventAsync` writes a `WorkflowExecutionEventEntity` to the DB; swallows exceptions rather than propagating — in `tests/DBAIAzure.Tests/WorkflowObserverTests.cs`.
+- [X] T051 [P] [US4] Unit: SK `IFunctionInvocationFilter` implementation emits a `LlmCallCompleted` event with non-null `LlmModelName`, `LlmInputTokens`, `LlmOutputTokens` — mock `IFunctionInvocationContext` in `tests/DBAIAzure.Tests/WorkflowObserverTests.cs`.
+- [X] T052 [P] [US4] Unit: observer fan-out — when first observer throws, second observer still receives the event — in `tests/DBAIAzure.Tests/WorkflowObserverTests.cs`.
 
 ### Implementation
 
@@ -212,8 +212,8 @@ fully wired; realize and run without additional manual steps (quickstart Scenari
 
 ### Tests (write first, confirm failing)
 
-- [ ] T068 [P] [US6] Unit: `WorkflowDesignSkillService.GenerateWorkflowAsync` with mocked `IStructuredCompletionService` returns a `WorkflowGenerationResult` whose nodes match expected `WorkflowNodeType` values and edges form a connected graph — in `tests/DBAIAzure.Tests/WorkflowGenerationTests.cs`.
-- [ ] T069 [P] [US6] Unit: when `WorkflowGenerationResult.ClarifyingQuestion` is non-null, `GenerateWorkflowAsync` returns an empty node list and a non-empty question string — in `tests/DBAIAzure.Tests/WorkflowGenerationTests.cs`.
+- [X] T068 [P] [US6] Unit: `WorkflowDesignSkillService.GenerateWorkflowAsync` with mocked `IStructuredCompletionService` returns a `WorkflowGenerationResult` whose nodes match expected `WorkflowNodeType` values and edges form a connected graph — in `tests/DBAIAzure.Tests/WorkflowGenerationTests.cs`.
+- [X] T069 [P] [US6] Unit: when `WorkflowGenerationResult.ClarifyingQuestion` is non-null, `GenerateWorkflowAsync` returns an empty node list and a non-empty question string — in `tests/DBAIAzure.Tests/WorkflowGenerationTests.cs`.
 
 ### Implementation
 
@@ -233,11 +233,11 @@ plain-language reason; realize all nodes; confirm Run proceeds (quickstart Scena
 
 ### Tests (write first, confirm failing)
 
-- [ ] T073 [P] [US7] Unit: `TriggerNodePresentRule.CheckAsync` fails when workflow has no trigger node; passes when one exists — in `tests/DBAIAzure.Tests/WorkflowPreRunValidatorTests.cs`.
-- [ ] T074 [P] [US7] Unit: `AllNodesRealizedRule.CheckAsync` fails when any node has `IsConfigured = false` — in `tests/DBAIAzure.Tests/WorkflowPreRunValidatorTests.cs`.
-- [ ] T075 [P] [US7] Unit: `ConnectorsHealthyRule.CheckAsync` fails when any bound connector's last health check is Unhealthy — in `tests/DBAIAzure.Tests/WorkflowPreRunValidatorTests.cs`.
-- [ ] T076 [P] [US7] Unit: `ApprovalNodesConfiguredRule.CheckAsync` fails when an approval node's `ApprovalNodeConfig.ApproverChain` is empty — in `tests/DBAIAzure.Tests/WorkflowPreRunValidatorTests.cs`.
-- [ ] T077 [P] [US7] Unit: `WorkflowPreRunValidator.ValidateAsync` skips rules whose `RuleName` appears in `DorRuleSettings.DisabledRuleNames`; returns failing rules first — in `tests/DBAIAzure.Tests/WorkflowPreRunValidatorTests.cs`.
+- [X] T073 [P] [US7] Unit: `TriggerNodePresentRule.CheckAsync` fails when workflow has no trigger node; passes when one exists — in `tests/DBAIAzure.Tests/WorkflowPreRunValidatorTests.cs`.
+- [X] T074 [P] [US7] Unit: `AllNodesRealizedRule.CheckAsync` fails when any node has `IsConfigured = false` — in `tests/DBAIAzure.Tests/WorkflowPreRunValidatorTests.cs`.
+- [X] T075 [P] [US7] Unit: `ConnectorsHealthyRule.CheckAsync` fails when any bound connector's last health check is Unhealthy — in `tests/DBAIAzure.Tests/WorkflowPreRunValidatorTests.cs`.
+- [X] T076 [P] [US7] Unit: `ApprovalNodesConfiguredRule.CheckAsync` fails when an approval node's `ApprovalNodeConfig.ApproverChain` is empty — in `tests/DBAIAzure.Tests/WorkflowPreRunValidatorTests.cs`.
+- [X] T077 [P] [US7] Unit: `WorkflowPreRunValidator.ValidateAsync` skips rules whose `RuleName` appears in `DorRuleSettings.DisabledRuleNames`; returns failing rules first — in `tests/DBAIAzure.Tests/WorkflowPreRunValidatorTests.cs`.
 
 ### Implementation
 

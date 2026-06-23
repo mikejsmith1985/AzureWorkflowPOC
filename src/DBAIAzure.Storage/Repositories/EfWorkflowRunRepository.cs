@@ -57,12 +57,17 @@ public sealed class EfWorkflowRunRepository : IWorkflowRunRepository
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
         var statusInt = (int)status;
+        // Ordering on DateTimeOffset is done in-process so that the query is portable across
+        // both Azure SQL (production) and SQLite (integration tests).
         var entities = await db.WorkflowBuilderRuns
             .AsNoTracking()
             .Where(r => r.Status == statusInt)
-            .OrderByDescending(r => r.StartedAt)
             .ToListAsync(ct);
-        return entities.Select(ToRecord).ToList().AsReadOnly();
+        return entities
+            .OrderByDescending(r => r.StartedAt)
+            .Select(ToRecord)
+            .ToList()
+            .AsReadOnly();
     }
 
     /// <inheritdoc />
@@ -71,9 +76,12 @@ public sealed class EfWorkflowRunRepository : IWorkflowRunRepository
         await using var db = await _factory.CreateDbContextAsync(ct);
         var entities = await db.WorkflowBuilderRuns
             .AsNoTracking()
-            .OrderByDescending(r => r.StartedAt)
             .ToListAsync(ct);
-        return entities.Select(ToRecord).ToList().AsReadOnly();
+        return entities
+            .OrderByDescending(r => r.StartedAt)
+            .Select(ToRecord)
+            .ToList()
+            .AsReadOnly();
     }
 
     /// <inheritdoc />
@@ -89,9 +97,14 @@ public sealed class EfWorkflowRunRepository : IWorkflowRunRepository
             (int)WorkflowRunStatus.Cancelled,
         };
 
-        var stale = await db.WorkflowBuilderRuns
-            .Where(r => terminalStatuses.Contains(r.Status) && r.CompletedAt < cutoff)
+        // DateTimeOffset comparison is evaluated in-process (portable across Azure SQL and SQLite).
+        var terminal = await db.WorkflowBuilderRuns
+            .Where(r => terminalStatuses.Contains(r.Status))
             .ToListAsync(ct);
+
+        var stale = terminal
+            .Where(r => r.CompletedAt.HasValue && r.CompletedAt.Value < cutoff)
+            .ToList();
 
         if (stale.Count == 0)
             return;

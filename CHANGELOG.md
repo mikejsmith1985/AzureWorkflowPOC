@@ -19,6 +19,7 @@ Implements the Azure-stack completeness feature set across US1–US7:
 - **DoR validation (US7)** — `IWorkflowReadinessRule` / `IWorkflowPreRunValidator` framework; four built-in rules: `TriggerNodePresentRule`, `AllNodesRealizedRule`, `ConnectorsHealthyRule`, `ApprovalNodesConfiguredRule`. Rules disabled via `DorRules:DisabledRuleNames` configuration.
 - **Prompt audit filter** — `WorkflowPromptRenderFilter` logs SHA-256 hash of rendered prompts, never the text (Article IX).
 - **Nav links** — Run History and Review Queue added to the main navigation bar.
+- **Unit tests (T024–T077)** — 42 new passing tests: repository CRUD + purge, observer persistence + fan-out isolation, `WorkflowDesignSkillService` generation + clarifying-question path, and all four DoR rules plus validator skip/sort. `EfWorkflowRunRepository` updated to evaluate `DateTimeOffset` sorts and purge filters in-process for SQLite portability.
 
 ### Added — Node Realization: turn plain-language workflows into production-ready ones (spec 007)
 
