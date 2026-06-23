@@ -135,6 +135,39 @@ public sealed class WorkflowRealizationServiceTests
     }
 
     [Fact]
+    public async Task AcceptProposal_on_partially_realized_workflow_leaves_all_other_nodes_unchanged()
+    {
+        // US3: after the trigger is already realized, realizing only the agent must leave the trigger's
+        // FunctionConfig byte-identical and must not touch the still-unrealized notify node.
+        var workflow  = RealizationTestWorkflows.TriggerAgentNotify();
+        var service   = BuildService(out _);
+        var triggerId = workflow.Nodes.Single(node => node.NodeType == WorkflowNodeType.Trigger).Id;
+        var agentId   = workflow.Nodes.Single(node => node.NodeType == WorkflowNodeType.AgenticReason).Id;
+        var notifyId  = workflow.Nodes.Single(node => node.NodeType == WorkflowNodeType.FunctionNotify).Id;
+
+        // Step 1 — realize the trigger node.
+        var triggerProposal      = await service.ProposeNodeAsync(workflow, triggerId);
+        var partiallyRealized    = service.AcceptProposal(workflow, triggerProposal, triggerProposal.ProposedConfig!);
+        var triggerFunctionConfig = partiallyRealized.Nodes.Single(node => node.Id == triggerId).FunctionConfig;
+
+        // Step 2 — realize only the agent on top of the partially-realized workflow.
+        var agentProposal = await service.ProposeNodeAsync(partiallyRealized, agentId);
+        var fullyRealized = service.AcceptProposal(partiallyRealized, agentProposal, agentProposal.ProposedConfig!);
+
+        // The agent is now configured.
+        Assert.True(fullyRealized.Nodes.Single(node => node.Id == agentId).IsConfigured);
+
+        // The trigger's FunctionConfig is byte-identical — accepting the agent didn't touch it.
+        Assert.Equal(triggerFunctionConfig, fullyRealized.Nodes.Single(node => node.Id == triggerId).FunctionConfig);
+
+        // The notify node (not yet realized) is still completely untouched.
+        var originalNotify = workflow.Nodes.Single(node => node.Id == notifyId);
+        var updatedNotify  = fullyRealized.Nodes.Single(node => node.Id == notifyId);
+        Assert.False(updatedNotify.IsConfigured);
+        Assert.Equal(originalNotify.FunctionConfig, updatedNotify.FunctionConfig);
+    }
+
+    [Fact]
     public async Task AcceptProposal_rejects_an_intrinsically_invalid_config()
     {
         var workflow = RealizationTestWorkflows.TriggerAgentNotify();

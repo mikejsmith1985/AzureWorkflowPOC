@@ -47,11 +47,17 @@ is User Story 1 (the MVP) of spec `007-node-realization`.
   `{initialDataDescription}` blob.
 - **Secrets discipline** — proposals, prompts, and `FunctionConfig` never carry secrets; only
   `ConnectorType` references (Article IX).
+- **Per-node "Realize this node" (US3)** — right-clicking any canvas node opens a context menu with a
+  "Realize this node" action that calls `ProposeNodeAsync` for exactly that node and opens the review
+  panel scoped to one proposal. Other nodes are untouched. After acceptance, readiness is re-evaluated.
+  Enables incremental realization: add a new node to an already-realized workflow and realize only it.
 - Tests (TDD): unit coverage for config round-trip, proposal ordering/no-mutation, single-node accept +
-  provenance, and readiness ready/blocked/needs-input; an end-to-end runtime test proving the realized
-  instruction reaches the step through the real local process runtime; and a Playwright Scenario A
-  (`make-it-real → accept → readiness verdict → runnable`) verified green against the live app with a
-  real Anthropic key.
+  provenance, out-of-date detection, partially-realized single-node isolation (T041), and readiness
+  ready/blocked/needs-input; an end-to-end runtime test proving the realized instruction reaches the
+  step through the real local process runtime; and Playwright Scenarios A (make-it-real → accept →
+  readiness verdict → runnable), B (edit-then-accept, proposal count decreases), and C (per-node
+  context-menu realize → exactly 1 proposal card → readiness re-evaluated) verified green against the
+  live app with a real Anthropic key.
 
 ### Fixed — Saved edits silently reverted by stale auto-save (data loss)
 

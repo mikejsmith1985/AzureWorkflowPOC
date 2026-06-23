@@ -101,6 +101,57 @@ public sealed class NodeRealizationTests : E2ETestBase
             .ToHaveCountAsync(proposalsBefore - 1, new() { Timeout = 20_000 });
     }
 
+    [Fact]
+    public async Task RealizeNode_ViaContextMenu_OpensSingleNodePanel()
+    {
+        // US3 Scenario C: adding a new node to a workflow whose existing nodes are already configured,
+        // then right-clicking → "Realize this node" proposes config for exactly that one node.
+        // The panel must contain exactly 1 proposal card (not cards for all nodes), proving that
+        // the per-node entry point never re-proposes nodes that were already realized.
+        await NavigateAsync(BuilderUrl);
+        await WaitForToolbarAsync();
+
+        // 1. Add a new AI step via the palette (the 4-node example already has all nodes configured).
+        await Page.Locator("[data-testid='palette-node-AgenticReason']").ClickAsync();
+
+        // 2. The new node is unconfigured — its amber badge appears on the canvas.
+        var unconfiguredBadge = Page.Locator("[data-testid='node-unconfigured-badge']");
+        await unconfiguredBadge.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
+
+        // 3. Right-click the unconfigured node to open the context menu.
+        var unconfiguredNode = Page.Locator(".workflow-node")
+            .Filter(new() { Has = Page.Locator("[data-testid='node-unconfigured-badge']") });
+        await unconfiguredNode.First.ClickAsync(new() { Button = MouseButton.Right });
+
+        // 4. Click "Realize this node" in the context menu.
+        var realizeMenuItem = Page.Locator("[data-testid='context-menu-realize-node']");
+        await realizeMenuItem.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+        await realizeMenuItem.ClickAsync();
+
+        // 5. The panel opens and exactly 1 proposal arrives (only the new node, not all 5).
+        await Page.Locator("[data-testid='realization-panel']")
+            .WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
+
+        await Page.Locator("[data-testid='realization-proposal']").First
+            .WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = RealizationTimeoutMs });
+
+        await Assertions.Expect(Page.Locator("[data-testid='realization-proposal']"))
+            .ToHaveCountAsync(1, new() { Timeout = 10_000 });
+
+        // 6. Accept the single proposal to confirm the accept path works end-to-end.
+        var acceptAll = Page.Locator("[data-testid='accept-all']");
+        await Assertions.Expect(acceptAll).ToBeEnabledAsync(new() { Timeout = RealizationTimeoutMs });
+        await acceptAll.ClickAsync();
+
+        await Page.Locator("[data-testid='accept-all-confirm']")
+            .WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+        await Page.Locator("[data-testid='accept-all-confirm']").ClickAsync();
+
+        // 7. The readiness indicator appears after the single-node accept triggers re-evaluation.
+        var readiness = Page.Locator("[data-testid='readiness-indicator']");
+        await readiness.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 30_000 });
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
     /// <summary>Waits for the toolbar to be visible, confirming Blazor's first interactive render completed.</summary>

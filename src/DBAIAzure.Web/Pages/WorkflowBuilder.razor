@@ -66,7 +66,8 @@
                         DraggedNodeType="@_draggedNodeType"
                         NodeStates="@_nodeStates"
                         NodeDoubleClicked="@OnNodeDoubleClicked"
-                        OnTriggerPresenceChanged="@OnTriggerPresenceChanged" />
+                        OnTriggerPresenceChanged="@OnTriggerPresenceChanged"
+                        OnRealizeNodeRequested="@OnRealizeNodeRequestedAsync" />
 
         @* Node config panel — opens when user double-clicks a canvas node *@
         <WorkflowNodeConfigPanel Node="@_configNode"
@@ -570,6 +571,36 @@
     }
 
     // ── Node realization handlers (spec 007) ──────────────────────────────────────
+
+    /// <summary>
+    /// Runs a single-node "Realize this node" pass: proposes production-ready config for exactly the
+    /// requested node and opens the review panel scoped to that one proposal. Other nodes are untouched.
+    /// Triggered from the right-click context menu on the canvas (US3).
+    /// </summary>
+    private async Task OnRealizeNodeRequestedAsync(WorkflowNode node)
+    {
+        if (_workflow is null || _isRealizing) return;
+
+        _isRealizing            = true;
+        _isRealizationPanelOpen = true;
+        _realizationProposals   = new();
+        StateHasChanged();
+
+        try
+        {
+            var proposal = await RealizationService.ProposeNodeAsync(_workflow, node.Id);
+            _realizationProposals = new() { proposal };
+        }
+        catch (Exception ex)
+        {
+            _canvas?.ShowToast($"Couldn't prepare a proposal for this node: {ex.Message}", isError: true);
+        }
+        finally
+        {
+            _isRealizing = false;
+            StateHasChanged();
+        }
+    }
 
     /// <summary>
     /// Runs a whole-workflow "Make it real" pass: asks the assistant to propose executable config for
