@@ -43,6 +43,14 @@ public interface IWorkflowExecutionOrchestrator
     /// approval gate. Passing <see langword="false"/> causes the run to abort.
     /// </summary>
     void SubmitApproval(string runId, bool approved);
+
+    /// <summary>
+    /// Restores a persisted Paused run into the in-memory state so that
+    /// <see cref="SubmitApproval"/> can later resolve it. Called once at startup by
+    /// <c>WorkflowRunRehydrationService</c> for each run that was Paused when the
+    /// process last shut down.
+    /// </summary>
+    void RehydratePausedRun(WorkflowRunRecord record);
 }
 
 /// <summary>

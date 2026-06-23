@@ -207,6 +207,10 @@ builder.Services.AddSingleton<IWorkflowObserver, SqlWorkflowObserver>();
 builder.Services.AddSingleton<IWorkflowObserver, SignalRWorkflowObserver>();
 builder.Services.AddSingleton<IWorkflowObserver, AzureMonitorWorkflowObserver>();
 
+// ── SK kernel filters (FR-21.2 token tracing, Article IX prompt hashing) ──────
+builder.Services.AddSingleton<WorkflowFunctionInvocationFilter>();
+builder.Services.AddSingleton<WorkflowPromptRenderFilter>();
+
 // ── WorkflowApprovalNotifier — Teams notification on HITL pause (FR-19, US2) ──
 // Registered as null-safe stub; TeamsWorkflowApprovalNotifier wired in US2 implementation phase.
 builder.Services.AddSingleton<IWorkflowApprovalNotifier, TeamsWorkflowApprovalNotifier>();
@@ -221,6 +225,9 @@ builder.Services.AddSingleton<IWorkflowPreRunValidator, WorkflowPreRunValidator>
 
 // ── Run retention background service (FR-18.4) ────────────────────────────────
 builder.Services.AddHostedService<WorkflowRunRetentionService>();
+
+// ── Startup rehydration of Paused runs (FR-18.5, T031) ───────────────────────
+builder.Services.AddHostedService<WorkflowRunRehydrationService>();
 
 // ── Application Insights (FR-21, US4) ─────────────────────────────────────────
 builder.Services.AddApplicationInsightsTelemetry(builder.Configuration);
@@ -285,7 +292,17 @@ builder.Services.AddSingleton<IWorkflowExecutionOrchestrator>(sp =>
         var kernelBuilder = Kernel.CreateBuilder();
         kernelBuilder.Services.AddSingleton<IChatCompletionService>(
             new AnthropicChatCompletionService(effectiveKey, effectiveModel));
-        return kernelBuilder.Build();
+
+        var kernel = kernelBuilder.Build();
+
+        // Register the LLM token-tracking filter so token counts appear in Run History.
+        var invocationFilter = sp.GetRequiredService<WorkflowFunctionInvocationFilter>();
+        kernel.FunctionInvocationFilters.Add(invocationFilter);
+
+        var promptFilter = sp.GetRequiredService<WorkflowPromptRenderFilter>();
+        kernel.PromptRenderFilters.Add(promptFilter);
+
+        return kernel;
     };
 
     var runRepo          = sp.GetRequiredService<IWorkflowRunRepository>();

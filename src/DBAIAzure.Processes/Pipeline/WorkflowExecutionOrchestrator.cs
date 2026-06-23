@@ -187,6 +187,32 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
         runState.ApprovalTcs?.TrySetResult(approved);
     }
 
+    public void RehydratePausedRun(WorkflowRunRecord record)
+    {
+        // Reconstitute just enough state for SubmitApproval to resolve the TCS.
+        // The execution task itself cannot be resumed in-process — rehydration only
+        // enables operators to approve/reject without waiting for the next full run.
+        var run = new WorkflowExecutionRun(
+            RunId:        record.RunId,
+            WorkflowId:   record.WorkflowId,
+            Status:       WorkflowRunStatus.Paused,
+            NodeStates:   Array.Empty<NodeExecutionState>(),
+            FailureReason: null,
+            StartedAt:    record.StartedAt,
+            CompletedAt:  null);
+
+        var rehydrated = new WorkflowRunState
+        {
+            Run          = run,
+            WorkflowName = record.WorkflowName,
+            TriggeredBy  = record.TriggeredBy,
+            SuspendedAt  = record.SuspendedAt,
+            ApprovalTcs  = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+        };
+
+        _runs.TryAdd(record.RunId, rehydrated);
+    }
+
     // ── Background execution ───────────────────────────────────────────────────────
 
     /// <summary>
