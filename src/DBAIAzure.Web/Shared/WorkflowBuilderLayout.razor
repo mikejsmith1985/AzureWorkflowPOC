@@ -1,0 +1,20 @@
+@* Full-viewport layout for the Workflow Builder — no max-width or padding constraints
+   so the palette + canvas fill the entire browser window. *@
+@inherits LayoutComponentBase
+
+<div class="flex flex-col min-h-screen bg-gray-950 text-gray-100">
+    <header class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center gap-4">
+        <span class="text-cyan-400 font-bold text-lg tracking-tight">DBAIAzure</span>
+        <span class="text-gray-600 text-sm">Intake Pipeline</span>
+        <nav class="ml-auto flex gap-6">
+            <a href="/" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Threads</a>
+            <a href="/graph" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Graph</a>
+            <a href="/new-ticket" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">New Ticket</a>
+            <a href="/workflow-builder" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Workflow Builder</a>
+        </nav>
+    </header>
+
+    <main class="flex-1 overflow-hidden">
+        @Body
+    </main>
+</div>
