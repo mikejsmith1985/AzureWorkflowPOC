@@ -49,6 +49,7 @@
                      IsRealizing="@_isRealizing"
                      CanRealize="@CanRealize"
                      IsProductionReady="@(_readinessReport?.IsProductionReady)"
+                     ReadinessBlockingSummary="@ReadinessBlockingSummary"
                      IsRunning="@(_activeRunId is not null)" />
 
     @* ── Body row ──────────────────────────────────────────────────────────────── *@
@@ -189,10 +190,21 @@
 
     /// <summary>
     /// The Run button is only enabled when every node in the workflow has been configured
-    /// (i.e. none are in the amber "unconfigured" state) and there is at least one node.
+    /// (i.e. none are in the amber "unconfigured" state), at least one node exists, and — when a
+    /// readiness report is available — the workflow is production-ready (no Blocked connectors).
     /// </summary>
     private bool CanRun => _workflow is { Nodes.Count: > 0 }
-                        && _workflow.Nodes.All(n => n.IsConfigured);
+                        && _workflow.Nodes.All(n => n.IsConfigured)
+                        && (_readinessReport is null || _readinessReport.IsProductionReady);
+
+    /// <summary>
+    /// First blocking reason from the readiness report, or null when there are none. Surfaced in
+    /// the toolbar so the user sees specifically which connector is missing (T048).
+    /// </summary>
+    private string? ReadinessBlockingSummary =>
+        _readinessReport is { IsProductionReady: false, BlockingSummary.Count: > 0 }
+            ? _readinessReport.BlockingSummary[0]
+            : null;
 
     // ── Lifecycle ────────────────────────────────────────────────────────────────
 

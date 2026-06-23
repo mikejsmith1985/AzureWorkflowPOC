@@ -108,10 +108,67 @@ public sealed class WorkflowRealizationService : IWorkflowRealizationService
 
     // ── Per-node proposal dispatch ──────────────────────────────────────────────
 
+    // Connector-category sets used to gate proposers before the LLM is called (T047).
+    private static readonly IReadOnlySet<ConnectorType> MessagingConnectors =
+        new HashSet<ConnectorType> { ConnectorType.Teams };
+
+    private static readonly IReadOnlySet<ConnectorType> DataConnectors =
+        new HashSet<ConnectorType> { ConnectorType.ServiceNow, ConnectorType.AzureDevOps };
+
+    /// <summary>
+    /// Returns the connector category that must be configured before the LLM may be called for this
+    /// node type, or null when the node needs no specific connector.
+    /// </summary>
+    private static IReadOnlySet<ConnectorType>? RequiredConnectorCategory(WorkflowNodeType nodeType) =>
+        nodeType switch
+        {
+            WorkflowNodeType.FunctionNotify => MessagingConnectors,
+            WorkflowNodeType.FunctionData   => DataConnectors,
+            _                               => null,
+        };
+
+    /// <summary>
+    /// Returns the configured connectors from the repository that belong to the given category.
+    /// Only connectors with <c>IsConfigured = true</c> are considered available.
+    /// </summary>
+    private async Task<IReadOnlyList<ConnectorType>> GetConfiguredConnectorsInSetAsync(
+        IReadOnlySet<ConnectorType> candidates, CancellationToken cancellationToken)
+    {
+        var all = await _connectorRepo.GetAllAsync(cancellationToken).ConfigureAwait(false);
+        return all
+            .Where(config => config.IsConfigured && candidates.Contains(config.Type))
+            .Select(config => config.Type)
+            .ToList();
+    }
+
     /// <summary>Routes a node to the proposer for its type and produces a reviewable proposal.</summary>
     private async Task<RealizationProposal> ProposeForNodeAsync(
         WorkflowDefinition workflow, WorkflowNode node, string modelRef, CancellationToken cancellationToken)
     {
+        // T047: if this node needs a specific connector, verify at least one is configured before
+        // calling the LLM. Returning Blocked immediately avoids a wasted LLM call and tells the
+        // user honestly what they need to set up in Settings → Connectors.
+        var requiredCategory = RequiredConnectorCategory(node.NodeType);
+        if (requiredCategory is not null)
+        {
+            var configured = await GetConfiguredConnectorsInSetAsync(requiredCategory, cancellationToken)
+                .ConfigureAwait(false);
+            if (configured.Count == 0)
+            {
+                var connectorNames = string.Join(" or ", requiredCategory.Select(type => type.ToString()));
+                return new RealizationProposal
+                {
+                    NodeId               = node.Id,
+                    NodeType             = node.NodeType,
+                    ProposedConfig       = null,
+                    PlainLanguageSummary = $"Cannot configure \"{node.Label}\" — no connector is set up for this step.",
+                    Status               = NodeRealizationStatus.Blocked,
+                    BlockingReason       = $"This step needs a connector ({connectorNames}) that has not been "
+                                         + "configured yet. Go to Settings → Connectors to add it.",
+                };
+            }
+        }
+
         try
         {
             var (envelope, summary) = node.NodeType switch

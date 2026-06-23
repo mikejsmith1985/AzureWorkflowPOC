@@ -62,10 +62,17 @@ public sealed class NodeRealizationTests : E2ETestBase
             verdict.Contains("Ready", StringComparison.OrdinalIgnoreCase),
             $"Expected a readiness verdict containing 'Ready'/'Not ready', got '{verdict}'.");
 
-        // 5. The realized workflow is runnable — every node is configured, so Run is enabled.
+        // 5. After T048: Run is enabled when "Ready" and disabled when "Not ready" (Blocked connectors).
+        //    The assertion adapts to the test environment's connector health so the test stays portable.
         var runButton = Page.Locator(".run-btn-ready");
         await runButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
-        Assert.True(await runButton.IsEnabledAsync(), "The Run button must be enabled once the workflow is realized.");
+        var isNotReady = verdict.Contains("Not ready", StringComparison.OrdinalIgnoreCase);
+        if (isNotReady)
+            Assert.False(await runButton.IsEnabledAsync(),
+                "Run must be disabled when the readiness verdict is 'Not ready'.");
+        else
+            Assert.True(await runButton.IsEnabledAsync(),
+                "Run must be enabled when the readiness verdict is 'Ready'.");
     }
 
     [Fact]
@@ -150,6 +157,58 @@ public sealed class NodeRealizationTests : E2ETestBase
         // 7. The readiness indicator appears after the single-node accept triggers re-evaluation.
         var readiness = Page.Locator("[data-testid='readiness-indicator']");
         await readiness.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 30_000 });
+    }
+
+    [Fact]
+    public async Task ReadinessGate_RunButtonMatchesReadinessVerdict()
+    {
+        // US4 Scenario D (T049): after realization, the Run button's enabled/disabled state must
+        // exactly mirror the toolbar readiness verdict. When "Not ready" (Blocked connector), Run
+        // stays disabled and the toolbar shows the specific blocking reason — not the generic
+        // "Set up all steps first" message. When "Ready", Run is enabled. This test is environment-
+        // adaptive: it proves the gate works regardless of which connectors are installed.
+        await NavigateAsync(BuilderUrl);
+        await WaitForToolbarAsync();
+
+        // Realize the example workflow and accept all proposals.
+        await Page.Locator("[data-testid='make-it-real']").ClickAsync();
+        await Page.Locator("[data-testid='realization-panel']")
+            .WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
+        var acceptAll = Page.Locator("[data-testid='accept-all']");
+        await Assertions.Expect(acceptAll).ToBeEnabledAsync(new() { Timeout = RealizationTimeoutMs });
+        await acceptAll.ClickAsync();
+        await Page.Locator("[data-testid='accept-all-confirm']")
+            .WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+        await Page.Locator("[data-testid='accept-all-confirm']").ClickAsync();
+
+        // Wait for the readiness indicator then read its verdict.
+        var readinessIndicator = Page.Locator("[data-testid='readiness-indicator']");
+        await readinessIndicator.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 30_000 });
+        var verdictText = (await readinessIndicator.InnerTextAsync()).Trim();
+
+        var runButton = Page.Locator(".run-btn-ready");
+        await runButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
+
+        var isNotReady = verdictText.Contains("Not ready", StringComparison.OrdinalIgnoreCase);
+        if (isNotReady)
+        {
+            // T048: Run must be disabled when there are Blocked connectors.
+            Assert.False(await runButton.IsEnabledAsync(),
+                "Run must be disabled when the readiness report says 'Not ready'.");
+
+            // The toolbar must show a specific blocking reason, not the generic "Set up all steps first".
+            var disabledReason = Page.Locator("[data-testid='run-disabled-reason']");
+            await disabledReason.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+            var reasonText = (await disabledReason.InnerTextAsync()).Trim();
+            Assert.NotEmpty(reasonText);
+            Assert.DoesNotMatch("Set up all steps first", reasonText);
+        }
+        else
+        {
+            // All connectors are configured → Run is enabled. Proves T048 gate doesn't block unnecessarily.
+            Assert.True(await runButton.IsEnabledAsync(),
+                "Run must be enabled when the readiness report says 'Ready'.");
+        }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────────

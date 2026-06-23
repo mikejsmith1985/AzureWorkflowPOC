@@ -32,7 +32,9 @@ public sealed class WorkflowRealizationServiceTests
     private static WorkflowRealizationService BuildService(out CannedStructuredCompletionService fakeLlm)
     {
         fakeLlm = new CannedStructuredCompletionService(CannedResponses);
-        return new WorkflowRealizationService(fakeLlm, new FakeConnectorConfigRepository());
+        // Include Teams so the Notify proposer can proceed to the LLM call in the happy-path tests (T047).
+        return new WorkflowRealizationService(
+            fakeLlm, new FakeConnectorConfigRepository(configuredConnectors: ConnectorType.Teams));
     }
 
     [Fact]
@@ -132,6 +134,26 @@ public sealed class WorkflowRealizationServiceTests
         foreach (var original in workflow.Nodes.Where(node => node.Id != agentId))
             Assert.Equal(original.FunctionConfig,
                 accepted.Nodes.Single(node => node.Id == original.Id).FunctionConfig);
+    }
+
+    [Fact]
+    public async Task ProposeNodeAsync_returns_blocked_when_no_messaging_connector_is_configured()
+    {
+        // T044 / T047: when no messaging connector is configured, the service must return a Blocked
+        // proposal without calling the LLM — the user is told honestly that setup is required first.
+        var workflow = RealizationTestWorkflows.TriggerAgentNotify();
+        var notifyId = workflow.Nodes.Single(node => node.NodeType == WorkflowNodeType.FunctionNotify).Id;
+
+        // No messaging connectors in the repository (only LLM is implicit).
+        var emptyResponses = new Dictionary<string, string>();
+        var fakeLlm        = new CannedStructuredCompletionService(emptyResponses);
+        var service        = new WorkflowRealizationService(fakeLlm, new FakeConnectorConfigRepository());
+
+        var proposal = await service.ProposeNodeAsync(workflow, notifyId);
+
+        Assert.Equal(NodeRealizationStatus.Blocked, proposal.Status);
+        Assert.NotNull(proposal.BlockingReason);
+        Assert.Empty(fakeLlm.ToolCalls);  // LLM must NOT be called when the connector is missing.
     }
 
     [Fact]

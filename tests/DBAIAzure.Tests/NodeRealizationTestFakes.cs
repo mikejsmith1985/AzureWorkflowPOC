@@ -43,29 +43,41 @@ internal sealed class CannedStructuredCompletionService : IStructuredCompletionS
     }
 }
 
-/// <summary>Fake connector repository: reports a fixed LLM model name and no other configuration.</summary>
+/// <summary>
+/// Fake connector repository: reports a fixed LLM model name and a configurable set of additional
+/// configured connectors. Pass <paramref name="configuredConnectors"/> to include non-LLM connectors
+/// that T047 checks before calling the LLM for Notify/Data nodes.
+/// </summary>
 internal sealed class FakeConnectorConfigRepository : IConnectorConfigRepository
 {
     private readonly string? _llmModelName;
+    private readonly IReadOnlySet<ConnectorType> _configuredConnectors;
 
-    public FakeConnectorConfigRepository(string? llmModelName = "claude-test-model")
+    public FakeConnectorConfigRepository(
+        string? llmModelName = "claude-test-model",
+        params ConnectorType[] configuredConnectors)
     {
-        _llmModelName = llmModelName;
+        _llmModelName        = llmModelName;
+        // LLM is always implicitly configured so model-ref resolution works in all tests.
+        _configuredConnectors = new HashSet<ConnectorType>(configuredConnectors) { ConnectorType.LLM };
     }
 
-    public Task<ConnectorConfig?> GetAsync(ConnectorType type, CancellationToken ct = default)
+    private ConnectorConfig BuildConfig(ConnectorType type)
     {
-        if (type == ConnectorType.LLM && _llmModelName is not null)
-        {
-            var nonSecret = JsonSerializer.Serialize(new { modelName = _llmModelName });
-            return Task.FromResult<ConnectorConfig?>(
-                new ConnectorConfig(type, nonSecret, true, true, DateTimeOffset.UtcNow, null));
-        }
-        return Task.FromResult<ConnectorConfig?>(null);
+        var nonSecret = type == ConnectorType.LLM && _llmModelName is not null
+            ? JsonSerializer.Serialize(new { modelName = _llmModelName })
+            : "{}";
+        return new ConnectorConfig(type, nonSecret, true, true, DateTimeOffset.UtcNow, null);
     }
 
-    public Task<IReadOnlyList<ConnectorConfig>> GetAllAsync(CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<ConnectorConfig>>(Array.Empty<ConnectorConfig>());
+    public Task<ConnectorConfig?> GetAsync(ConnectorType type, CancellationToken ct = default) =>
+        Task.FromResult(_configuredConnectors.Contains(type) ? BuildConfig(type) : (ConnectorConfig?)null);
+
+    public Task<IReadOnlyList<ConnectorConfig>> GetAllAsync(CancellationToken ct = default)
+    {
+        IReadOnlyList<ConnectorConfig> configs = _configuredConnectors.Select(BuildConfig).ToList();
+        return Task.FromResult(configs);
+    }
 
     public Task SaveAsync(ConnectorType type, string? nonSecretConfigJson, string? plaintextSecretsJson, CancellationToken ct = default) =>
         Task.CompletedTask;

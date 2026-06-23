@@ -144,7 +144,10 @@
     <div class="flex items-center gap-2">
         @if (!string.IsNullOrEmpty(RunDisabledReason))
         {
-            <span class="text-xs text-amber-400 max-w-[180px] leading-tight" role="status" aria-live="polite">
+            <span class="text-xs text-amber-400 max-w-[180px] leading-tight"
+                  role="status"
+                  aria-live="polite"
+                  data-testid="run-disabled-reason">
                 @RunDisabledReason
             </span>
         }
@@ -239,6 +242,13 @@
     /// </summary>
     [Parameter] public bool? IsProductionReady { get; set; }
 
+    /// <summary>
+    /// First blocking reason from the readiness report — e.g. "Teams connector not configured."
+    /// When set and Run is disabled, overrides the generic "Set up all steps first" message so
+    /// the user sees exactly what they need to fix (T048).
+    /// </summary>
+    [Parameter] public string? ReadinessBlockingSummary { get; set; }
+
     // ── Callback parameters ──────────────────────────────────────────────────────
 
     [Parameter] public EventCallback OnUndoClicked          { get; set; }
@@ -286,9 +296,11 @@
     /// Plain-language reason why Run is disabled. Empty when the button is enabled (T030).
     /// </summary>
     private string RunDisabledReason =>
-        IsTriggerMissing         ? "Needs a trigger to start" :
-        !CanRun && !IsRunning    ? "Set up all steps first" :
-                                    string.Empty;
+        IsTriggerMissing                                           ? "Needs a trigger to start" :
+        !CanRun && !IsRunning && ReadinessBlockingSummary is { Length: > 0 }
+                                                                   ? ReadinessBlockingSummary :
+        !CanRun && !IsRunning                                      ? "Set up all steps first" :
+                                                                     string.Empty;
 
     // ── Inline name editing (T034/T035) ─────────────────────────────────────────
 

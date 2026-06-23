@@ -87,6 +87,21 @@ public sealed class WorkflowReadinessServiceTests
     }
 
     [Fact]
+    public async Task Blocked_node_reason_names_the_missing_connector()
+    {
+        // T044: the blocking reason surfaced to the user must name the specific connector so they know what
+        // to configure — "Teams" must appear in the reason text, not a generic "a connector is missing".
+        var workflow = FullyRealized();
+        var notifyId = workflow.Nodes.Single(node => node.NodeType == WorkflowNodeType.FunctionNotify).Id;
+
+        var report = await BuildService(/* nothing healthy */).EvaluateAsync(workflow);
+
+        var notifyReason = report.Nodes.Single(node => node.NodeId == notifyId).Reasons.Single();
+        Assert.Contains("Teams", notifyReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(notifyReason, report.BlockingSummary);
+    }
+
+    [Fact]
     public async Task Realized_node_flips_to_out_of_date_when_its_intent_changes()
     {
         // R6 / Scenario E: a node realized against one intent, then re-worded, is reported out-of-date.
