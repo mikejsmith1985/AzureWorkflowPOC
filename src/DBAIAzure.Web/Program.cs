@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DBAIAzure.Connectors;
+using DBAIAzure.Core.Configuration;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
 using DBAIAzure.Core.Services;
@@ -7,10 +8,13 @@ using DBAIAzure.Core.Validation;
 using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Storage;
 using DBAIAzure.Storage.Repositories;
+using DBAIAzure.Web.Hubs;
 using DBAIAzure.Web.Integrations.AzureDevOps;
 using DBAIAzure.Web.Integrations.SpecKit;
 using DBAIAzure.Web.Integrations.Teams;
+using DBAIAzure.Web.Rules;
 using DBAIAzure.Web.Services;
+using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
@@ -195,6 +199,39 @@ builder.Services.AddSingleton<LlmConnectorTester>();
 builder.Services.AddSingleton<TeamsConnectorTester>();
 builder.Services.AddSingleton<IConnectorHealthChecker, ConnectorHealthChecker>();
 
+// ── Workflow run repository (FR-18, US1) ───────────────────────────────────────
+builder.Services.AddSingleton<IWorkflowRunRepository, EfWorkflowRunRepository>();
+
+// ── Workflow execution event observers (FR-21, US4) ───────────────────────────
+builder.Services.AddSingleton<IWorkflowObserver, SqlWorkflowObserver>();
+builder.Services.AddSingleton<IWorkflowObserver, SignalRWorkflowObserver>();
+builder.Services.AddSingleton<IWorkflowObserver, AzureMonitorWorkflowObserver>();
+
+// ── SK kernel filters (FR-21.2 token tracing, Article IX prompt hashing) ──────
+builder.Services.AddSingleton<WorkflowFunctionInvocationFilter>();
+builder.Services.AddSingleton<WorkflowPromptRenderFilter>();
+
+// ── WorkflowApprovalNotifier — Teams notification on HITL pause (FR-19, US2) ──
+// Registered as null-safe stub; TeamsWorkflowApprovalNotifier wired in US2 implementation phase.
+builder.Services.AddSingleton<IWorkflowApprovalNotifier, TeamsWorkflowApprovalNotifier>();
+
+// ── DoR validation framework (FR-24, US7) ─────────────────────────────────────
+builder.Services.Configure<DorRuleSettings>(builder.Configuration.GetSection(DorRuleSettings.SectionName));
+builder.Services.AddSingleton<IWorkflowReadinessRule, TriggerNodePresentRule>();
+builder.Services.AddSingleton<IWorkflowReadinessRule, AllNodesRealizedRule>();
+builder.Services.AddSingleton<IWorkflowReadinessRule, ConnectorsHealthyRule>();
+builder.Services.AddSingleton<IWorkflowReadinessRule, ApprovalNodesConfiguredRule>();
+builder.Services.AddSingleton<IWorkflowPreRunValidator, WorkflowPreRunValidator>();
+
+// ── Run retention background service (FR-18.4) ────────────────────────────────
+builder.Services.AddHostedService<WorkflowRunRetentionService>();
+
+// ── Startup rehydration of Paused runs (FR-18.5, T031) ───────────────────────
+builder.Services.AddHostedService<WorkflowRunRehydrationService>();
+
+// ── Application Insights (FR-21, US4) ─────────────────────────────────────────
+builder.Services.AddApplicationInsightsTelemetry(builder.Configuration);
+
 // ── Workflow structural validator (spec 004) ───────────────────────────────────
 builder.Services.AddSingleton<IWorkflowValidator, WorkflowValidator>();
 
@@ -255,10 +292,24 @@ builder.Services.AddSingleton<IWorkflowExecutionOrchestrator>(sp =>
         var kernelBuilder = Kernel.CreateBuilder();
         kernelBuilder.Services.AddSingleton<IChatCompletionService>(
             new AnthropicChatCompletionService(effectiveKey, effectiveModel));
-        return kernelBuilder.Build();
+
+        var kernel = kernelBuilder.Build();
+
+        // Register the LLM token-tracking filter so token counts appear in Run History.
+        var invocationFilter = sp.GetRequiredService<WorkflowFunctionInvocationFilter>();
+        kernel.FunctionInvocationFilters.Add(invocationFilter);
+
+        var promptFilter = sp.GetRequiredService<WorkflowPromptRenderFilter>();
+        kernel.PromptRenderFilters.Add(promptFilter);
+
+        return kernel;
     };
 
-    return new WorkflowExecutionOrchestrator(kernelFactory);
+    var runRepo          = sp.GetRequiredService<IWorkflowRunRepository>();
+    var approvalNotifier = sp.GetRequiredService<IWorkflowApprovalNotifier>();
+    var observers        = sp.GetServices<IWorkflowObserver>();
+
+    return new WorkflowExecutionOrchestrator(kernelFactory, runRepo, approvalNotifier, observers);
 });
 
 var app = builder.Build();
@@ -308,6 +359,49 @@ using (var scope = app.Services.CreateScope())
         CREATE INDEX IF NOT EXISTS IX_WorkflowDefinitions_OwnerId
             ON WorkflowDefinitions (OwnerId);
         """);
+
+    // Workflow builder run records and execution event audit log (FR-18, FR-21, US1, US4).
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS WorkflowBuilderRuns (
+            RunId         TEXT    NOT NULL PRIMARY KEY,
+            WorkflowId    TEXT    NOT NULL,
+            WorkflowName  TEXT    NOT NULL,
+            Status        INTEGER NOT NULL DEFAULT 0,
+            TriggeredBy   TEXT    NOT NULL DEFAULT '',
+            StartedAt     TEXT    NOT NULL,
+            SuspendedAt   TEXT,
+            ResumedAt     TEXT,
+            CompletedAt   TEXT,
+            FailureReason TEXT
+        );
+        CREATE INDEX IF NOT EXISTS IX_WorkflowBuilderRuns_WorkflowId
+            ON WorkflowBuilderRuns (WorkflowId);
+        CREATE INDEX IF NOT EXISTS IX_WorkflowBuilderRuns_Status
+            ON WorkflowBuilderRuns (Status);
+        """);
+
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS WorkflowExecutionEvents (
+            EventId         TEXT    NOT NULL PRIMARY KEY,
+            RunId           TEXT    NOT NULL,
+            NodeId          TEXT,
+            NodeLabel       TEXT,
+            EventType       INTEGER NOT NULL,
+            OccurredAt      TEXT    NOT NULL,
+            DurationMs      INTEGER,
+            Outcome         TEXT,
+            LlmModelName    TEXT,
+            LlmInputTokens  INTEGER,
+            LlmOutputTokens INTEGER,
+            FOREIGN KEY (RunId) REFERENCES WorkflowBuilderRuns(RunId) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS IX_WorkflowExecutionEvents_RunId
+            ON WorkflowExecutionEvents (RunId);
+        CREATE INDEX IF NOT EXISTS IX_WorkflowExecutionEvents_OccurredAt
+            ON WorkflowExecutionEvents (OccurredAt);
+        CREATE INDEX IF NOT EXISTS IX_WorkflowExecutionEvents_RunId_OccurredAt
+            ON WorkflowExecutionEvents (RunId, OccurredAt);
+        """);
 }
 
 if (!app.Environment.IsDevelopment())
@@ -319,6 +413,7 @@ app.UseRouting();
 app.MapControllers();
 app.MapRazorPages();
 app.MapBlazorHub();
+app.MapHub<WorkflowRunHub>("/hubs/workflow-run");
 app.MapFallbackToPage("/_Host");
 
 app.Run();

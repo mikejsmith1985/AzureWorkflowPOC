@@ -3,6 +3,7 @@
    Toolbar runs across the top. Pre-loads a 3-node example when no {id} is supplied. *@
 @page "/workflow-builder"
 @page "/workflow-builder/{Id}"
+@layout WorkflowBuilderLayout
 @implements IDisposable
 @inject NavigationManager Nav
 @inject IWorkflowCodeGenerator CodeGenerator
@@ -14,8 +15,10 @@
 @inject IWorkflowCodeDiffService CodeDiffService
 @inject IWorkflowRealizationService RealizationService
 @inject IWorkflowReadinessService ReadinessService
+@inject IWorkflowPreRunValidator PreRunValidator
 @using DBAIAzure.Core.Exceptions
 @using DBAIAzure.Core.Interfaces
+@using DBAIAzure.Core.Models
 @using DBAIAzure.Core.Models.NodeConfig
 @using System.Text.Json.Nodes
 
@@ -78,6 +81,21 @@
                                  OnGoalPreview="@OnGoalPreview"
                                  OnConfigCommitted="@OnConfigCommitted" />
 
+        @* DoR pre-run validation failures — shown above the run output panel *@
+        @if (_dorFailures.Count > 0)
+        {
+            <div class="mx-4 mt-2 bg-red-950/60 border border-red-700/50 rounded-lg px-3 py-2 text-sm text-red-300"
+                 role="alert" aria-label="Workflow is not ready to run">
+                <div class="font-semibold mb-1">Workflow not ready to run</div>
+                <ul class="list-disc list-inside space-y-0.5 text-xs">
+                    @foreach (var failure in _dorFailures)
+                    {
+                        <li>@failure.FailureReason</li>
+                    }
+                </ul>
+            </div>
+        }
+
         @* Execution output panel — shown when trigger is missing, during a run, or after completion *@
         @if (_isTriggerMissing || _activeRunId is not null || _nodeStates.Count > 0)
         {
@@ -114,6 +132,7 @@
                            DesignSkillService="@DesignSkillService"
                            DiffService="@CodeDiffService"
                            OnCodeSaved="@OnCodeSaved"
+                           OnGenerationResultReady="@OnGenerationResultReadyAsync"
                            OnCloseRequested="@(() => _isChatOpen = false)" />
     </div>
 </div>
@@ -174,6 +193,9 @@
     // nav guard lets that synthetic navigation through instead of popping the confirmation modal.
     private bool _isProgrammaticNav;
 
+    // ── DoR pre-run validation (spec 008, US7) ────────────────────────────────────
+    private IReadOnlyList<DorRuleResult> _dorFailures = Array.Empty<DorRuleResult>();
+
     // ── Node realization (spec 007) ───────────────────────────────────────────────
     // Proposals streamed from the assistant during a "Make it real" pass, the panel's open state,
     // a busy flag while proposing, and the most recent readiness evaluation (null until first run).
@@ -195,6 +217,7 @@
     /// </summary>
     private bool CanRun => _workflow is { Nodes.Count: > 0 }
                         && _workflow.Nodes.All(n => n.IsConfigured)
+                        && _dorFailures.Count == 0
                         && (_readinessReport is null || _readinessReport.IsProductionReady);
 
     /// <summary>
@@ -552,6 +575,28 @@
         _hasCanvasChangedSinceCodeGen = false;
         StateHasChanged();
         return Task.CompletedTask;
+    }
+
+    private async Task OnGenerationResultReadyAsync(WorkflowGenerationResult result)
+    {
+        if (_workflow is null || result.Nodes.Count == 0)
+            return;
+
+        _workflow = BuilderService.ApplyGenerationResult(_workflow, result);
+        _workflow = await BuilderService.SaveAsync(_workflow);
+        await RunDorValidationAsync();
+        StateHasChanged();
+    }
+
+    private async Task RunDorValidationAsync()
+    {
+        if (_workflow is null || _workflow.Nodes.Count == 0)
+        {
+            _dorFailures = Array.Empty<DorRuleResult>();
+            return;
+        }
+        var results = await PreRunValidator.ValidateAsync(_workflow);
+        _dorFailures = results.Where(r => !r.Passed).ToList().AsReadOnly();
     }
 
     private void OnRunUpdated(string runId)

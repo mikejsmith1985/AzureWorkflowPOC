@@ -1,3 +1,5 @@
+@* Full-viewport layout for the Workflow Builder — no max-width or padding constraints
+   so the palette + canvas fill the entire browser window. *@
 @inherits LayoutComponentBase
 
 <div class="flex flex-col min-h-screen bg-gray-950 text-gray-100">
@@ -9,16 +11,10 @@
             <a href="/graph" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Graph</a>
             <a href="/new-ticket" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">New Ticket</a>
             <a href="/workflow-builder" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Workflow Builder</a>
-            <a href="/runs" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Run History</a>
-            <a href="/review-queue" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Review Queue</a>
         </nav>
     </header>
 
-    <main class="flex-1 px-6 py-6 max-w-6xl mx-auto w-full">
+    <main class="flex-1 overflow-hidden">
         @Body
     </main>
-
-    <footer class="border-t border-gray-800 px-6 py-3 text-xs text-gray-600 text-center">
-        SK Process Framework · Anthropic claude-sonnet-4-6 · Blazor Server
-    </footer>
 </div>
