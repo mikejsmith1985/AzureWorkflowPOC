@@ -51,13 +51,23 @@ is User Story 1 (the MVP) of spec `007-node-realization`.
   "Realize this node" action that calls `ProposeNodeAsync` for exactly that node and opens the review
   panel scoped to one proposal. Other nodes are untouched. After acceptance, readiness is re-evaluated.
   Enables incremental realization: add a new node to an already-realized workflow and realize only it.
+- **Honest Blocked gating when connectors are unconfigured (US4)** — `ProposeNotifyAsync` and
+  `ProposeDataAsync` now check the connector repository before calling the LLM. When no connector of
+  the required category (messaging or data) is configured, they return a `Blocked` proposal immediately
+  with a plain-language reason naming the missing connector type — no LLM call is wasted. The `CanRun`
+  gate was extended to require `IsProductionReady` from the readiness report, so a workflow whose nodes
+  are configured but whose connectors are unhealthy cannot be run. The toolbar's disabled-Run label now
+  shows the specific blocking reason from the readiness report (e.g. "This step needs a connector
+  (Teams) that has not been configured yet") rather than the generic "Set up all steps first".
 - Tests (TDD): unit coverage for config round-trip, proposal ordering/no-mutation, single-node accept +
-  provenance, out-of-date detection, partially-realized single-node isolation (T041), and readiness
-  ready/blocked/needs-input; an end-to-end runtime test proving the realized instruction reaches the
-  step through the real local process runtime; and Playwright Scenarios A (make-it-real → accept →
-  readiness verdict → runnable), B (edit-then-accept, proposal count decreases), and C (per-node
-  context-menu realize → exactly 1 proposal card → readiness re-evaluated) verified green against the
-  live app with a real Anthropic key.
+  provenance, out-of-date detection, partially-realized single-node isolation (T041), readiness
+  ready/blocked/needs-input/blocking-reason content (T044), and Blocked proposal when no messaging
+  connector is configured (T044/T047); an end-to-end runtime test proving the realized instruction
+  reaches the step through the real local process runtime; and Playwright Scenarios A (make-it-real →
+  accept → readiness verdict → Run state mirrors verdict), B (edit-then-accept, proposal count
+  decreases), C (per-node context-menu realize → exactly 1 proposal card → readiness re-evaluated),
+  and D (Run button and readiness indicator are coherent; specific blocking reason shown when not ready)
+  verified green against the live app with a real Anthropic key.
 
 ### Fixed — Saved edits silently reverted by stale auto-save (data loss)
 
