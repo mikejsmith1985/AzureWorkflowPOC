@@ -7,13 +7,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" Version="2.22.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.11" />
     <PackageReference Include="Z.Blazor.Diagrams" Version="3.0.4.1" />
     <PackageReference Include="Z.Blazor.Diagrams.Core" Version="3.0.4.1" />
     <PackageReference Include="Microsoft.SemanticKernel" Version="1.77.0" />
     <PackageReference Include="Microsoft.SemanticKernel.Process.Core" Version="1.77.0-alpha" />
     <PackageReference Include="Microsoft.SemanticKernel.Process.LocalRuntime" Version="1.77.0-alpha" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.11" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design"  Version="8.0.11" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.11" PrivateAssets="all" />
     <PackageReference Include="Microsoft.TeamFoundationServer.Client" Version="20.256.2" />
     <!-- Pin the transitive ConfigurationManager up to 8.0.0 to resolve the TFS client's downgrade. -->
     <PackageReference Include="System.Configuration.ConfigurationManager" Version="8.0.0" />

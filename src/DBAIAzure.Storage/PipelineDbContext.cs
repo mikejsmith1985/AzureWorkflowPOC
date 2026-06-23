@@ -1,5 +1,6 @@
 using DBAIAzure.Storage.Entities;
 using Microsoft.EntityFrameworkCore;
+using DBAIAzure.Core.Models;
 
 namespace DBAIAzure.Storage;
 
@@ -19,6 +20,12 @@ public class PipelineDbContext : DbContext
 
     /// <summary>One row per saved workflow; nodes, edges, settings, and chat history stored as JSON blobs.</summary>
     public DbSet<WorkflowDefinitionRecord> Workflows { get; set; } = null!;
+
+    /// <summary>One row per workflow builder run; updated on every status transition (FR-18).</summary>
+    public DbSet<WorkflowRunEntity> WorkflowBuilderRuns { get; set; } = null!;
+
+    /// <summary>Step-level audit events produced by IWorkflowObserver (FR-21).</summary>
+    public DbSet<WorkflowExecutionEventEntity> WorkflowExecutionEvents { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -60,6 +67,29 @@ public class PipelineDbContext : DbContext
             entity.Property(r => r.Id).ValueGeneratedOnAdd();
             // One record per connector type — backs the concurrency-safe upsert in the repository.
             entity.HasIndex(r => r.ConnectorType).IsUnique();
+        });
+
+        modelBuilder.Entity<WorkflowRunEntity>(entity =>
+        {
+            entity.ToTable("WorkflowBuilderRuns");
+            entity.HasKey(r => r.RunId);
+            entity.Property(r => r.RunId).ValueGeneratedNever();
+            entity.HasIndex(r => r.WorkflowId);
+            entity.HasIndex(r => r.Status);
+            entity.HasMany(r => r.ExecutionEvents)
+                  .WithOne()
+                  .HasForeignKey(e => e.RunId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WorkflowExecutionEventEntity>(entity =>
+        {
+            entity.ToTable("WorkflowExecutionEvents");
+            entity.HasKey(e => e.EventId);
+            entity.Property(e => e.EventId).ValueGeneratedNever();
+            entity.HasIndex(e => e.RunId);
+            entity.HasIndex(e => e.OccurredAt);
+            entity.HasIndex(e => new { e.RunId, e.OccurredAt });
         });
 
         modelBuilder.Entity<WorkflowDefinitionRecord>(entity =>

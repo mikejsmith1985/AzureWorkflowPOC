@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Production Platform Parity: run persistence, HITL close-loop, execution history, DoR validation (spec 008)
+
+Implements the Azure-stack completeness feature set across US1–US7:
+
+- **Run persistence (US1)** — `WorkflowBuilderRuns` and `WorkflowExecutionEvents` tables; `EfWorkflowRunRepository` writes every status transition via the existing `IDbContextFactory` singleton-safe pattern. `WorkflowRunRetentionService` (hosted service) purges terminal runs older than `RetentionDays` (default 30).
+- **HITL close-loop via Teams (US2)** — `IWorkflowApprovalNotifier` / `TeamsWorkflowApprovalNotifier` sends Adaptive Cards via Graph API on run pause. `TeamsWebhookController` (`/api/teams/approval`) routes inbound decisions to `IWorkflowExecutionOrchestrator.SubmitApproval`. `ApprovalNodeConfig` extended with `ApproverChain`, `TimeoutMinutes`, `EscalationPolicy`.
+- **Review Queue (US3)** — `/review-queue` Blazor page lists Paused runs with one-click Approve/Reject; updates live via orchestrator `RunUpdated` event subscription.
+- **Execution History (US4)** — `/runs` list page and `/runs/{id}` detail page showing step timeline, LLM token costs, and failure reasons. `SqlWorkflowObserver`, `SignalRWorkflowObserver`, `AzureMonitorWorkflowObserver` fan-out to all registered observers on each event.
+- **SignalR hub (US4)** — `WorkflowRunHub` at `/hubs/workflow-run` enables per-run group subscriptions and review-queue broadcast notifications.
+- **DoR validation (US7)** — `IWorkflowReadinessRule` / `IWorkflowPreRunValidator` framework; four built-in rules: `TriggerNodePresentRule`, `AllNodesRealizedRule`, `ConnectorsHealthyRule`, `ApprovalNodesConfiguredRule`. Rules disabled via `DorRules:DisabledRuleNames` configuration.
+- **Prompt audit filter** — `WorkflowPromptRenderFilter` logs SHA-256 hash of rendered prompts, never the text (Article IX).
+- **Nav links** — Run History and Review Queue added to the main navigation bar.
+
 ### Added — Node Realization: turn plain-language workflows into production-ready ones (spec 007)
 
 A new **"Make it real"** flow converts a plain-language workflow into runnable, production-ready
