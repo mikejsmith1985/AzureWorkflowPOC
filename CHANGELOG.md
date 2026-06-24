@@ -7,6 +7,219 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — ADO Telemetry Field Bootstrap: preflight service bootstraps custom fields before ticket creation (spec 009)
+
+Before work items are created by the Spec Kit pipeline, a preflight step ensures the required ADO
+custom telemetry fields exist. The feature operates in two modes chosen automatically at runtime:
+
+- **Bootstrap mode (US1)** — admin access detected: creates 14 custom fields (`Custom.AISessionID`,
+  `Custom.AIModelUsed`, token/cost/cache/rate counters, `Custom.SpeckitPhase` picklist) across
+  `User Story` and `Task` work item types via the ADO Inherited Process API. Retries up to 3 times
+  with exponential backoff on 429/503 HTTP errors. Writes a `.ado-bootstrap-manifest.json` to the
+  active spec feature directory.
+- **Adaptive mode (US2)** — admin probe returns 403: scans the org's existing fields and builds a
+  fallback mapping (exact match → `FallbackReferenceName` → type-level fallback → log-only). Lets the
+  pipeline continue without admin rights at the cost of telemetry fidelity.
+- **Config override (US4)** — callers can pass a custom `AdoTelemetryFieldConfig` to `RunPreflightAsync`
+  to swap the embedded default field schema without redeploying.
+- **Startup auto-run** — `app.Lifetime.ApplicationStarted` fires a fire-and-forget preflight so fields
+  are ready before the first ticket request.
+- **"Test Connection" button (US3)** — the ADO connector card on `/settings/connectors` shows a
+  dedicated "Test Connection" button. On click, `IAdoTelemetryPreflightService.RunPreflightAsync` runs
+  and the result is surfaced via a `data-testid="ado-preflight-result"` badge.
+- **SK Process step** — `AdoTelemetryPreflightStep : KernelProcessStep<AdoPreflightStepState>` wraps
+  the service for integration into the Spec Kit SK process pipeline. Emits
+  `AdoPreflightSucceeded` / `AdoPreflightFailed` events for downstream steps to react to.
+- **Unit tests** — `AdoTelemetryPreflightServiceTests` and `AdoTelemetryPreflightStepTests` (408 tests
+  total passing). `RetryDelayFactory` is publicly overridable so retry tests complete in milliseconds.
+- **E2E tests** — two new Playwright tests in `ConnectorSettingsTests`:
+  `ConnectorSettings_AdoPreflightButton_RendersOnAdoCard` (always runs) and
+  `ConnectorSettings_AdoPreflightButton_WhenClicked_ShowsResultBadge` (live-credential path gated on
+  `E2E_TEST_ADO_PAT`).
+
+### Added — Production Platform Parity: run persistence, HITL close-loop, execution history, DoR validation (spec 008)
+
+Implements the Azure-stack completeness feature set across US1–US7:
+
+- **Run persistence (US1)** — `WorkflowBuilderRuns` and `WorkflowExecutionEvents` tables; `EfWorkflowRunRepository` writes every status transition via the existing `IDbContextFactory` singleton-safe pattern. `WorkflowRunRetentionService` (hosted service) purges terminal runs older than `RetentionDays` (default 30).
+- **HITL close-loop via Teams (US2)** — `IWorkflowApprovalNotifier` / `TeamsWorkflowApprovalNotifier` sends Adaptive Cards via Graph API on run pause. `TeamsWebhookController` (`/api/teams/approval`) routes inbound decisions to `IWorkflowExecutionOrchestrator.SubmitApproval`. `ApprovalNodeConfig` extended with `ApproverChain`, `TimeoutMinutes`, `EscalationPolicy`.
+- **Review Queue (US3)** — `/review-queue` Blazor page lists Paused runs with one-click Approve/Reject; updates live via orchestrator `RunUpdated` event subscription.
+- **Execution History (US4)** — `/runs` list page and `/runs/{id}` detail page showing step timeline, LLM token costs, and failure reasons. `SqlWorkflowObserver`, `SignalRWorkflowObserver`, `AzureMonitorWorkflowObserver` fan-out to all registered observers on each event.
+- **SignalR hub (US4)** — `WorkflowRunHub` at `/hubs/workflow-run` enables per-run group subscriptions and review-queue broadcast notifications.
+- **DoR validation (US7)** — `IWorkflowReadinessRule` / `IWorkflowPreRunValidator` framework; four built-in rules: `TriggerNodePresentRule`, `AllNodesRealizedRule`, `ConnectorsHealthyRule`, `ApprovalNodesConfiguredRule`. Rules disabled via `DorRules:DisabledRuleNames` configuration.
+- **Prompt audit filter** — `WorkflowPromptRenderFilter` logs SHA-256 hash of rendered prompts, never the text (Article IX).
+- **Nav links** — Run History and Review Queue added to the main navigation bar.
+- **Unit tests (T024–T077)** — 42 new passing tests: repository CRUD + purge, observer persistence + fan-out isolation, `WorkflowDesignSkillService` generation + clarifying-question path, and all four DoR rules plus validator skip/sort. `EfWorkflowRunRepository` updated to evaluate `DateTimeOffset` sorts and purge filters in-process for SQLite portability.
+
+### Added — Node Realization: turn plain-language workflows into production-ready ones (spec 007)
+
+A new **"Make it real"** flow converts a plain-language workflow into runnable, production-ready
+configuration. The assistant proposes per-node configuration, the user reviews and accepts it, and the
+workflow reports an honest production-readiness verdict and runs from the accepted configuration. This
+is User Story 1 (the MVP) of spec `007-node-realization`.
+
+- **Per-node realized config** — each node type has a typed configuration record (agent instruction +
+  model + output shape; notify connector/recipient/message; route conditions + default; transform
+  mappings; data read/write; approval prompt/options; trigger initial-data shape). All are stored in the
+  existing `WorkflowNode.FunctionConfig` as a versioned envelope via `NodeConfigSerializer`, so no schema
+  migration is needed.
+- **`WorkflowRealizationService`** — proposes configuration for each node using schema-bound forced
+  tool-use (`IStructuredCompletionService`), so the model returns structured config, never free text
+  (Article VII). Proposing is read-only; `AcceptProposal` is a separate, deterministic, single-node
+  mutation that records an intent hash for out-of-date detection.
+- **`WorkflowReadinessService`** — evaluates production readiness: structural validity, per-node
+  intrinsic validity, cross-node consistency, and live connector health. Validation of realized config
+  lives here (the Run gate), keeping `WorkflowValidator` structural-only so plain-language drafts still
+  save.
+- **Builder UI** — a "Make it real" toolbar action, a streaming review panel with a single explicit
+  "Accept all" confirmation, a production-readiness indicator, and a green "realized" badge on each node.
+- **Review & adjust (US2)** — each proposal can be accepted, **edited in plain language** (no raw
+  code/schema — the node type's primary field), rejected, or **regenerated** (re-proposed for that one
+  node). Single-node acceptance is deterministic and touches only its own node.
+- **Out-of-date detection (US2)** — when a realized node's plain-language intent (label, goal, or
+  connected edges) changes, its accepted config no longer matches what was asked; the node is reported
+  out-of-date and the workflow is no longer production-ready, via a content-based intent hash recorded
+  at acceptance (not a timestamp, so unrelated re-saves never raise a false signal). Readiness re-checks
+  on a meaningful edit only — pure position drags don't trigger a connector-health round-trip.
+- **Runtime executes from realized config** — each step receives its node's configuration as Semantic
+  Kernel step state (`AddStepFromType<TStep, TState>`). Agentic steps run the realized instruction;
+  notify steps resolve the bound connector (secrets fetched at execution, never in config — Article IX);
+  branch steps now route correctly (this fixed a pre-existing bug where the visual-workflow orchestrator
+  never populated route port labels, so branch nodes always failed); transform steps apply the realized
+  field mappings to structured (JSON) payloads; data steps resolve the bound connector and apply the
+  configured operation; the trigger read-path reads `TriggerNodeConfig`, back-compatible with the legacy
+  `{initialDataDescription}` blob.
+- **Secrets discipline** — proposals, prompts, and `FunctionConfig` never carry secrets; only
+  `ConnectorType` references (Article IX).
+- **Per-node "Realize this node" (US3)** — right-clicking any canvas node opens a context menu with a
+  "Realize this node" action that calls `ProposeNodeAsync` for exactly that node and opens the review
+  panel scoped to one proposal. Other nodes are untouched. After acceptance, readiness is re-evaluated.
+  Enables incremental realization: add a new node to an already-realized workflow and realize only it.
+- **Honest Blocked gating when connectors are unconfigured (US4)** — `ProposeNotifyAsync` and
+  `ProposeDataAsync` now check the connector repository before calling the LLM. When no connector of
+  the required category (messaging or data) is configured, they return a `Blocked` proposal immediately
+  with a plain-language reason naming the missing connector type — no LLM call is wasted. The `CanRun`
+  gate was extended to require `IsProductionReady` from the readiness report, so a workflow whose nodes
+  are configured but whose connectors are unhealthy cannot be run. The toolbar's disabled-Run label now
+  shows the specific blocking reason from the readiness report (e.g. "This step needs a connector
+  (Teams) that has not been configured yet") rather than the generic "Set up all steps first".
+- Tests (TDD): unit coverage for config round-trip, proposal ordering/no-mutation, single-node accept +
+  provenance, out-of-date detection, partially-realized single-node isolation (T041), readiness
+  ready/blocked/needs-input/blocking-reason content (T044), and Blocked proposal when no messaging
+  connector is configured (T044/T047); an end-to-end runtime test proving the realized instruction
+  reaches the step through the real local process runtime; and Playwright Scenarios A (make-it-real →
+  accept → readiness verdict → Run state mirrors verdict), B (edit-then-accept, proposal count
+  decreases), C (per-node context-menu realize → exactly 1 proposal card → readiness re-evaluated),
+  and D (Run button and readiness indicator are coherent; specific blocking reason shown when not ready)
+  verified green against the live app with a real Anthropic key.
+
+### Fixed — Saved edits silently reverted by stale auto-save (data loss)
+
+A saved workflow edit could be overwritten seconds later and revert to an older state, so "Save"
+appeared not to work. `WorkflowBuilderService` is scoped per Blazor circuit and runs a 60-second
+`System.Threading.Timer` for auto-save, but Blazor Server retains disconnected circuits for ~3
+minutes — during which the timer kept firing `SaveAsync` with that circuit's stale captured
+`_workflow`, clobbering newer saves made from another circuit (e.g. after a reload or in a second
+tab). Reproduced and fixed:
+
+- **Content-signature change detection** — `WorkflowBuilderService` now fingerprints the content it
+  last persisted (name, nodes, edges, settings, generated code, chat) and the auto-save timer
+  **skips when nothing has changed**. A stale circuit can no longer re-save its old snapshot over a
+  newer save. The baseline is seeded from the loaded workflow so an untouched workflow is never
+  needlessly re-saved (which would also wrongly bump its `LastModifiedAt` for the "resume most
+  recent" sort).
+- The auto-save interval is now injectable (defaults to 60 s) so the behaviour is unit-testable.
+- Regression tests: `AutoSave_DoesNotResave_WhenContentUnchanged` and
+  `AutoSave_PersistsOnEdit_ThenStopsResaving`. The `DBAIAzure.Tests` project now references
+  `DBAIAzure.Web` so the service is tested directly (previously only constants were asserted).
+- Verified live: the clobber scenario that previously reverted a save now keeps it
+  (`NEW survived? true`).
+
+### Fixed — Node edits lost on navigation; builder now persists & resumes work
+
+Node text (and any other canvas edit) was saved to the database but to a workflow id the URL
+never pointed at, so navigating away and back showed a freshly-generated example and the edits
+appeared to "revert". Root cause and fixes in `Pages/WorkflowBuilder.razor` (+ `WorkflowGallery.razor`):
+
+- **Resume most recent on the bare URL** — opening `/workflow-builder` with no id now reopens the
+  most-recently-edited saved workflow instead of regenerating a throwaway example. First-time users
+  (no saved workflows) still get the entry-choice modal.
+- **Bind the URL to the workflow after it is persisted** — on the first successful save (manual or
+  auto-save), and when resuming a workflow reached via the bare URL, the page rewrites the address to
+  `/workflow-builder/{id}` (history-replace, no reload) so a browser refresh reloads the same work.
+- **`/workflow-builder/new`** is now the explicit "start a new workflow" entry point; the Gallery's
+  "New Workflow" button targets it. Bare `/workflow-builder` is reserved for resuming.
+- **Unsaved-changes dialog now completes the navigation** — its Save button previously persisted but
+  silently kept the user on the page; it now resumes the originally-requested navigation on success
+  and keeps the modal open if the save fails.
+- **New-workflow name de-duplication** — example/scratch workflows get a unique " (n)" suffix when a
+  name is already taken, preventing the `(OwnerId, Name)` uniqueness conflict that made the first save
+  of a second new workflow fail silently. Manual save now also surfaces that conflict as a toast.
+- E2E `Scenario9_RenamedLabel_PersistsAfterNavigatingAway` covers the regression; all 14
+  label-editing E2E tests and 298 unit tests pass.
+
+### Fixed — Undo label revert not updating DOM (spec 006 T018)
+
+- `ApplyLabelChange` now calls `nodeModel.Refresh()` instead of `_diagram.Refresh()`.
+  ZBD's per-node `Refresh()` sets the `_shouldRender` flag and calls `StateHasChanged()`
+  directly on the node's widget, guaranteeing a re-render when a label changes outside of
+  an active edit session (undo / redo). The diagram-level `Refresh()` lacked this guarantee
+  under ZBD 3.0.4.1's `NodeRenderer` optimisation.
+- Added `IsLabelEditing` flag on `WorkflowNodeModel`; ZBD keyboard shortcuts
+  (`Delete`/`Backspace`) now check this flag so typing in the label input never
+  accidentally deletes the node.
+- E2E test `Scenario4_LabelUndo_CtrlZ_RestoresPreviousLabel` now uses the toolbar Undo
+  button (more reliable than keyboard Ctrl+Z in Blazor Server SignalR tests) and waits for
+  DOM re-renders rather than fixed timeouts. All 31 E2E tests pass.
+
+### Fixed — Node text editing in Workflow Builder (spec 006)
+
+Two-part fix for the bug where users could not type into workflow node fields because
+text input was silently reset by Blazor re-renders.
+
+**Part 1 — Config panel reset guard** (`WorkflowNodeConfigPanel.razor`):
+- Added `_lastInitialisedNodeId` field that guards `OnParametersSet()` from resetting
+  `_goalPrompt`, `_inputLabel`, and `_outputLabel` when the same node is re-rendered
+  (e.g. while the 200 ms goal-preview debounce fires a parent `StateHasChanged()`).
+- `OnCloseAsync()` clears the guard so re-opening the panel for the same node
+  correctly reinitialises fields from the saved node record.
+
+**Part 2 — Inline label editing** (`WorkflowNodeRenderer.razor`):
+- Node label `<span>` is now a dual-state span/input: double-clicking the label text
+  switches to an `<input>` field with the current label pre-filled.
+- `_labelBuffer` is a local field never written by `OnParametersSet` — it is fully
+  isolated from parent re-renders while the user is typing.
+- Committing with Enter or blurring the input calls `Node.RaiseLabelCommitted()`;
+  pressing Escape restores the pre-edit label without raising the committed event.
+- `@ondblclick:stopPropagation="true"` on the label container prevents the node-body
+  double-click handler (which opens the config panel) from firing when renaming.
+- Keyboard accessibility: `tabindex="0"` on the outer node div; `Enter` activates
+  inline editing when the node has keyboard focus.
+- Empty committed labels display a type-appropriate fallback ("AI Agent", "Notify",
+  etc.) rather than a blank header; the fallback is never stored or pre-filled.
+
+**New types** (`WorkflowDiagramModels.cs`):
+- `LabelCommitArgs readonly record struct` — carries `NodeId`, `PreviousLabel`,
+  `NewLabel` from the renderer's committed event to the canvas handler.
+- `LabelCommitted event Action<string, string>?` on `WorkflowNodeModel` (alongside
+  the existing `DoubleClicked` event) — the signalling channel that avoids the
+  EventCallback limitation when components are registered via `RegisterComponent`.
+- `RenameLabelAction : ICanvasAction` in `WorkflowCanvas.razor` — undoable rename
+  command that pairs with the existing `AddNodeAction`/`AddEdgeAction` undo stack.
+
+**New tests** (`tests/DBAIAzure.Tests/`):
+- `WorkflowNodeLabelEditTests.cs` — 8 pure domain tests covering rename Do/Undo,
+  no-op guard, edit state machine transitions, double-fire guard, re-edit value, and
+  empty label fallback.
+- `WorkflowNodeConfigPanelResetGuardTests.cs` — 5 pure domain tests covering the
+  same-node guard, different-node reset, close-then-reopen, null-node safety, and
+  undo order.
+
+**New E2E test stubs** (`tests/DBAIAzure.E2ETests/Tests/WorkflowNodeLabelEditTests.cs`):
+- 5 Playwright stubs (Scenarios 1–5 from `specs/006-fix-node-text-editing/quickstart.md`)
+  for config-panel reset guard, double-click rename, Escape cancel, Ctrl+Z undo, and
+  empty-label placeholder.
+
 ### Changed — E2E tests upgraded to real user interactions
 
 Replaced four "element presence" WorkflowBuilder tests with tests that physically click,

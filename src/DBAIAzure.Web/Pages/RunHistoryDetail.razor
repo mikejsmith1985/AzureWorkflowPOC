@@ -1,0 +1,196 @@
+@* Run detail page: step-by-step execution timeline with LLM token cost visibility (FR-20, FR-21, US4). *@
+@page "/runs/{RunId}"
+@implements IDisposable
+@inject IWorkflowRunRepository RunRepository
+@inject IWorkflowExecutionOrchestrator Orchestrator
+@inject IDbContextFactory<PipelineDbContext> DbFactory
+@inject NavigationManager Nav
+@using DBAIAzure.Core.Interfaces
+@using DBAIAzure.Core.Models
+@using DBAIAzure.Storage
+@using DBAIAzure.Storage.Entities
+@using Microsoft.EntityFrameworkCore
+
+<div class="mb-6">
+    <a href="/runs" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">← Run History</a>
+</div>
+
+@if (_loading)
+{
+    <div class="text-gray-500 text-sm">Loading…</div>
+}
+else if (_run is null)
+{
+    <div class="text-gray-500 text-sm">Run <span class="font-mono">@RunId</span> not found.</div>
+}
+else
+{
+    <!-- ── Run header ──────────────────────────────────────────────────────── -->
+    <div class="flex items-start justify-between mb-6 gap-4">
+        <div>
+            <h1 class="text-xl font-semibold text-gray-100">@_run.WorkflowName</h1>
+            <p class="text-xs text-gray-400 mt-1">
+                Run <span class="font-mono">@_run.RunId</span>
+                · Started @_run.StartedAt.ToLocalTime().ToString("MMM d yyyy HH:mm:ss")
+                · @FormatDuration(_run)
+            </p>
+        </div>
+        <span class="inline-flex items-center px-3 py-1 rounded text-sm font-medium shrink-0 @StatusClass(_run.Status)">
+            @_run.Status
+        </span>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_run.FailureReason))
+    {
+        <div class="mb-4 rounded bg-red-900/30 border border-red-700 p-3 text-sm text-red-300">
+            <span class="font-medium">Failure: </span>@_run.FailureReason
+        </div>
+    }
+
+    <!-- ── Token cost summary ──────────────────────────────────────────── -->
+    @if (_totalInputTokens > 0 || _totalOutputTokens > 0)
+    {
+        <div class="mb-5 rounded bg-gray-900 border border-gray-700 p-4 flex gap-6 text-sm">
+            <div>
+                <p class="text-xs text-gray-500 mb-0.5">Input tokens</p>
+                <p class="text-gray-100 font-medium">@_totalInputTokens.ToString("N0")</p>
+            </div>
+            <div>
+                <p class="text-xs text-gray-500 mb-0.5">Output tokens</p>
+                <p class="text-gray-100 font-medium">@_totalOutputTokens.ToString("N0")</p>
+            </div>
+            <div>
+                <p class="text-xs text-gray-500 mb-0.5">LLM calls</p>
+                <p class="text-gray-100 font-medium">@_llmCallCount</p>
+            </div>
+        </div>
+    }
+
+    <!-- ── Step timeline ──────────────────────────────────────────────── -->
+    <h2 class="text-sm font-medium text-gray-300 mb-3">Execution Timeline</h2>
+
+    @if (_events.Count == 0)
+    {
+        <p class="text-xs text-gray-500">No step events recorded for this run.</p>
+    }
+    else
+    {
+        <div class="space-y-2">
+            @foreach (var evt in _events)
+            {
+                <div class="rounded bg-gray-900 border border-gray-800 px-4 py-3 flex items-start gap-3">
+                    <span class="text-base mt-0.5 shrink-0 select-none">@EventIcon(evt.EventType)</span>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-sm text-gray-100 font-medium">@(evt.NodeLabel ?? ((WorkflowEventType)evt.EventType).ToString())</span>
+                            @if (!string.IsNullOrWhiteSpace(evt.Outcome))
+                            {
+                                <span class="text-xs text-gray-400">— @evt.Outcome</span>
+                            }
+                        </div>
+                        <div class="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
+                            <span>@evt.OccurredAt.ToLocalTime().ToString("HH:mm:ss.fff")</span>
+                            @if (evt.DurationMs.HasValue)
+                            {
+                                <span>@evt.DurationMs ms</span>
+                            }
+                            @if (evt.LlmInputTokens.HasValue)
+                            {
+                                <span>@evt.LlmInputTokens.Value.ToString("N0") in / @evt.LlmOutputTokens?.ToString("N0") out tokens</span>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(evt.LlmModelName))
+                            {
+                                <span class="font-mono">@evt.LlmModelName</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public string RunId { get; set; } = string.Empty;
+
+    private bool _loading = true;
+    private WorkflowRunRecord? _run;
+    private List<WorkflowExecutionEventEntity> _events = new();
+    private int _totalInputTokens;
+    private int _totalOutputTokens;
+    private int _llmCallCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Orchestrator.RunUpdated += OnRunUpdated;
+        await LoadAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_loading)
+            await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _run = await RunRepository.GetAsync(RunId);
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _events = await db.WorkflowExecutionEvents
+            .AsNoTracking()
+            .Where(e => e.RunId == RunId)
+            .OrderBy(e => e.OccurredAt)
+            .ToListAsync();
+
+        _totalInputTokens  = _events.Sum(e => e.LlmInputTokens  ?? 0);
+        _totalOutputTokens = _events.Sum(e => e.LlmOutputTokens ?? 0);
+        _llmCallCount      = _events.Count(e => e.EventType == (int)WorkflowEventType.LlmCallCompleted);
+
+        _loading = false;
+    }
+
+    private void OnRunUpdated(string updatedRunId)
+    {
+        if (updatedRunId != RunId) return;
+        _ = InvokeAsync(async () =>
+        {
+            await LoadAsync();
+            StateHasChanged();
+        });
+    }
+
+    private static string StatusClass(WorkflowRunStatus status) => status switch
+    {
+        WorkflowRunStatus.Running   => "bg-blue-900 text-blue-300",
+        WorkflowRunStatus.Paused    => "bg-yellow-900 text-yellow-300",
+        WorkflowRunStatus.Completed => "bg-green-900 text-green-300",
+        WorkflowRunStatus.Failed    => "bg-red-900 text-red-300",
+        WorkflowRunStatus.TimedOut  => "bg-orange-900 text-orange-300",
+        WorkflowRunStatus.Cancelled => "bg-gray-800 text-gray-400",
+        _                           => "bg-gray-800 text-gray-400",
+    };
+
+    private static string EventIcon(int eventType) => (WorkflowEventType)eventType switch
+    {
+        WorkflowEventType.StepStarted    => "▶",
+        WorkflowEventType.StepCompleted  => "✓",
+        WorkflowEventType.StepFailed     => "✗",
+        WorkflowEventType.StepSkipped    => "⊘",
+        WorkflowEventType.LlmCallCompleted => "◆",
+        WorkflowEventType.RunPaused      => "⏸",
+        WorkflowEventType.RunResumed     => "▶",
+        _                                => "·",
+    };
+
+    private static string FormatDuration(WorkflowRunRecord run)
+    {
+        var end  = run.CompletedAt ?? DateTimeOffset.UtcNow;
+        var span = end - run.StartedAt;
+        if (span.TotalSeconds < 60) return $"{(int)span.TotalSeconds}s";
+        if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m {span.Seconds}s";
+        return $"{(int)span.TotalHours}h {span.Minutes}m";
+    }
+
+    public void Dispose() => Orchestrator.RunUpdated -= OnRunUpdated;
+}

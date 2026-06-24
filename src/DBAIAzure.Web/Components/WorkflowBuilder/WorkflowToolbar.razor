@@ -116,11 +116,38 @@
 
     <div class="h-4 border-l border-gray-700 mx-1"></div>
 
+    @* Make it real — converts plain-language nodes into production-ready config (spec 007) *@
+    <button @onclick="OnMakeItRealClicked"
+            disabled="@(IsRealizing || !CanRealize)"
+            data-testid="make-it-real"
+            class="toolbar-btn @(IsRealizing || !CanRealize ? "opacity-40 cursor-not-allowed text-gray-500" : "text-amber-300 hover:text-amber-200")"
+            aria-label="Make it real — turn plain-language steps into production-ready configuration"
+            title="Make it real">
+        @(IsRealizing ? "✨ Working…" : "✨ Make it real")
+    </button>
+
+    @* Readiness indicator — green when production-ready, amber otherwise (only once evaluated) *@
+    @if (IsProductionReady.HasValue)
+    {
+        <span class="flex items-center gap-1 text-xs @(IsProductionReady.Value ? "text-green-400" : "text-amber-400")"
+              role="status" aria-live="polite"
+              data-testid="readiness-indicator"
+              title="@(IsProductionReady.Value ? "Ready for production" : "Not ready for production")">
+            <span class="w-2 h-2 rounded-full @(IsProductionReady.Value ? "bg-green-400" : "bg-amber-400")"></span>
+            @(IsProductionReady.Value ? "Ready" : "Not ready")
+        </span>
+    }
+
+    <div class="h-4 border-l border-gray-700 mx-1"></div>
+
     @* Run / Stop — with disabled-reason text label (T030) *@
     <div class="flex items-center gap-2">
         @if (!string.IsNullOrEmpty(RunDisabledReason))
         {
-            <span class="text-xs text-amber-400 max-w-[180px] leading-tight" role="status" aria-live="polite">
+            <span class="text-xs text-amber-400 max-w-[180px] leading-tight"
+                  role="status"
+                  aria-live="polite"
+                  data-testid="run-disabled-reason">
                 @RunDisabledReason
             </span>
         }
@@ -203,6 +230,25 @@
     /// <summary>Whether the keyboard shortcuts panel is open (T064).</summary>
     [Parameter] public bool IsShortcutsPanelOpen { get; set; }
 
+    /// <summary>True while a "Make it real" realization pass is running, so its button shows progress (spec 007).</summary>
+    [Parameter] public bool IsRealizing { get; set; }
+
+    /// <summary>Whether the workflow has nodes that can be realized (enables the "Make it real" action).</summary>
+    [Parameter] public bool CanRealize { get; set; }
+
+    /// <summary>
+    /// Overall production-readiness once evaluated: true = ready, false = not ready, null = not yet
+    /// evaluated (no indicator shown). Drives the toolbar readiness dot (spec 007).
+    /// </summary>
+    [Parameter] public bool? IsProductionReady { get; set; }
+
+    /// <summary>
+    /// First blocking reason from the readiness report — e.g. "Teams connector not configured."
+    /// When set and Run is disabled, overrides the generic "Set up all steps first" message so
+    /// the user sees exactly what they need to fix (T048).
+    /// </summary>
+    [Parameter] public string? ReadinessBlockingSummary { get; set; }
+
     // ── Callback parameters ──────────────────────────────────────────────────────
 
     [Parameter] public EventCallback OnUndoClicked          { get; set; }
@@ -211,6 +257,7 @@
     [Parameter] public EventCallback OnSaveClicked          { get; set; }
     [Parameter] public EventCallback OnChatToggleClicked    { get; set; }
     [Parameter] public EventCallback OnSettingsClicked      { get; set; }
+    [Parameter] public EventCallback OnMakeItRealClicked    { get; set; }
     [Parameter] public EventCallback OnRunClicked           { get; set; }
     [Parameter] public EventCallback OnStopClicked          { get; set; }
     [Parameter] public EventCallback<string> OnNameChanged  { get; set; }
@@ -249,9 +296,11 @@
     /// Plain-language reason why Run is disabled. Empty when the button is enabled (T030).
     /// </summary>
     private string RunDisabledReason =>
-        IsTriggerMissing         ? "Needs a trigger to start" :
-        !CanRun && !IsRunning    ? "Set up all steps first" :
-                                    string.Empty;
+        IsTriggerMissing                                           ? "Needs a trigger to start" :
+        !CanRun && !IsRunning && ReadinessBlockingSummary is { Length: > 0 }
+                                                                   ? ReadinessBlockingSummary :
+        !CanRun && !IsRunning                                      ? "Set up all steps first" :
+                                                                     string.Empty;
 
     // ── Inline name editing (T034/T035) ─────────────────────────────────────────
 

@@ -1,8 +1,11 @@
-// Generic agentic step — drives any agentic canvas node by streaming an LLM response
-// for the goal prompt injected via WorkflowRuntimeBuilder per-node configuration.
+// Generic agentic step — drives any agentic canvas node by streaming an LLM response. When the node
+// has been realized it executes the accepted AgentNodeConfig (instruction + model); otherwise it falls
+// back to the node's plain-language GoalPrompt so un-realized workflows still run.
 #pragma warning disable SKEXP0080
 
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Models.NodeConfig;
+using DBAIAzure.Processes.Pipeline;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
@@ -11,28 +14,34 @@ using System.Text;
 namespace DBAIAzure.Processes.Steps;
 
 /// <summary>
-/// Generic agentic step — reads GoalPrompt from step data parameter (injected by
-/// WorkflowRuntimeBuilder per-node via ProcessFunctionTargetBuilder). One step type
-/// handles all agentic node types; the goal differentiates them.
+/// Generic agentic step. Its per-node configuration is injected by <see cref="WorkflowRuntimeBuilder"/>
+/// as Semantic Kernel step state. Once a node is realized, the step uses the accepted
+/// <see cref="AgentNodeConfig.Instruction"/> as the operating instruction; before realization it uses
+/// the node's <see cref="WorkflowNode.GoalPrompt"/>. Emits <see cref="WorkflowNodeEvents.NodeCompleted"/>
+/// with the accumulated output so the downstream router can forward it.
 /// </summary>
-public sealed class AgenticNodeStep : KernelProcessStep
+public sealed class AgenticNodeStep : KernelProcessStep<NodeRuntimeConfig>
 {
+    // Default system instruction when neither realized config nor a goal prompt is available.
+    private const string DefaultInstruction = "Complete the assigned task.";
+
+    // Captured from step state on activation so the KernelFunction can read this node's configuration.
+    private NodeRuntimeConfig _config = new();
+
+    /// <summary>Captures the per-node configuration injected at build time.</summary>
+    public override ValueTask ActivateAsync(KernelProcessStepState<NodeRuntimeConfig> state)
+    {
+        _config = state.State ?? new NodeRuntimeConfig();
+        return ValueTask.CompletedTask;
+    }
+
     /// <summary>
-    /// Executes the agentic node by streaming an LLM response for the configured goal
-    /// prompt, then emits <see cref="WorkflowNodeEvents.NodeCompleted"/> with the
-    /// accumulated output so the downstream router can forward it to the next step.
+    /// Executes the agentic node by streaming an LLM response for the resolved instruction, then emits
+    /// <see cref="WorkflowNodeEvents.NodeCompleted"/> carrying the accumulated output.
     /// </summary>
-    /// <param name="ctx">
-    /// Semantic Kernel step context used to emit process events back into the pipeline.
-    /// </param>
-    /// <param name="stepData">
-    /// Immutable payload carrying the run identifier, node identifier, optional goal
-    /// prompt, and any input forwarded from the preceding step.
-    /// </param>
-    /// <param name="kernel">
-    /// The configured <see cref="Kernel"/> instance, used to resolve the chat completion
-    /// service wired up during pipeline initialisation.
-    /// </param>
+    /// <param name="ctx">SK step context used to emit process events back into the pipeline.</param>
+    /// <param name="stepData">Run payload carrying the input forwarded from the preceding step.</param>
+    /// <param name="kernel">Configured kernel; resolves the chat-completion service.</param>
     [KernelFunction]
     public async Task ExecuteAsync(
         KernelProcessStepContext ctx,
@@ -42,7 +51,7 @@ public sealed class AgenticNodeStep : KernelProcessStep
         var chatService = kernel.GetRequiredService<IChatCompletionService>();
 
         var history = new ChatHistory();
-        history.AddSystemMessage(stepData.GoalPrompt ?? "Complete the assigned task.");
+        history.AddSystemMessage(ResolveInstruction(stepData));
         history.AddUserMessage(stepData.InputPayload ?? "Begin.");
 
         var fullText = new StringBuilder();
@@ -66,5 +75,21 @@ public sealed class AgenticNodeStep : KernelProcessStep
             Id   = WorkflowNodeEvents.NodeCompleted,
             Data = stepData with { OutputPayload = fullText.ToString() }
         });
+    }
+
+    /// <summary>
+    /// Resolves the operating instruction in priority order: the realized agent instruction, then the
+    /// node's plain-language goal (from state or the incoming payload), then a generic default.
+    /// </summary>
+    private string ResolveInstruction(WorkflowStepData stepData)
+    {
+        var realized = NodeConfigSerializer.ReadConfig<AgentNodeConfig>(_config.FunctionConfig);
+        if (realized is not null && !string.IsNullOrWhiteSpace(realized.Instruction))
+            return realized.Instruction;
+
+        if (!string.IsNullOrWhiteSpace(_config.GoalPrompt))
+            return _config.GoalPrompt!;
+
+        return stepData.GoalPrompt ?? DefaultInstruction;
     }
 }

@@ -11,6 +11,16 @@ using DBAIAzure.Core.Models;
 namespace DBAIAzure.Web.Components.WorkflowBuilder;
 
 /// <summary>
+/// Payload raised by WorkflowNodeRenderer when the user commits an inline label edit.
+/// Carries the node identifier and the before/after label values so the canvas can
+/// update the node model and record an undoable RenameLabelAction on the undo stack.
+/// </summary>
+public readonly record struct LabelCommitArgs(
+    string NodeId,
+    string PreviousLabel,
+    string NewLabel);
+
+/// <summary>
 /// Blazor.Diagrams NodeModel subclass that carries the domain WorkflowNode.
 /// Created by WorkflowCanvas on palette drop so the diagram layer can render and
 /// position the tile while the domain record remains the authoritative source of truth.
@@ -23,6 +33,14 @@ public sealed class WorkflowNodeModel : NodeModel
     /// Reset when a new edge is added to this node.
     /// </summary>
     public bool IsIsolated { get; set; }
+
+    /// <summary>
+    /// True while the user is actively editing this node's label via the inline input.
+    /// Set by WorkflowNodeRenderer on StartLabelEdit and cleared on CommitLabel/CancelLabel.
+    /// WorkflowCanvas reads this flag to suppress the Delete/Backspace keyboard shortcut so
+    /// typing in the input does not accidentally delete the node from the canvas.
+    /// </summary>
+    public bool IsLabelEditing { get; set; }
     /// <summary>
     /// Initialises the diagram node at the given canvas position and retains the
     /// domain record so that property panels and serialisation paths can read it
@@ -65,6 +83,19 @@ public sealed class WorkflowNodeModel : NodeModel
     /// <summary>Called by the renderer component on oncontextmenu to propagate the event to the canvas.</summary>
     public void RaiseContextMenuRequested(double clientX, double clientY) =>
         ContextMenuRequested?.Invoke(this, clientX, clientY);
+
+    /// <summary>
+    /// Raised by WorkflowNodeRenderer when the user commits an inline label edit.
+    /// WorkflowCanvas subscribes in OnNodeAdded (alongside DoubleClicked) to receive
+    /// before/after label values and record a RenameLabelAction on the undo stack.
+    /// The renderer cannot pass this via EventCallback because it is instantiated by
+    /// _diagram.RegisterComponent — it never appears directly in canvas razor markup.
+    /// </summary>
+    public event Action<string, string>? LabelCommitted;
+
+    /// <summary>Called by the renderer component inside CommitLabel() to signal a committed label change.</summary>
+    public void RaiseLabelCommitted(string previousLabel, string newLabel) =>
+        LabelCommitted?.Invoke(previousLabel, newLabel);
 }
 
 /// <summary>

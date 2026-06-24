@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DBAIAzure.Connectors;
+using DBAIAzure.Core.Configuration;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
 using DBAIAzure.Core.Services;
@@ -7,17 +8,32 @@ using DBAIAzure.Core.Validation;
 using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Storage;
 using DBAIAzure.Storage.Repositories;
+using DBAIAzure.Web.Hubs;
 using DBAIAzure.Web.Integrations.AzureDevOps;
 using DBAIAzure.Web.Integrations.SpecKit;
 using DBAIAzure.Web.Integrations.Teams;
+using DBAIAzure.Web.Rules;
 using DBAIAzure.Web.Services;
+using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.SemanticKernel;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.SemanticKernel.ChatCompletion;
 
 #pragma warning disable SKEXP0080
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ── Key Vault (T066): when KeyVault:Uri is set, overlay secrets from Azure Key Vault.
+// Credentials resolve via DefaultAzureCredential (managed identity in production, developer
+// credentials locally). Connector secrets referenced as "Connectors:<name>:<field>" in config
+// map transparently to Key Vault secrets with the same name (hyphens replace colons per KV rules).
+var keyVaultUri = builder.Configuration["KeyVault:Uri"];
+if (!string.IsNullOrWhiteSpace(keyVaultUri))
+{
+    var credential = new Azure.Identity.DefaultAzureCredential();
+    builder.Configuration.AddAzureKeyVault(new Uri(keyVaultUri), credential);
+}
 
 // ── Configuration ──────────────────────────────────────────────────────────────
 var anthropicKey   = builder.Configuration["Anthropic:ApiKey"]   ?? string.Empty;
@@ -195,6 +211,39 @@ builder.Services.AddSingleton<LlmConnectorTester>();
 builder.Services.AddSingleton<TeamsConnectorTester>();
 builder.Services.AddSingleton<IConnectorHealthChecker, ConnectorHealthChecker>();
 
+// ── Workflow run repository (FR-18, US1) ───────────────────────────────────────
+builder.Services.AddSingleton<IWorkflowRunRepository, EfWorkflowRunRepository>();
+
+// ── Workflow execution event observers (FR-21, US4) ───────────────────────────
+builder.Services.AddSingleton<IWorkflowObserver, SqlWorkflowObserver>();
+builder.Services.AddSingleton<IWorkflowObserver, SignalRWorkflowObserver>();
+builder.Services.AddSingleton<IWorkflowObserver, AzureMonitorWorkflowObserver>();
+
+// ── SK kernel filters (FR-21.2 token tracing, Article IX prompt hashing) ──────
+builder.Services.AddSingleton<WorkflowFunctionInvocationFilter>();
+builder.Services.AddSingleton<WorkflowPromptRenderFilter>();
+
+// ── WorkflowApprovalNotifier — Teams notification on HITL pause (FR-19, US2) ──
+// Registered as null-safe stub; TeamsWorkflowApprovalNotifier wired in US2 implementation phase.
+builder.Services.AddSingleton<IWorkflowApprovalNotifier, TeamsWorkflowApprovalNotifier>();
+
+// ── DoR validation framework (FR-24, US7) ─────────────────────────────────────
+builder.Services.Configure<DorRuleSettings>(builder.Configuration.GetSection(DorRuleSettings.SectionName));
+builder.Services.AddSingleton<IWorkflowReadinessRule, TriggerNodePresentRule>();
+builder.Services.AddSingleton<IWorkflowReadinessRule, AllNodesRealizedRule>();
+builder.Services.AddSingleton<IWorkflowReadinessRule, ConnectorsHealthyRule>();
+builder.Services.AddSingleton<IWorkflowReadinessRule, ApprovalNodesConfiguredRule>();
+builder.Services.AddSingleton<IWorkflowPreRunValidator, WorkflowPreRunValidator>();
+
+// ── Run retention background service (FR-18.4) ────────────────────────────────
+builder.Services.AddHostedService<WorkflowRunRetentionService>();
+
+// ── Startup rehydration of Paused runs (FR-18.5, T031) ───────────────────────
+builder.Services.AddHostedService<WorkflowRunRehydrationService>();
+
+// ── Application Insights (FR-21, US4) ─────────────────────────────────────────
+builder.Services.AddApplicationInsightsTelemetry(builder.Configuration);
+
 // ── Workflow structural validator (spec 004) ───────────────────────────────────
 builder.Services.AddSingleton<IWorkflowValidator, WorkflowValidator>();
 
@@ -212,6 +261,24 @@ builder.Services.AddSingleton<IWorkflowThumbnailGenerator, WorkflowThumbnailGene
 builder.Services.AddSingleton<IWorkflowCodeDiffService, WorkflowCodeDiffService>();
 // WorkflowBuilderService is scoped (one instance per session / per page).
 builder.Services.AddScoped<WorkflowBuilderService>();
+
+// ── ADO Telemetry Preflight (spec-009) ────────────────────────────────────────
+// Named HttpClient for the preflight service — reuses the ADO-scoped client pattern.
+builder.Services.AddHttpClient(nameof(DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryPreflightService),
+    client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddScoped<DBAIAzure.Web.Integrations.AzureDevOps.ManifestPathResolver>();
+builder.Services.AddScoped<DBAIAzure.Core.Interfaces.IAdoTelemetryPreflightService,
+    DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryPreflightService>();
+
+// ── Node Realization services (spec 007) ───────────────────────────────────────
+// Schema-bound LLM output for turning plain-language nodes into executable config (Article VII).
+// AnthropicChatCompletionService implements IStructuredCompletionService; registered at the app root
+// (the existing IStructuredCompletionService lives only inside the per-run pipeline kernel).
+builder.Services.AddSingleton<IStructuredCompletionService>(
+    new AnthropicChatCompletionService(anthropicKey, anthropicModel));
+// Scoped to mirror WorkflowBuilderService — one realization/readiness instance per session.
+builder.Services.AddScoped<IWorkflowRealizationService, WorkflowRealizationService>();
+builder.Services.AddScoped<IWorkflowReadinessService, WorkflowReadinessService>();
 
 // WorkflowExecutionOrchestrator: singleton that owns all visual-workflow run lifecycles.
 // Accepts a Func<Kernel> so it can re-read LLM credentials from the DB on each run (hot-reload).
@@ -245,10 +312,31 @@ builder.Services.AddSingleton<IWorkflowExecutionOrchestrator>(sp =>
         var kernelBuilder = Kernel.CreateBuilder();
         kernelBuilder.Services.AddSingleton<IChatCompletionService>(
             new AnthropicChatCompletionService(effectiveKey, effectiveModel));
-        return kernelBuilder.Build();
+
+        var kernel = kernelBuilder.Build();
+
+        // Register the LLM token-tracking filter so token counts appear in Run History.
+        var invocationFilter = sp.GetRequiredService<WorkflowFunctionInvocationFilter>();
+        kernel.FunctionInvocationFilters.Add(invocationFilter);
+
+        var promptFilter = sp.GetRequiredService<WorkflowPromptRenderFilter>();
+        kernel.PromptRenderFilters.Add(promptFilter);
+
+        return kernel;
     };
 
-    return new WorkflowExecutionOrchestrator(kernelFactory);
+    var runRepo          = sp.GetRequiredService<IWorkflowRunRepository>();
+    var approvalNotifier = sp.GetRequiredService<IWorkflowApprovalNotifier>();
+    var observers        = sp.GetServices<IWorkflowObserver>();
+
+    // T048: broadcast run status changes to SignalR so non-Blazor clients (e.g., external dashboards)
+    // receive real-time updates without polling. The Blazor Review Queue uses the in-process
+    // RunUpdated event; this callback serves cross-process / cross-server consumers.
+    var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<WorkflowRunHub>>();
+    Func<string, string, Task> broadcastUpdate = (runId, statusText) =>
+        hubContext.Clients.All.SendAsync("RunStatusChanged", runId, statusText);
+
+    return new WorkflowExecutionOrchestrator(kernelFactory, runRepo, approvalNotifier, observers, broadcastUpdate);
 });
 
 var app = builder.Build();
@@ -298,7 +386,75 @@ using (var scope = app.Services.CreateScope())
         CREATE INDEX IF NOT EXISTS IX_WorkflowDefinitions_OwnerId
             ON WorkflowDefinitions (OwnerId);
         """);
+
+    // Workflow builder run records and execution event audit log (FR-18, FR-21, US1, US4).
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS WorkflowBuilderRuns (
+            RunId         TEXT    NOT NULL PRIMARY KEY,
+            WorkflowId    TEXT    NOT NULL,
+            WorkflowName  TEXT    NOT NULL,
+            Status        INTEGER NOT NULL DEFAULT 0,
+            TriggeredBy   TEXT    NOT NULL DEFAULT '',
+            StartedAt     TEXT    NOT NULL,
+            SuspendedAt   TEXT,
+            ResumedAt     TEXT,
+            CompletedAt   TEXT,
+            FailureReason TEXT
+        );
+        CREATE INDEX IF NOT EXISTS IX_WorkflowBuilderRuns_WorkflowId
+            ON WorkflowBuilderRuns (WorkflowId);
+        CREATE INDEX IF NOT EXISTS IX_WorkflowBuilderRuns_Status
+            ON WorkflowBuilderRuns (Status);
+        """);
+
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS WorkflowExecutionEvents (
+            EventId         TEXT    NOT NULL PRIMARY KEY,
+            RunId           TEXT    NOT NULL,
+            NodeId          TEXT,
+            NodeLabel       TEXT,
+            EventType       INTEGER NOT NULL,
+            OccurredAt      TEXT    NOT NULL,
+            DurationMs      INTEGER,
+            Outcome         TEXT,
+            LlmModelName    TEXT,
+            LlmInputTokens  INTEGER,
+            LlmOutputTokens INTEGER,
+            FOREIGN KEY (RunId) REFERENCES WorkflowBuilderRuns(RunId) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS IX_WorkflowExecutionEvents_RunId
+            ON WorkflowExecutionEvents (RunId);
+        CREATE INDEX IF NOT EXISTS IX_WorkflowExecutionEvents_OccurredAt
+            ON WorkflowExecutionEvents (OccurredAt);
+        CREATE INDEX IF NOT EXISTS IX_WorkflowExecutionEvents_RunId_OccurredAt
+            ON WorkflowExecutionEvents (RunId, OccurredAt);
+        """);
 }
+
+// ── ADO Telemetry Preflight auto-run on startup (spec-009, T034) ──────────────
+// Fire-and-forget: runs in the background so startup is not blocked. Uses a scoped service
+// lifetime inside CreateScope to avoid capturing the root provider (captive dependency guard).
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    _ = Task.Run(async () =>
+    {
+        await using var scope = app.Services.CreateAsyncScope();
+        var preflight = scope.ServiceProvider.GetRequiredService<DBAIAzure.Core.Interfaces.IAdoTelemetryPreflightService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryPreflightService>>();
+        try
+        {
+            var result = await preflight.RunPreflightAsync(null, CancellationToken.None);
+            if (result.IsSuccess)
+                logger.LogInformation("ADO preflight succeeded on startup: mode={Mode}", result.Manifest?.Mode);
+            else
+                logger.LogWarning("ADO preflight failed on startup: {Error}", result.ErrorMessage);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "ADO preflight threw unexpectedly on startup — pipeline continues.");
+        }
+    });
+});
 
 if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error");
@@ -309,6 +465,7 @@ app.UseRouting();
 app.MapControllers();
 app.MapRazorPages();
 app.MapBlazorHub();
+app.MapHub<WorkflowRunHub>("/hubs/workflow-run");
 app.MapFallbackToPage("/_Host");
 
 app.Run();

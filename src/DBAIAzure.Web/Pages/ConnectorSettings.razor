@@ -1,0 +1,397 @@
+@* Connector configuration administration page — simple labeled fields per connector type (FR-05, US5). *@
+@page "/settings/connectors"
+@inject IConnectorConfigRepository ConfigRepository
+@inject IConnectorHealthChecker HealthChecker
+@inject IAdoTelemetryPreflightService AdoPreflightService
+@inject ILogger<ConnectorSettings> Logger
+@using DBAIAzure.Core.Interfaces
+@using DBAIAzure.Core.Models
+@using DBAIAzure.Core.Models.AdoTelemetry
+@using System.Text.Json
+
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-semibold text-gray-100">Connector Settings</h1>
+    <span class="text-sm text-gray-400">Configure credentials for each integration</span>
+</div>
+
+@if (_loading)
+{
+    <div class="text-gray-500 text-sm">Loading…</div>
+}
+else
+{
+    <div class="space-y-4">
+        @foreach (var entry in _entries)
+        {
+            <div class="rounded bg-gray-900 border border-gray-700 p-5">
+                <!-- ── Header ──────────────────────────────────────────────── -->
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm font-semibold text-gray-100">@ConnectorDisplayName(entry.ConnectorType)</span>
+                        @if (entry.IsConfigured)
+                        {
+                            <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-900 text-cyan-300">Configured</span>
+                        }
+                        else
+                        {
+                            <span class="text-xs px-2 py-0.5 rounded-full bg-amber-900 text-amber-300">Not configured</span>
+                        }
+                        @if (entry.TestResult is not null)
+                        {
+                            var badgeClass = entry.TestResult.IsSuccess
+                                ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300";
+                            <span class="text-xs px-2 py-0.5 rounded-full @badgeClass">
+                                @(entry.TestResult.IsSuccess ? "Healthy" : "Unhealthy")
+                            </span>
+                        }
+                    </div>
+                    <div class="flex gap-2">
+                        <button @onclick="() => ToggleEdit(entry)"
+                                class="px-3 py-1.5 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-100 transition-colors">
+                            @(entry.IsEditing ? "Cancel" : "Edit")
+                        </button>
+                        <button @onclick="() => RunHealthCheck(entry)"
+                                disabled="@(!entry.IsConfigured || entry.IsChecking)"
+                                class="px-3 py-1.5 text-xs rounded bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40
+                                       disabled:cursor-not-allowed text-white transition-colors">
+                            @(entry.IsChecking ? "Checking…" : "Check Health")
+                        </button>
+                        @if (entry.ConnectorType == ConnectorType.AzureDevOps)
+                        {
+                            <button @onclick="RunAdoPreflight"
+                                    disabled="@(!entry.IsConfigured || _isPreflightRunning)"
+                                    data-testid="ado-preflight-button"
+                                    class="px-3 py-1.5 text-xs rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40
+                                           disabled:cursor-not-allowed text-white transition-colors">
+                                @(_isPreflightRunning ? "Running…" : "Test Connection")
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <!-- ── Last health-check message ──────────────────────────── -->
+                @if (entry.TestResult is { Message: { Length: > 0 } msg })
+                {
+                    <p class="text-xs text-gray-500 mb-3">@msg · @FormatAge(entry.TestResult.TestedAt)</p>
+                }
+
+                <!-- ── ADO preflight result badge ─────────────────────────── -->
+                @if (entry.ConnectorType == ConnectorType.AzureDevOps && _preflightResult is not null)
+                {
+                    var preflightBadge = _preflightResult.IsSuccess
+                        ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300";
+                    <div class="flex items-center gap-2 mb-3">
+                        <span data-testid="ado-preflight-result"
+                              class="text-xs px-2 py-0.5 rounded-full @preflightBadge">
+                            @(_preflightResult.IsSuccess
+                                ? $"Preflight OK — {_preflightResult.Manifest?.Mode}"
+                                : $"Preflight failed: {_preflightResult.ErrorMessage}")
+                        </span>
+                    </div>
+                }
+
+                <!-- ── Edit form — simple named fields, no JSON ───────────── -->
+                @if (entry.IsEditing)
+                {
+                    <div class="mt-3 space-y-3 border-t border-gray-700 pt-3">
+
+                        @if (entry.ConnectorType == ConnectorType.AzureDevOps)
+                        {
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Organization URL</label>
+                                <input type="url" @bind="entry.DraftUrl"
+                                       placeholder="https://dev.azure.com/your-org"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Project Name</label>
+                                <input type="text" @bind="entry.DraftUsername"
+                                       placeholder="MyProject"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Personal Access Token</label>
+                                <input type="password" @bind="entry.DraftSecret"
+                                       placeholder="Leave blank to keep existing"
+                                       autocomplete="new-password" class="@InputClass" />
+                            </div>
+                        }
+                        else if (entry.ConnectorType == ConnectorType.LLM)
+                        {
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Provider URL</label>
+                                <input type="url" @bind="entry.DraftUrl"
+                                       placeholder="https://api.anthropic.com"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Model Name</label>
+                                <input type="text" @bind="entry.DraftUsername"
+                                       placeholder="claude-sonnet-4-6"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">API Key</label>
+                                <input type="password" @bind="entry.DraftSecret"
+                                       placeholder="Leave blank to keep existing"
+                                       autocomplete="new-password" class="@InputClass" />
+                            </div>
+                        }
+                        else if (entry.ConnectorType == ConnectorType.ServiceNow)
+                        {
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Instance URL</label>
+                                <input type="url" @bind="entry.DraftUrl"
+                                       placeholder="https://acme.service-now.com"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Username</label>
+                                <input type="text" @bind="entry.DraftUsername"
+                                       placeholder="svc-account"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Password</label>
+                                <input type="password" @bind="entry.DraftSecret"
+                                       placeholder="Leave blank to keep existing"
+                                       autocomplete="new-password" class="@InputClass" />
+                            </div>
+                        }
+                        else if (entry.ConnectorType == ConnectorType.Teams)
+                        {
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Webhook URL</label>
+                                <input type="password" @bind="entry.DraftSecret"
+                                       placeholder="https://acme.webhook.office.com/…  (leave blank to keep existing)"
+                                       autocomplete="new-password" class="@InputClass" />
+                            </div>
+                        }
+
+                        @if (!string.IsNullOrEmpty(entry.SaveError))
+                        {
+                            <p class="text-xs text-red-400">@entry.SaveError</p>
+                        }
+
+                        <div class="flex gap-2 pt-1">
+                            <button @onclick="() => SaveEntry(entry)"
+                                    disabled="@entry.IsSaving"
+                                    class="px-4 py-1.5 text-xs rounded bg-cyan-600 hover:bg-cyan-500
+                                           disabled:opacity-40 text-white transition-colors">
+                                @(entry.IsSaving ? "Saving…" : "Save")
+                            </button>
+                            <button @onclick="() => ToggleEdit(entry)"
+                                    class="px-3 py-1.5 text-xs rounded bg-gray-700 hover:bg-gray-600
+                                           text-gray-100 transition-colors">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private const string InputClass =
+        "w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-gray-100 " +
+        "placeholder-gray-600 focus:outline-none focus:border-cyan-500";
+
+    private bool _loading = true;
+    private List<ConnectorEntry> _entries = [];
+    private bool _isPreflightRunning;
+    private PreflightResult? _preflightResult;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var configs = await ConfigRepository.GetAllAsync();
+        _entries = configs
+            .OrderBy(c => c.Type.ToString())
+            .Select(c => new ConnectorEntry(c))
+            .ToList();
+        _loading = false;
+    }
+
+    private static void ToggleEdit(ConnectorEntry entry)
+    {
+        entry.IsEditing = !entry.IsEditing;
+        if (entry.IsEditing)
+        {
+            entry.LoadDraftFromJson();
+            entry.DraftSecret = string.Empty; // never pre-populate secrets (Article IX)
+            entry.SaveError   = string.Empty;
+        }
+    }
+
+    private async Task SaveEntry(ConnectorEntry entry)
+    {
+        entry.IsSaving  = true;
+        entry.SaveError = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            var (nonSecretJson, secretJson) = entry.SerializeToJson();
+
+            // null secretJson leaves the existing encrypted blob intact (Article IX).
+            await ConfigRepository.SaveAsync(entry.ConnectorType, nonSecretJson, secretJson);
+
+            entry.IsConfigured    = true;
+            entry.NonSecretConfig = nonSecretJson;
+            entry.IsEditing       = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to save connector config for {Type}", entry.ConnectorType);
+            entry.SaveError = $"Save failed: {ex.Message}";
+        }
+        finally
+        {
+            entry.IsSaving = false;
+        }
+    }
+
+    private async Task RunAdoPreflight()
+    {
+        _isPreflightRunning = true;
+        _preflightResult    = null;
+        StateHasChanged();
+        try
+        {
+            _preflightResult = await AdoPreflightService.RunPreflightAsync(null, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "ADO preflight threw unexpectedly from UI");
+            _preflightResult = PreflightResult.Fail($"Unexpected error: {ex.Message}");
+        }
+        finally
+        {
+            _isPreflightRunning = false;
+        }
+    }
+
+    private async Task RunHealthCheck(ConnectorEntry entry)
+    {
+        entry.IsChecking = true;
+        StateHasChanged();
+        try
+        {
+            entry.TestResult = await HealthChecker.TestAsync(entry.ConnectorType);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Health check threw for {Type}", entry.ConnectorType);
+        }
+        finally
+        {
+            entry.IsChecking = false;
+        }
+    }
+
+    private static string ConnectorDisplayName(ConnectorType type) => type switch
+    {
+        ConnectorType.AzureDevOps => "Azure DevOps",
+        ConnectorType.LLM         => "LLM (Anthropic)",
+        ConnectorType.ServiceNow  => "ServiceNow",
+        ConnectorType.Teams       => "Microsoft Teams",
+        _                         => type.ToString(),
+    };
+
+    private static string FormatAge(DateTimeOffset at)
+    {
+        var age = DateTimeOffset.UtcNow - at;
+        if (age.TotalMinutes < 1) return "just now";
+        if (age.TotalHours   < 1) return $"{(int)age.TotalMinutes}m ago";
+        if (age.TotalDays    < 1) return $"{(int)age.TotalHours}h ago";
+        return $"{(int)age.TotalDays}d ago";
+    }
+
+    /// <summary>
+    /// Mutable view-model for one connector card. Exposes simple named draft fields;
+    /// JSON serialization/deserialization is encapsulated here, invisible to the template.
+    /// </summary>
+    private sealed class ConnectorEntry
+    {
+        public ConnectorType        ConnectorType   { get; }
+        public bool                 IsConfigured    { get; set; }
+        public string?              NonSecretConfig { get; set; }
+        public ConnectorTestResult? TestResult      { get; set; }
+
+        // UI state
+        public bool   IsEditing  { get; set; }
+        public bool   IsSaving   { get; set; }
+        public bool   IsChecking { get; set; }
+        public string SaveError  { get; set; } = string.Empty;
+
+        // Named draft fields — no JSON in the UI.
+        // DraftUrl      = Organization URL | Provider URL | Instance URL  | (unused for Teams)
+        // DraftUsername = Project Name     | Model Name  | Username       | (unused for Teams)
+        // DraftSecret   = PAT              | API Key     | Password       | Webhook URL
+        public string DraftUrl      { get; set; } = string.Empty;
+        public string DraftUsername { get; set; } = string.Empty;
+        public string DraftSecret   { get; set; } = string.Empty;
+
+        public ConnectorEntry(ConnectorConfig config)
+        {
+            ConnectorType   = config.Type;
+            IsConfigured    = config.IsConfigured;
+            NonSecretConfig = config.NonSecretConfig;
+            TestResult      = config.LastTestResult;
+        }
+
+        /// <summary>Populates DraftUrl and DraftUsername from the stored NonSecretConfig JSON.</summary>
+        public void LoadDraftFromJson()
+        {
+            DraftUrl = DraftUsername = string.Empty;
+            if (string.IsNullOrWhiteSpace(NonSecretConfig)) return;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(NonSecretConfig);
+                var root = doc.RootElement;
+                (DraftUrl, DraftUsername) = ConnectorType switch
+                {
+                    ConnectorType.AzureDevOps => (Str(root, "organizationUrl"), Str(root, "projectName")),
+                    ConnectorType.LLM         => (Str(root, "providerEndpoint"), Str(root, "modelName")),
+                    ConnectorType.ServiceNow  => (Str(root, "instanceUrl"),      Str(root, "username")),
+                    _                         => (string.Empty, string.Empty),
+                };
+
+                static string Str(JsonElement el, string key) =>
+                    el.TryGetProperty(key, out var p) ? (p.GetString() ?? string.Empty) : string.Empty;
+            }
+            catch { /* malformed — start blank */ }
+        }
+
+        /// <summary>
+        /// Returns the (nonSecretJson, secretJson) pair ready for <see cref="IConnectorConfigRepository.SaveAsync"/>.
+        /// secretJson is null when DraftSecret is blank, which preserves the existing encrypted secret.
+        /// </summary>
+        public (string? nonSecretJson, string? secretJson) SerializeToJson()
+        {
+            var nonSecret = ConnectorType switch
+            {
+                ConnectorType.AzureDevOps =>
+                    JsonSerializer.Serialize(new { organizationUrl = DraftUrl, projectName = DraftUsername }),
+                ConnectorType.LLM =>
+                    JsonSerializer.Serialize(new { providerEndpoint = DraftUrl, modelName = DraftUsername }),
+                ConnectorType.ServiceNow =>
+                    JsonSerializer.Serialize(new { instanceUrl = DraftUrl, username = DraftUsername }),
+                _ => null,
+            };
+
+            var secret = string.IsNullOrWhiteSpace(DraftSecret) ? null : ConnectorType switch
+            {
+                ConnectorType.AzureDevOps => JsonSerializer.Serialize(new { personalAccessToken = DraftSecret }),
+                ConnectorType.LLM         => JsonSerializer.Serialize(new { apiKey = DraftSecret }),
+                ConnectorType.ServiceNow  => JsonSerializer.Serialize(new { password = DraftSecret }),
+                ConnectorType.Teams       => JsonSerializer.Serialize(new { webhookUrl = DraftSecret }),
+                _                         => null,
+            };
+
+            return (nonSecret, secret);
+        }
+    }
+}

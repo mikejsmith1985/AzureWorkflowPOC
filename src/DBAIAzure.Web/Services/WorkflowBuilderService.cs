@@ -1,6 +1,9 @@
 // Manages save, load, duplicate, and auto-save for the Visual Workflow Builder.
 // Single service instance shared across the builder page and toolbar.
 
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using DBAIAzure.Core.Exceptions;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
@@ -17,15 +20,25 @@ namespace DBAIAzure.Web.Services;
 /// </summary>
 public sealed class WorkflowBuilderService : IDisposable
 {
-    private static readonly TimeSpan AutoSaveInterval = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan DefaultAutoSaveInterval = TimeSpan.FromSeconds(60);
+
+    // Web-defaults JSON used only to build the change-detection signature (camelCase, matches the
+    // repository's blob style). Never persisted — purely an in-memory fingerprint of the content.
+    private static readonly JsonSerializerOptions SignatureJsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IWorkflowRepository _repository;
     private readonly IWorkflowThumbnailGenerator _thumbnailGenerator;
     private readonly IWorkflowValidator _validator;
     private readonly ILogger<WorkflowBuilderService> _logger;
+    private readonly TimeSpan _autoSaveInterval;
 
     private System.Threading.Timer? _autoSaveTimer;
     private Func<Task<WorkflowDefinition?>>? _autoSaveWorkflowGetter;
+
+    // Fingerprint of the content last persisted by THIS service instance. The auto-save timer skips
+    // a save when the current content matches this, so a stale circuit (a tab Blazor has retained
+    // after disconnect) cannot re-save its old snapshot on top of a newer save from another circuit.
+    private string? _lastSavedSignature;
 
     /// <summary>UTC instant of the most recent successful save; null if never saved.</summary>
     public DateTimeOffset? LastSavedAt { get; private set; }
@@ -36,16 +49,22 @@ public sealed class WorkflowBuilderService : IDisposable
     /// <summary>
     /// Initialises the service with the workflow repository, thumbnail generator, validator, and logger.
     /// </summary>
+    /// <param name="autoSaveInterval">
+    /// How often auto-save fires. Defaults to 60 seconds; overridable so tests can exercise the
+    /// timer behaviour without waiting a real minute.
+    /// </param>
     public WorkflowBuilderService(
         IWorkflowRepository repository,
         IWorkflowThumbnailGenerator thumbnailGenerator,
         IWorkflowValidator validator,
-        ILogger<WorkflowBuilderService> logger)
+        ILogger<WorkflowBuilderService> logger,
+        TimeSpan? autoSaveInterval = null)
     {
         _repository         = repository;
         _thumbnailGenerator = thumbnailGenerator;
         _validator          = validator;
         _logger             = logger;
+        _autoSaveInterval   = autoSaveInterval ?? DefaultAutoSaveInterval;
     }
 
     /// <summary>
@@ -75,6 +94,8 @@ public sealed class WorkflowBuilderService : IDisposable
 
         await _repository.SaveAsync(toSave, cancellationToken).ConfigureAwait(false);
 
+        // Remember what we just persisted so the auto-save timer can detect "nothing changed".
+        _lastSavedSignature = ComputeContentSignature(toSave);
         LastSavedAt = utcNow;
         WorkflowSaved?.Invoke(utcNow);
         _logger.LogInformation("Workflow '{Name}' saved at {SavedAt}", toSave.Name, utcNow);
@@ -137,15 +158,25 @@ public sealed class WorkflowBuilderService : IDisposable
     /// Starts the 60-second auto-save debounce.
     /// <paramref name="workflowGetter"/> is called when the timer fires to obtain the current state.
     /// </summary>
-    public void StartAutoSave(Func<Task<WorkflowDefinition?>> workflowGetter)
+    /// <param name="initialWorkflow">
+    /// The workflow as just loaded. Seeds the change-detection baseline so an untouched, freshly
+    /// loaded workflow is never re-saved (which would needlessly bump its LastModifiedAt and let an
+    /// idle tab win the "most recent" resume).
+    /// </param>
+    public void StartAutoSave(
+        Func<Task<WorkflowDefinition?>> workflowGetter,
+        WorkflowDefinition? initialWorkflow = null)
     {
         _autoSaveWorkflowGetter = workflowGetter;
+        if (initialWorkflow is not null)
+            _lastSavedSignature = ComputeContentSignature(initialWorkflow);
+
         _autoSaveTimer?.Dispose();
         _autoSaveTimer = new System.Threading.Timer(
             OnAutoSaveTimerElapsed,
             state: null,
-            dueTime: AutoSaveInterval,
-            period: AutoSaveInterval);
+            dueTime: _autoSaveInterval,
+            period: _autoSaveInterval);
     }
 
     /// <summary>Stops the auto-save timer without triggering a final save.</summary>
@@ -165,14 +196,97 @@ public sealed class WorkflowBuilderService : IDisposable
             try
             {
                 var workflow = await _autoSaveWorkflowGetter().ConfigureAwait(false);
-                if (workflow is not null)
-                    await SaveAsync(workflow).ConfigureAwait(false);
+                if (workflow is null)
+                    return;
+
+                // Skip when nothing has changed since the last persist. This is the guard that stops
+                // a stale (disconnected-but-retained) circuit from re-saving its old snapshot and
+                // clobbering a newer save made from another circuit.
+                if (ComputeContentSignature(workflow) == _lastSavedSignature)
+                    return;
+
+                await SaveAsync(workflow).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Auto-save failed.");
             }
         });
+    }
+
+    /// <summary>
+    /// Builds a stable fingerprint of the fields a save would meaningfully change — name, topology,
+    /// settings, generated code, and chat history. Deliberately excludes <c>LastModifiedAt</c> and
+    /// <c>ThumbnailSvg</c>, which change on every save and would otherwise defeat change detection.
+    /// </summary>
+    private static string ComputeContentSignature(WorkflowDefinition workflow)
+    {
+        var payload = JsonSerializer.Serialize(
+            new
+            {
+                workflow.Name,
+                workflow.Nodes,
+                workflow.Edges,
+                workflow.Settings,
+                workflow.GeneratedCode,
+                workflow.ChatHistory,
+            },
+            SignatureJsonOptions);
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
+        return Convert.ToHexString(hash);
+    }
+
+    /// <summary>
+    /// Converts a <see cref="WorkflowGenerationResult"/> into canvas nodes and edges
+    /// and replaces the existing graph in <paramref name="workflow"/>, returning the updated
+    /// definition. The caller must save the returned definition to persist it.
+    /// Only called when <see cref="WorkflowGenerationResult.ClarifyingQuestion"/> is null.
+    /// </summary>
+    public WorkflowDefinition ApplyGenerationResult(
+        WorkflowDefinition workflow,
+        WorkflowGenerationResult result)
+    {
+        var nodeIdMap = new Dictionary<string, string>();
+        var nodes     = new List<WorkflowNode>();
+
+        for (var idx = 0; idx < result.Nodes.Count; idx++)
+        {
+            var gn       = result.Nodes[idx];
+            var nodeType = Enum.TryParse<WorkflowNodeType>(gn.NodeType, ignoreCase: true, out var parsed)
+                ? parsed
+                : WorkflowNodeType.AgenticReason;
+
+            // Use the typed factory to get correct port topology per node type.
+            var label      = string.IsNullOrWhiteSpace(gn.Label) ? nodeType.ToString() : gn.Label;
+            var node       = WorkflowNode.CreateNew(nodeType, label);
+            var positioned = node with
+            {
+                GoalPrompt = gn.GoalPrompt,
+                PositionX  = 120.0,             // vertical stack; UI re-positions on first open
+                PositionY  = 80.0 + idx * 110,
+            };
+
+            nodeIdMap[gn.Id] = positioned.Id;
+            nodes.Add(positioned);
+        }
+
+        var edges = result.Edges
+            .Where(e => nodeIdMap.ContainsKey(e.SourceNodeId) && nodeIdMap.ContainsKey(e.TargetNodeId))
+            .Select(e =>
+            {
+                var src = nodes.First(n => n.Id == nodeIdMap[e.SourceNodeId]);
+                var tgt = nodes.First(n => n.Id == nodeIdMap[e.TargetNodeId]);
+
+                var srcPort = src.OutputPorts.FirstOrDefault()?.Id ?? "out";
+                var tgtPort = tgt.InputPorts.FirstOrDefault()?.Id  ?? "in";
+
+                return WorkflowEdge.CreateNew(src.Id, srcPort, tgt.Id, tgtPort, "→");
+            })
+            .ToList()
+            .AsReadOnly();
+
+        return workflow with { Nodes = nodes.AsReadOnly(), Edges = edges };
     }
 
     /// <inheritdoc/>

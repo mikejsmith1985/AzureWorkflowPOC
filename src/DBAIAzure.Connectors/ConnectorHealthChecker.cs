@@ -1,6 +1,7 @@
 // Orchestrates functional tests across all four pipeline connectors (IConnectorHealthChecker).
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("DBAIAzure.Tests")]
@@ -19,6 +20,13 @@ public sealed class ConnectorHealthChecker : IConnectorHealthChecker
     private readonly IReadOnlyDictionary<ConnectorType, Func<CancellationToken, Task<ConnectorTestResult>>> _testers;
     private readonly IConnectorConfigRepository _configRepo;
     private readonly ILogger<ConnectorHealthChecker> _logger;
+    private readonly IMemoryCache? _cache;
+
+    /// <summary>
+    /// Results are cached for this duration so rapid UI-driven checks (e.g., modal polling)
+    /// do not each trigger a live HTTP call. Stays well under typical connector rate limits.
+    /// </summary>
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(60);
 
     /// <summary>Production constructor — wires the four concrete connector testers.</summary>
     public ConnectorHealthChecker(
@@ -27,13 +35,15 @@ public sealed class ConnectorHealthChecker : IConnectorHealthChecker
         LlmConnectorTester llmTester,
         TeamsConnectorTester teamsTester,
         IConnectorConfigRepository configRepo,
-        ILogger<ConnectorHealthChecker> logger)
+        ILogger<ConnectorHealthChecker> logger,
+        IMemoryCache? cache = null)
     {
         _configRepo = configRepo;
-        _logger = logger;
+        _logger     = logger;
+        _cache      = cache;
         _testers = new Dictionary<ConnectorType, Func<CancellationToken, Task<ConnectorTestResult>>>
         {
-            [ConnectorType.ServiceNow] = snowClient.TestConnectionAsync,
+            [ConnectorType.ServiceNow]  = snowClient.TestConnectionAsync,
             [ConnectorType.AzureDevOps] = adoTester.TestConnectionAsync,
             [ConnectorType.LLM]         = llmTester.TestConnectionAsync,
             [ConnectorType.Teams]       = teamsTester.TestConnectionAsync,
@@ -47,11 +57,13 @@ public sealed class ConnectorHealthChecker : IConnectorHealthChecker
     internal ConnectorHealthChecker(
         IReadOnlyDictionary<ConnectorType, Func<CancellationToken, Task<ConnectorTestResult>>> testers,
         IConnectorConfigRepository configRepo,
-        ILogger<ConnectorHealthChecker> logger)
+        ILogger<ConnectorHealthChecker> logger,
+        IMemoryCache? cache = null)
     {
-        _testers = testers;
+        _testers    = testers;
         _configRepo = configRepo;
-        _logger = logger;
+        _logger     = logger;
+        _cache      = cache;
     }
 
     /// <inheritdoc/>
@@ -59,6 +71,12 @@ public sealed class ConnectorHealthChecker : IConnectorHealthChecker
     {
         if (!_testers.TryGetValue(type, out var tester))
             throw new ArgumentOutOfRangeException(nameof(type), type, "No tester registered for this connector type.");
+
+        // Return the cached result when called again within 60 seconds so rapid UI polling
+        // (e.g., settings modal) does not each trigger a live HTTP call (T062, T065).
+        var cacheKey = $"health:{type}";
+        if (_cache is not null && _cache.TryGetValue(cacheKey, out ConnectorTestResult? cached) && cached is not null)
+            return cached;
 
         ConnectorTestResult result;
         try
@@ -84,6 +102,9 @@ public sealed class ConnectorHealthChecker : IConnectorHealthChecker
             // Persistence failure does not fail the test itself.
             _logger.LogWarning(ex, "Failed to persist test result for {ConnectorType}", type);
         }
+
+        // Store in cache so subsequent calls within 60 seconds skip the live HTTP round-trip.
+        _cache?.Set(cacheKey, result, CacheDuration);
 
         return result;
     }

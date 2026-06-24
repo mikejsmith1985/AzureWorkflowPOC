@@ -1,14 +1,101 @@
 // Tests for WorkflowBuilderService contract:
 // - auto-save debounce enforces 60-second minimum interval
+// - auto-save skips re-saving unchanged content (stale-circuit clobber regression)
 // - duplicate appends " (copy)" to the workflow name
 // - delete returns false for an unknown workflow id
+using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Web.Services;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace DBAIAzure.Tests;
 
 public class WorkflowBuilderServiceTests
 {
+    // ── Auto-save change-detection (stale-circuit clobber regression) ────────────
+
+    [Fact]
+    public async Task AutoSave_DoesNotResave_WhenContentUnchanged()
+    {
+        // Regression: a disconnected-but-retained Blazor circuit kept re-saving its stale snapshot
+        // every interval, clobbering newer saves from another circuit. With change-detection, an
+        // untouched workflow must never be auto-saved again.
+        var repository = new CountingRepository();
+        var service = new WorkflowBuilderService(
+            repository, new NullThumbnailGenerator(), new AlwaysValidValidator(),
+            NullLogger<WorkflowBuilderService>.Instance, TimeSpan.FromMilliseconds(50));
+
+        var workflow = WorkflowDefinition.CreateNew("Stable Workflow", "owner1");
+        service.StartAutoSave(() => Task.FromResult<WorkflowDefinition?>(workflow), workflow);
+        await Task.Delay(350);  // ~7 timer ticks
+        service.StopAutoSave();
+
+        Assert.Equal(0, repository.SaveCount);
+    }
+
+    [Fact]
+    public async Task AutoSave_PersistsOnEdit_ThenStopsResaving()
+    {
+        // A genuine edit must be auto-saved, but once persisted the same content must not be
+        // saved again on later ticks (otherwise an idle tab keeps winning the "most recent" sort).
+        var repository = new CountingRepository();
+        var service = new WorkflowBuilderService(
+            repository, new NullThumbnailGenerator(), new AlwaysValidValidator(),
+            NullLogger<WorkflowBuilderService>.Instance, TimeSpan.FromMilliseconds(50));
+
+        var current = WorkflowDefinition.CreateNew("Edited Workflow", "owner1");
+        service.StartAutoSave(() => Task.FromResult<WorkflowDefinition?>(current), current);
+
+        await Task.Delay(200);
+        Assert.Equal(0, repository.SaveCount);            // baseline unchanged → no save yet
+
+        current = current with { Name = "Edited Workflow v2" };  // simulate a user edit
+        await Task.Delay(400);
+        var savesAfterEdit = repository.SaveCount;
+        Assert.True(savesAfterEdit >= 1, $"expected at least one save after the edit, got {savesAfterEdit}");
+
+        await Task.Delay(300);                            // further ticks, no further changes
+        service.StopAutoSave();
+        Assert.Equal(savesAfterEdit, repository.SaveCount);
+    }
+
+    // ── Hand-rolled fakes (no I/O; keeps the test in the unit layer) ─────────────
+
+    private sealed class CountingRepository : IWorkflowRepository
+    {
+        private int _saveCount;
+        public int SaveCount => _saveCount;
+
+        public Task<Guid> SaveAsync(WorkflowDefinition workflow, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref _saveCount);
+            return Task.FromResult(workflow.Id);
+        }
+
+        public Task<WorkflowDefinition?> GetAsync(Guid id, string ownerId, CancellationToken ct = default)
+            => Task.FromResult<WorkflowDefinition?>(null);
+
+        public Task<IReadOnlyList<WorkflowDefinition>> ListByOwnerAsync(string ownerId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<WorkflowDefinition>>(Array.Empty<WorkflowDefinition>());
+
+        public Task<bool> DeleteAsync(Guid id, string ownerId, CancellationToken ct = default)
+            => Task.FromResult(false);
+
+        public Task<bool> ExistsAsync(string name, string ownerId, CancellationToken ct = default)
+            => Task.FromResult(false);
+    }
+
+    private sealed class NullThumbnailGenerator : IWorkflowThumbnailGenerator
+    {
+        public string? GenerateSvg(WorkflowDefinition workflow) => null;
+    }
+
+    private sealed class AlwaysValidValidator : IWorkflowValidator
+    {
+        public IReadOnlyList<string> Validate(WorkflowDefinition definition) => Array.Empty<string>();
+    }
+
     // ── Contract tests via domain logic ─────────────────────────────────────────
 
     [Fact]

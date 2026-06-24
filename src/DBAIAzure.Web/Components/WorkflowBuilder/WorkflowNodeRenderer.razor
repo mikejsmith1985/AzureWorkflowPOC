@@ -6,14 +6,17 @@
      @ondblclick="OnDoubleClick"
      @oncontextmenu:preventDefault
      @oncontextmenu="OnContextMenu"
-     title="Double-click to configure"
-     aria-label="@Node.WorkflowNode.Label — double-click to configure">
+     @onkeydown="OnNodeKeyDown"
+     tabindex="0"
+     title="@(_isEditingLabel ? string.Empty : "Double-click label to rename; double-click body to configure")"
+     aria-label="@Node.WorkflowNode.Label — double-click label to rename, double-click body to configure">
 
     @* Amber badge + "Set up →" label when the node has not been configured yet *@
     @if (!Node.WorkflowNode.IsConfigured)
     {
         <div class="absolute -top-2 -right-2 w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center"
              title="This node needs configuration"
+             data-testid="node-unconfigured-badge"
              aria-label="Node requires configuration">
             <span class="text-white text-xs font-bold leading-none">!</span>
         </div>
@@ -21,6 +24,17 @@
         <div class="absolute -bottom-5 right-0 text-xs text-amber-400 font-medium whitespace-nowrap pointer-events-none select-none"
              aria-label="Double-click to set up this step">
             Set up →
+        </div>
+    }
+
+    @* Green "realized" check — shown once a node has accepted production-ready config (spec 007).
+       Trigger nodes are entry markers and are not surfaced as realized here. *@
+    @if (Node.WorkflowNode.IsConfigured && Node.WorkflowNode.NodeType != WorkflowNodeType.Trigger)
+    {
+        <div class="absolute -top-2 -right-2 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center"
+             title="This step has been made production-ready"
+             aria-label="Step is realized and production-ready">
+            <span class="text-white text-xs font-bold leading-none">✓</span>
         </div>
     }
 
@@ -34,11 +48,29 @@
         </div>
     }
 
-    @* Node type icon + label header *@
+    @* Node type icon + label header (label span double-click enters inline edit; stopPropagation prevents config panel open) *@
     <div class="@GetHeaderClass() rounded-t-md px-3 py-2 flex items-center gap-2">
         <span class="text-lg" role="img" aria-label="@Node.WorkflowNode.NodeType.ToString()">@GetIcon()</span>
-        <div class="flex flex-col min-w-0">
-            <span class="text-white text-sm font-semibold truncate max-w-[110px]">@Node.WorkflowNode.Label</span>
+        <div class="flex flex-col min-w-0" @ondblclick:stopPropagation="true">
+            @if (_isEditingLabel)
+            {
+                <input class="node-label-input text-white text-sm font-semibold bg-transparent border-b border-white/60 outline-none max-w-[110px] min-w-0"
+                       value="@_labelBuffer"
+                       @oninput="OnLabelInput"
+                       @onkeydown="OnLabelKeyDown"
+                       @onblur="CommitLabel"
+                       @ref="_labelInputRef"
+                       aria-label="Edit node label"
+                       maxlength="50" />
+            }
+            else
+            {
+                <span class="node-label-text text-white text-sm font-semibold truncate max-w-[110px]"
+                      data-testid="node-label"
+                      @ondblclick="StartLabelEdit"
+                      tabindex="0"
+                      aria-label="@DisplayLabel() — double-click to rename">@DisplayLabel()</span>
+            }
             @if (Node.WorkflowNode.NodeType == WorkflowNodeType.Trigger)
             {
                 <span class="text-xs text-emerald-200 mt-0.5">Start here</span>
@@ -91,8 +123,95 @@
     [Parameter]
     public NodeExecutionState? ExecutionState { get; set; }
 
+    // ── Inline label editing state ───────────────────────────────────────────────
+
+    private bool            _isEditingLabel;
+    private string          _labelBuffer             = string.Empty;
+    private string          _previousLabelAtEditStart = string.Empty;
+    private ElementReference _labelInputRef;
+
+    // ── Event handlers ───────────────────────────────────────────────────────────
+
     private void OnDoubleClick(MouseEventArgs _) => Node.RaiseDoubleClicked();
     private void OnContextMenu(MouseEventArgs e) => Node.RaiseContextMenuRequested(e.ClientX, e.ClientY);
+
+    /// <summary>Keyboard-only entry point: Enter on a focused node activates inline label editing.</summary>
+    private void OnNodeKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_isEditingLabel)
+            StartLabelEdit();
+    }
+
+    // ── Label editing methods ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Enters inline label edit mode. Captures _previousLabelAtEditStart so CommitLabel()
+    /// can raise the correct before/after pair even if the node record changes externally.
+    /// Focus is deferred to the next Blazor render cycle so the input element exists in the DOM.
+    /// </summary>
+    private void StartLabelEdit()
+    {
+        _previousLabelAtEditStart = Node.WorkflowNode.Label;
+        _labelBuffer              = _previousLabelAtEditStart;
+        _isEditingLabel           = true;
+        Node.IsLabelEditing       = true;
+        InvokeAsync(async () =>
+        {
+            await Task.Yield();  // let Blazor render the input element
+            try { await _labelInputRef.FocusAsync(); }
+            catch { /* JS not ready — silently skip auto-focus */ }
+        });
+    }
+
+    /// <summary>Updates _labelBuffer as the user types; never touches Node.WorkflowNode.Label.</summary>
+    private void OnLabelInput(ChangeEventArgs e) =>
+        _labelBuffer = e.Value?.ToString() ?? string.Empty;
+
+    /// <summary>Handles Enter (commit) and Escape (cancel) in the label input.</summary>
+    private void OnLabelKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")  CommitLabel();
+        else if (e.Key == "Escape") CancelLabel();
+    }
+
+    /// <summary>
+    /// Commits the edited label. The double-fire guard (Enter-keydown + immediate blur)
+    /// ensures only the first invocation fires RaiseLabelCommitted.
+    /// </summary>
+    private void CommitLabel()
+    {
+        if (!_isEditingLabel) return;  // double-fire guard
+        _isEditingLabel     = false;
+        Node.IsLabelEditing = false;
+        Node.RaiseLabelCommitted(_previousLabelAtEditStart, _labelBuffer);
+    }
+
+    /// <summary>Cancels the edit and restores the display span without firing a commit event.</summary>
+    private void CancelLabel()
+    {
+        _isEditingLabel     = false;
+        Node.IsLabelEditing = false;
+    }
+
+    /// <summary>
+    /// Returns the node's current label, or a type-appropriate fallback when the label is empty.
+    /// The fallback is display-only — an empty string is stored in WorkflowNode.Label so that
+    /// re-opening edit mode shows an empty input (the placeholder is never pre-filled).
+    /// </summary>
+    private string DisplayLabel() =>
+        string.IsNullOrEmpty(Node.WorkflowNode.Label) ? GetFallbackLabel() : Node.WorkflowNode.Label;
+
+    private string GetFallbackLabel() => Node.WorkflowNode.NodeType switch
+    {
+        WorkflowNodeType.Trigger           => "Start / Trigger",
+        WorkflowNodeType.AgenticReason     => "AI Agent",
+        WorkflowNodeType.HumanApproval     => "Ask a Person",
+        WorkflowNodeType.FunctionRoute     => "Smart Branch",
+        WorkflowNodeType.FunctionTransform => "Transform",
+        WorkflowNodeType.FunctionNotify    => "Notify",
+        WorkflowNodeType.FunctionData      => "Save / Load",
+        _                                  => "Untitled node",
+    };
 
     private string GetBorderClass() => Node.WorkflowNode.NodeType switch
     {
