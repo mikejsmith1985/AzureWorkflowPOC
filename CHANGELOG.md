@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — ADO preflight fails for custom inherited process templates
+
+`DetectProcessTypeAsync` only matched the two built-in Agile and Scrum GUIDs. Projects using a
+custom inherited process (e.g. a process named "Agentic" that inherits from Agile) have a unique
+GUID that doesn't match either built-in, causing a spurious "unsupported process type" error even
+though the process is perfectly compatible.
+
+Fix: when the project's `templateTypeId` is not a known built-in GUID, the service now calls
+`_apis/process/processes/{typeId}` to read `parentProcessTypeId`. If the parent matches Agile or
+Scrum, the project is treated accordingly. Covers the most common case — custom inherited processes
+created in any ADO organisation.
+
 ### Fixed — ADO preflight process-type detection returns 404
 
 `DetectProcessTypeAsync` was calling `_apis/work/process/configuration` to read the project's

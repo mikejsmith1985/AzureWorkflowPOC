@@ -175,6 +175,42 @@ public sealed class AdoTelemetryPreflightServiceTests
         Assert.Contains("unsupported process type", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task RunPreflightAsync_WhenProcessIsCustomInheritedFromAgile_DetectsAgile()
+    {
+        const string customGuid  = "b8a3a935-7e91-48b8-a94c-606d37c3e9f2";
+        const string agileParent = "6b724908-ef14-45cf-84f8-768b5384da45";
+        var handler = new FakeHttpHandler();
+        handler.AddResponse(
+            url => url.Contains("/_apis/projects/") && url.Contains("includeCapabilities=true"),
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    $"{{\"capabilities\":{{\"processTemplate\":{{\"templateTypeId\":\"{customGuid}\"}}}}}}",
+                    Encoding.UTF8, "application/json"),
+            });
+        // Service resolves inherited parent via _apis/process/processes/{guid}
+        handler.AddResponse(
+            url => url.Contains($"/_apis/process/processes/{customGuid}"),
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    $"{{\"id\":\"{customGuid}\",\"type\":\"inherited\",\"parentProcessTypeId\":\"{agileParent}\"}}",
+                    Encoding.UTF8, "application/json"),
+            });
+        handler.AddDefaultAdminOkResponse();
+        handler.AddDefaultFieldExistsResponse(HttpStatusCode.NotFound);
+        handler.AddDefaultFieldCreateResponse();
+        handler.AddDefaultFieldAttachResponse();
+        handler.AddDefaultManifestResponse();
+
+        var service = BuildService(handler);
+        var result  = await service.RunPreflightAsync(MinimalFieldConfig());
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(AdoProcessType.Agile, ((BootstrapManifest)result.Manifest!).ProcessType);
+    }
+
     // ── T015: Bootstrap field operations ─────────────────────────────────────────
 
     [Fact]
