@@ -1,4 +1,4 @@
-@* Connector configuration administration page — list, edit, and health-check each connector (FR-05, US5). *@
+@* Connector configuration administration page — simple labeled fields per connector type (FR-05, US5). *@
 @page "/settings/connectors"
 @inject IConnectorConfigRepository ConfigRepository
 @inject IConnectorHealthChecker HealthChecker
@@ -7,6 +7,7 @@
 @using DBAIAzure.Core.Interfaces
 @using DBAIAzure.Core.Models
 @using DBAIAzure.Core.Models.AdoTelemetry
+@using System.Text.Json
 
 <div class="flex items-center justify-between mb-6">
     <h1 class="text-xl font-semibold text-gray-100">Connector Settings</h1>
@@ -26,7 +27,7 @@ else
                 <!-- ── Header ──────────────────────────────────────────────── -->
                 <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center gap-3">
-                        <span class="text-sm font-semibold text-gray-100">@entry.ConnectorType</span>
+                        <span class="text-sm font-semibold text-gray-100">@ConnectorDisplayName(entry.ConnectorType)</span>
                         @if (entry.IsConfigured)
                         {
                             <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-900 text-cyan-300">Configured</span>
@@ -68,18 +69,17 @@ else
                     </div>
                 </div>
 
-                <!-- ── Last test message ──────────────────────────────────── -->
+                <!-- ── Last health-check message ──────────────────────────── -->
                 @if (entry.TestResult is { Message: { Length: > 0 } msg })
                 {
                     <p class="text-xs text-gray-500 mb-3">@msg · @FormatAge(entry.TestResult.TestedAt)</p>
                 }
 
-                <!-- ── ADO preflight result badge ────────────────────────── -->
+                <!-- ── ADO preflight result badge ─────────────────────────── -->
                 @if (entry.ConnectorType == ConnectorType.AzureDevOps && _preflightResult is not null)
                 {
                     var preflightBadge = _preflightResult.IsSuccess
-                        ? "bg-green-900 text-green-300"
-                        : "bg-red-900 text-red-300";
+                        ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300";
                     <div class="flex items-center gap-2 mb-3">
                         <span data-testid="ado-preflight-result"
                               class="text-xs px-2 py-0.5 rounded-full @preflightBadge">
@@ -90,38 +90,90 @@ else
                     </div>
                 }
 
-                <!-- ── Edit form ──────────────────────────────────────────── -->
+                <!-- ── Edit form — simple named fields, no JSON ───────────── -->
                 @if (entry.IsEditing)
                 {
                     <div class="mt-3 space-y-3 border-t border-gray-700 pt-3">
-                        <div>
-                            <label class="block text-xs text-gray-400 mb-1">Non-secret configuration (JSON)</label>
-                            <textarea @bind="entry.DraftNonSecretJson" rows="3"
-                                      placeholder='e.g. {"modelName": "claude-sonnet-4-6"}'
-                                      class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm
-                                             text-gray-100 font-mono placeholder-gray-600
-                                             focus:outline-none focus:border-cyan-500" />
-                        </div>
-                        <div>
-                            <label class="block text-xs text-gray-400 mb-1">
-                                Secret / credentials (JSON — stored encrypted, never displayed again)
-                            </label>
-                            <!-- type="password" prevents the browser from caching or autofilling secret values (Article IX). -->
-                            <input type="password" @bind="entry.DraftSecretJson"
-                                   placeholder='e.g. {"apiKey": "sk-..."}'
-                                   autocomplete="new-password"
-                                   class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm
-                                          text-gray-100 font-mono placeholder-gray-600
-                                          focus:outline-none focus:border-cyan-500" />
-                            <p class="text-xs text-gray-600 mt-1">
-                                Leave blank to keep the existing secret unchanged.
-                            </p>
-                        </div>
+
+                        @if (entry.ConnectorType == ConnectorType.AzureDevOps)
+                        {
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Organization URL</label>
+                                <input type="url" @bind="entry.DraftUrl"
+                                       placeholder="https://dev.azure.com/your-org"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Project Name</label>
+                                <input type="text" @bind="entry.DraftUsername"
+                                       placeholder="MyProject"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Personal Access Token</label>
+                                <input type="password" @bind="entry.DraftSecret"
+                                       placeholder="Leave blank to keep existing"
+                                       autocomplete="new-password" class="@InputClass" />
+                            </div>
+                        }
+                        else if (entry.ConnectorType == ConnectorType.LLM)
+                        {
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Provider URL</label>
+                                <input type="url" @bind="entry.DraftUrl"
+                                       placeholder="https://api.anthropic.com"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Model Name</label>
+                                <input type="text" @bind="entry.DraftUsername"
+                                       placeholder="claude-sonnet-4-6"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">API Key</label>
+                                <input type="password" @bind="entry.DraftSecret"
+                                       placeholder="Leave blank to keep existing"
+                                       autocomplete="new-password" class="@InputClass" />
+                            </div>
+                        }
+                        else if (entry.ConnectorType == ConnectorType.ServiceNow)
+                        {
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Instance URL</label>
+                                <input type="url" @bind="entry.DraftUrl"
+                                       placeholder="https://acme.service-now.com"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Username</label>
+                                <input type="text" @bind="entry.DraftUsername"
+                                       placeholder="svc-account"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Password</label>
+                                <input type="password" @bind="entry.DraftSecret"
+                                       placeholder="Leave blank to keep existing"
+                                       autocomplete="new-password" class="@InputClass" />
+                            </div>
+                        }
+                        else if (entry.ConnectorType == ConnectorType.Teams)
+                        {
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Webhook URL</label>
+                                <input type="password" @bind="entry.DraftSecret"
+                                       placeholder="https://acme.webhook.office.com/…  (leave blank to keep existing)"
+                                       autocomplete="new-password" class="@InputClass" />
+                            </div>
+                        }
+
                         @if (!string.IsNullOrEmpty(entry.SaveError))
                         {
                             <p class="text-xs text-red-400">@entry.SaveError</p>
                         }
-                        <div class="flex gap-2">
+
+                        <div class="flex gap-2 pt-1">
                             <button @onclick="() => SaveEntry(entry)"
                                     disabled="@entry.IsSaving"
                                     class="px-4 py-1.5 text-xs rounded bg-cyan-600 hover:bg-cyan-500
@@ -142,6 +194,10 @@ else
 }
 
 @code {
+    private const string InputClass =
+        "w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-gray-100 " +
+        "placeholder-gray-600 focus:outline-none focus:border-cyan-500";
+
     private bool _loading = true;
     private List<ConnectorEntry> _entries = [];
     private bool _isPreflightRunning;
@@ -162,29 +218,27 @@ else
         entry.IsEditing = !entry.IsEditing;
         if (entry.IsEditing)
         {
-            entry.DraftNonSecretJson = entry.NonSecretConfig ?? string.Empty;
-            entry.DraftSecretJson    = string.Empty; // never pre-populate secrets (Article IX)
-            entry.SaveError          = string.Empty;
+            entry.LoadDraftFromJson();
+            entry.DraftSecret = string.Empty; // never pre-populate secrets (Article IX)
+            entry.SaveError   = string.Empty;
         }
     }
 
     private async Task SaveEntry(ConnectorEntry entry)
     {
-        entry.IsSaving   = true;
-        entry.SaveError  = string.Empty;
+        entry.IsSaving  = true;
+        entry.SaveError = string.Empty;
         StateHasChanged();
 
         try
         {
-            // Pass null for secrets when the field is blank — leaves existing encrypted blob intact.
-            var secretsToSave = string.IsNullOrWhiteSpace(entry.DraftSecretJson)
-                ? null
-                : entry.DraftSecretJson;
+            var (nonSecretJson, secretJson) = entry.SerializeToJson();
 
-            await ConfigRepository.SaveAsync(entry.ConnectorType, entry.DraftNonSecretJson, secretsToSave);
+            // null secretJson leaves the existing encrypted blob intact (Article IX).
+            await ConfigRepository.SaveAsync(entry.ConnectorType, nonSecretJson, secretJson);
 
             entry.IsConfigured    = true;
-            entry.NonSecretConfig = entry.DraftNonSecretJson;
+            entry.NonSecretConfig = nonSecretJson;
             entry.IsEditing       = false;
         }
         catch (Exception ex)
@@ -236,6 +290,15 @@ else
         }
     }
 
+    private static string ConnectorDisplayName(ConnectorType type) => type switch
+    {
+        ConnectorType.AzureDevOps => "Azure DevOps",
+        ConnectorType.LLM         => "LLM (Anthropic)",
+        ConnectorType.ServiceNow  => "ServiceNow",
+        ConnectorType.Teams       => "Microsoft Teams",
+        _                         => type.ToString(),
+    };
+
     private static string FormatAge(DateTimeOffset at)
     {
         var age = DateTimeOffset.UtcNow - at;
@@ -246,22 +309,29 @@ else
     }
 
     /// <summary>
-    /// Mutable view-model wrapping a <see cref="ConnectorConfig"/> for the settings panel.
-    /// Holds UI state (edit mode, draft values, saving flag) alongside the persisted data.
+    /// Mutable view-model for one connector card. Exposes simple named draft fields;
+    /// JSON serialization/deserialization is encapsulated here, invisible to the template.
     /// </summary>
     private sealed class ConnectorEntry
     {
-        public ConnectorType   ConnectorType   { get; }
-        public bool            IsConfigured    { get; set; }
-        public string?         NonSecretConfig { get; set; }
-        public ConnectorTestResult? TestResult { get; set; }
+        public ConnectorType        ConnectorType   { get; }
+        public bool                 IsConfigured    { get; set; }
+        public string?              NonSecretConfig { get; set; }
+        public ConnectorTestResult? TestResult      { get; set; }
 
-        public bool   IsEditing        { get; set; }
-        public bool   IsSaving         { get; set; }
-        public bool   IsChecking       { get; set; }
-        public string DraftNonSecretJson { get; set; } = string.Empty;
-        public string DraftSecretJson    { get; set; } = string.Empty;
-        public string SaveError          { get; set; } = string.Empty;
+        // UI state
+        public bool   IsEditing  { get; set; }
+        public bool   IsSaving   { get; set; }
+        public bool   IsChecking { get; set; }
+        public string SaveError  { get; set; } = string.Empty;
+
+        // Named draft fields — no JSON in the UI.
+        // DraftUrl      = Organization URL | Provider URL | Instance URL  | (unused for Teams)
+        // DraftUsername = Project Name     | Model Name  | Username       | (unused for Teams)
+        // DraftSecret   = PAT              | API Key     | Password       | Webhook URL
+        public string DraftUrl      { get; set; } = string.Empty;
+        public string DraftUsername { get; set; } = string.Empty;
+        public string DraftSecret   { get; set; } = string.Empty;
 
         public ConnectorEntry(ConnectorConfig config)
         {
@@ -269,6 +339,59 @@ else
             IsConfigured    = config.IsConfigured;
             NonSecretConfig = config.NonSecretConfig;
             TestResult      = config.LastTestResult;
+        }
+
+        /// <summary>Populates DraftUrl and DraftUsername from the stored NonSecretConfig JSON.</summary>
+        public void LoadDraftFromJson()
+        {
+            DraftUrl = DraftUsername = string.Empty;
+            if (string.IsNullOrWhiteSpace(NonSecretConfig)) return;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(NonSecretConfig);
+                var root = doc.RootElement;
+                (DraftUrl, DraftUsername) = ConnectorType switch
+                {
+                    ConnectorType.AzureDevOps => (Str(root, "organizationUrl"), Str(root, "projectName")),
+                    ConnectorType.LLM         => (Str(root, "providerEndpoint"), Str(root, "modelName")),
+                    ConnectorType.ServiceNow  => (Str(root, "instanceUrl"),      Str(root, "username")),
+                    _                         => (string.Empty, string.Empty),
+                };
+
+                static string Str(JsonElement el, string key) =>
+                    el.TryGetProperty(key, out var p) ? (p.GetString() ?? string.Empty) : string.Empty;
+            }
+            catch { /* malformed — start blank */ }
+        }
+
+        /// <summary>
+        /// Returns the (nonSecretJson, secretJson) pair ready for <see cref="IConnectorConfigRepository.SaveAsync"/>.
+        /// secretJson is null when DraftSecret is blank, which preserves the existing encrypted secret.
+        /// </summary>
+        public (string? nonSecretJson, string? secretJson) SerializeToJson()
+        {
+            var nonSecret = ConnectorType switch
+            {
+                ConnectorType.AzureDevOps =>
+                    JsonSerializer.Serialize(new { organizationUrl = DraftUrl, projectName = DraftUsername }),
+                ConnectorType.LLM =>
+                    JsonSerializer.Serialize(new { providerEndpoint = DraftUrl, modelName = DraftUsername }),
+                ConnectorType.ServiceNow =>
+                    JsonSerializer.Serialize(new { instanceUrl = DraftUrl, username = DraftUsername }),
+                _ => null,
+            };
+
+            var secret = string.IsNullOrWhiteSpace(DraftSecret) ? null : ConnectorType switch
+            {
+                ConnectorType.AzureDevOps => JsonSerializer.Serialize(new { personalAccessToken = DraftSecret }),
+                ConnectorType.LLM         => JsonSerializer.Serialize(new { apiKey = DraftSecret }),
+                ConnectorType.ServiceNow  => JsonSerializer.Serialize(new { password = DraftSecret }),
+                ConnectorType.Teams       => JsonSerializer.Serialize(new { webhookUrl = DraftSecret }),
+                _                         => null,
+            };
+
+            return (nonSecret, secret);
         }
     }
 }
