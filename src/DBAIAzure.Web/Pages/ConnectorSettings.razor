@@ -1,0 +1,224 @@
+@* Connector configuration administration page — list, edit, and health-check each connector (FR-05, US5). *@
+@page "/settings/connectors"
+@inject IConnectorConfigRepository ConfigRepository
+@inject IConnectorHealthChecker HealthChecker
+@inject ILogger<ConnectorSettings> Logger
+@using DBAIAzure.Core.Interfaces
+@using DBAIAzure.Core.Models
+
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-semibold text-gray-100">Connector Settings</h1>
+    <span class="text-sm text-gray-400">Configure credentials for each integration</span>
+</div>
+
+@if (_loading)
+{
+    <div class="text-gray-500 text-sm">Loading…</div>
+}
+else
+{
+    <div class="space-y-4">
+        @foreach (var entry in _entries)
+        {
+            <div class="rounded bg-gray-900 border border-gray-700 p-5">
+                <!-- ── Header ──────────────────────────────────────────────── -->
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm font-semibold text-gray-100">@entry.ConnectorType</span>
+                        @if (entry.IsConfigured)
+                        {
+                            <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-900 text-cyan-300">Configured</span>
+                        }
+                        else
+                        {
+                            <span class="text-xs px-2 py-0.5 rounded-full bg-amber-900 text-amber-300">Not configured</span>
+                        }
+                        @if (entry.TestResult is not null)
+                        {
+                            var badgeClass = entry.TestResult.IsSuccess
+                                ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300";
+                            <span class="text-xs px-2 py-0.5 rounded-full @badgeClass">
+                                @(entry.TestResult.IsSuccess ? "Healthy" : "Unhealthy")
+                            </span>
+                        }
+                    </div>
+                    <div class="flex gap-2">
+                        <button @onclick="() => ToggleEdit(entry)"
+                                class="px-3 py-1.5 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-100 transition-colors">
+                            @(entry.IsEditing ? "Cancel" : "Edit")
+                        </button>
+                        <button @onclick="() => RunHealthCheck(entry)"
+                                disabled="@(!entry.IsConfigured || entry.IsChecking)"
+                                class="px-3 py-1.5 text-xs rounded bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40
+                                       disabled:cursor-not-allowed text-white transition-colors">
+                            @(entry.IsChecking ? "Checking…" : "Check Health")
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ── Last test message ──────────────────────────────────── -->
+                @if (entry.TestResult is { Message: { Length: > 0 } msg })
+                {
+                    <p class="text-xs text-gray-500 mb-3">@msg · @FormatAge(entry.TestResult.TestedAt)</p>
+                }
+
+                <!-- ── Edit form ──────────────────────────────────────────── -->
+                @if (entry.IsEditing)
+                {
+                    <div class="mt-3 space-y-3 border-t border-gray-700 pt-3">
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">Non-secret configuration (JSON)</label>
+                            <textarea @bind="entry.DraftNonSecretJson" rows="3"
+                                      placeholder='e.g. {"modelName": "claude-sonnet-4-6"}'
+                                      class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm
+                                             text-gray-100 font-mono placeholder-gray-600
+                                             focus:outline-none focus:border-cyan-500" />
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">
+                                Secret / credentials (JSON — stored encrypted, never displayed again)
+                            </label>
+                            <!-- type="password" prevents the browser from caching or autofilling secret values (Article IX). -->
+                            <input type="password" @bind="entry.DraftSecretJson"
+                                   placeholder='e.g. {"apiKey": "sk-..."}'
+                                   autocomplete="new-password"
+                                   class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm
+                                          text-gray-100 font-mono placeholder-gray-600
+                                          focus:outline-none focus:border-cyan-500" />
+                            <p class="text-xs text-gray-600 mt-1">
+                                Leave blank to keep the existing secret unchanged.
+                            </p>
+                        </div>
+                        @if (!string.IsNullOrEmpty(entry.SaveError))
+                        {
+                            <p class="text-xs text-red-400">@entry.SaveError</p>
+                        }
+                        <div class="flex gap-2">
+                            <button @onclick="() => SaveEntry(entry)"
+                                    disabled="@entry.IsSaving"
+                                    class="px-4 py-1.5 text-xs rounded bg-cyan-600 hover:bg-cyan-500
+                                           disabled:opacity-40 text-white transition-colors">
+                                @(entry.IsSaving ? "Saving…" : "Save")
+                            </button>
+                            <button @onclick="() => ToggleEdit(entry)"
+                                    class="px-3 py-1.5 text-xs rounded bg-gray-700 hover:bg-gray-600
+                                           text-gray-100 transition-colors">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private List<ConnectorEntry> _entries = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var configs = await ConfigRepository.GetAllAsync();
+        _entries = configs
+            .OrderBy(c => c.Type.ToString())
+            .Select(c => new ConnectorEntry(c))
+            .ToList();
+        _loading = false;
+    }
+
+    private static void ToggleEdit(ConnectorEntry entry)
+    {
+        entry.IsEditing = !entry.IsEditing;
+        if (entry.IsEditing)
+        {
+            entry.DraftNonSecretJson = entry.NonSecretConfig ?? string.Empty;
+            entry.DraftSecretJson    = string.Empty; // never pre-populate secrets (Article IX)
+            entry.SaveError          = string.Empty;
+        }
+    }
+
+    private async Task SaveEntry(ConnectorEntry entry)
+    {
+        entry.IsSaving   = true;
+        entry.SaveError  = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            // Pass null for secrets when the field is blank — leaves existing encrypted blob intact.
+            var secretsToSave = string.IsNullOrWhiteSpace(entry.DraftSecretJson)
+                ? null
+                : entry.DraftSecretJson;
+
+            await ConfigRepository.SaveAsync(entry.ConnectorType, entry.DraftNonSecretJson, secretsToSave);
+
+            entry.IsConfigured    = true;
+            entry.NonSecretConfig = entry.DraftNonSecretJson;
+            entry.IsEditing       = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to save connector config for {Type}", entry.ConnectorType);
+            entry.SaveError = $"Save failed: {ex.Message}";
+        }
+        finally
+        {
+            entry.IsSaving = false;
+        }
+    }
+
+    private async Task RunHealthCheck(ConnectorEntry entry)
+    {
+        entry.IsChecking = true;
+        StateHasChanged();
+        try
+        {
+            entry.TestResult = await HealthChecker.TestAsync(entry.ConnectorType);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Health check threw for {Type}", entry.ConnectorType);
+        }
+        finally
+        {
+            entry.IsChecking = false;
+        }
+    }
+
+    private static string FormatAge(DateTimeOffset at)
+    {
+        var age = DateTimeOffset.UtcNow - at;
+        if (age.TotalMinutes < 1) return "just now";
+        if (age.TotalHours   < 1) return $"{(int)age.TotalMinutes}m ago";
+        if (age.TotalDays    < 1) return $"{(int)age.TotalHours}h ago";
+        return $"{(int)age.TotalDays}d ago";
+    }
+
+    /// <summary>
+    /// Mutable view-model wrapping a <see cref="ConnectorConfig"/> for the settings panel.
+    /// Holds UI state (edit mode, draft values, saving flag) alongside the persisted data.
+    /// </summary>
+    private sealed class ConnectorEntry
+    {
+        public ConnectorType   ConnectorType   { get; }
+        public bool            IsConfigured    { get; set; }
+        public string?         NonSecretConfig { get; set; }
+        public ConnectorTestResult? TestResult { get; set; }
+
+        public bool   IsEditing        { get; set; }
+        public bool   IsSaving         { get; set; }
+        public bool   IsChecking       { get; set; }
+        public string DraftNonSecretJson { get; set; } = string.Empty;
+        public string DraftSecretJson    { get; set; } = string.Empty;
+        public string SaveError          { get; set; } = string.Empty;
+
+        public ConnectorEntry(ConnectorConfig config)
+        {
+            ConnectorType   = config.Type;
+            IsConfigured    = config.IsConfigured;
+            NonSecretConfig = config.NonSecretConfig;
+            TestResult      = config.LastTestResult;
+        }
+    }
+}

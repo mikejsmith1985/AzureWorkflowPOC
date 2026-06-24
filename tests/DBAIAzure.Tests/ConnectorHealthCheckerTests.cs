@@ -1,8 +1,10 @@
-// Tests for ConnectorHealthChecker: all-pass, single-fail, pre-flight diagnostic (T019, T031).
+// Tests for ConnectorHealthChecker: all-pass, single-fail, pre-flight diagnostic (T019, T031), 60-second cache (T062).
 using DBAIAzure.Connectors;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace DBAIAzure.Tests;
@@ -17,10 +19,11 @@ public sealed class ConnectorHealthCheckerTests
 
     private static ConnectorHealthChecker BuildChecker(
         IReadOnlyDictionary<ConnectorType, Func<CancellationToken, Task<ConnectorTestResult>>> testers,
-        IConnectorConfigRepository? repo = null)
+        IConnectorConfigRepository? repo = null,
+        IMemoryCache? cache = null)
     {
         repo ??= new NullConfigRepository();
-        return new ConnectorHealthChecker(testers, repo, NullLogger<ConnectorHealthChecker>.Instance);
+        return new ConnectorHealthChecker(testers, repo, NullLogger<ConnectorHealthChecker>.Instance, cache);
     }
 
     private static Func<CancellationToken, Task<ConnectorTestResult>> PassTester(ConnectorType type) =>
@@ -146,6 +149,55 @@ public sealed class ConnectorHealthCheckerTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ConnectorType.Teams, result.Type);
+    }
+
+    // ── T062: Second call within 60s returns cached result without invoking the tester ──────
+
+    [Fact]
+    public async Task TestAsync_SecondCallWithinCachePeriod_ReturnsCachedResultWithoutCallingTester()
+    {
+        var callCount = 0;
+        var testers   = new Dictionary<ConnectorType, Func<CancellationToken, Task<ConnectorTestResult>>>
+        {
+            [ConnectorType.LLM] = _ =>
+            {
+                callCount++;
+                return Task.FromResult(new ConnectorTestResult(ConnectorType.LLM, true, "Connected.", DateTimeOffset.UtcNow));
+            },
+        };
+
+        var cache   = new MemoryCache(Options.Create(new MemoryCacheOptions()));
+        var checker = BuildChecker(testers, cache: cache);
+
+        var first  = await checker.TestAsync(ConnectorType.LLM);
+        var second = await checker.TestAsync(ConnectorType.LLM);
+
+        // The tester delegate should only have been invoked once — second call hit the cache.
+        Assert.Equal(1, callCount);
+        Assert.True(first.IsSuccess);
+        Assert.True(second.IsSuccess);
+    }
+
+    [Fact]
+    public async Task TestAsync_WhenCacheIsNull_InvokesTesterEveryTime()
+    {
+        var callCount = 0;
+        var testers   = new Dictionary<ConnectorType, Func<CancellationToken, Task<ConnectorTestResult>>>
+        {
+            [ConnectorType.LLM] = _ =>
+            {
+                callCount++;
+                return Task.FromResult(new ConnectorTestResult(ConnectorType.LLM, true, "Connected.", DateTimeOffset.UtcNow));
+            },
+        };
+
+        // No cache supplied.
+        var checker = BuildChecker(testers);
+
+        await checker.TestAsync(ConnectorType.LLM);
+        await checker.TestAsync(ConnectorType.LLM);
+
+        Assert.Equal(2, callCount);
     }
 
     // ── Null config repository (DI safety — health checker must not crash if repo is absent) ──

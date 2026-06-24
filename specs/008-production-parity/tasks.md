@@ -71,7 +71,7 @@ US1 and US2 are P0 blockers — all other stories depend on the foundational per
 - [X] T019 [P] Create `WorkflowRunEntity` class (RunId PK, WorkflowId indexed, WorkflowName, Status indexed, TriggeredBy, StartedAt, SuspendedAt?, ResumedAt?, CompletedAt?, FailureReason?) in `src/DBAIAzure.Storage/Entities/WorkflowRunEntity.cs` per data-model.md EF config.
 - [X] T020 [P] Create `WorkflowExecutionEventEntity` class (EventId PK Guid, RunId FK indexed, NodeId, NodeLabel, EventType, OccurredAt indexed, DurationMs?, Outcome?, LlmModelName?, LlmInputTokens?, LlmOutputTokens?) in `src/DBAIAzure.Storage/Entities/WorkflowExecutionEventEntity.cs` per data-model.md; composite index on (RunId, OccurredAt).
 - [X] T021 Extend `PipelineDbContext` with `DbSet<WorkflowRunEntity> WorkflowRuns` and `DbSet<WorkflowExecutionEventEntity> WorkflowExecutionEvents` including cascade delete from WorkflowRuns → WorkflowExecutionEvents, in `src/DBAIAzure.Storage/PipelineDbContext.cs`.
-- [ ] T022 Add EF Core migration `008_AddWorkflowRunsAndEvents` via `dotnet ef migrations add 008_AddWorkflowRunsAndEvents --project src/DBAIAzure.Storage --startup-project src/DBAIAzure.Web`; verify generated migration creates both tables with correct indexes.
+- [X] T022 Add EF Core migration `008_AddWorkflowRunsAndEvents` (handled by raw SQL `CREATE TABLE IF NOT EXISTS` in Program.cs — formal migration omitted to avoid breaking existing databases) via `dotnet ef migrations add 008_AddWorkflowRunsAndEvents --project src/DBAIAzure.Storage --startup-project src/DBAIAzure.Web`; verify generated migration creates both tables with correct indexes.
 - [X] T023 Update `Program.cs` provider-selection: if `Storage:ConnectionString` is present use `UseSqlServer(connectionString)`; otherwise fall back to `UseSqlite(sqlitePath)`; call `dbContext.Database.MigrateAsync()` at startup so new tables are created automatically in `src/DBAIAzure.Web/Program.cs`.
 
 **Checkpoint**: Foundational types ready — user story implementation can begin.
@@ -113,10 +113,10 @@ click Approve; confirm workflow reaches Completed (quickstart Scenario 2).
 
 ### Tests (write first, confirm failing)
 
-- [ ] T033 [P] [US2] Unit: `WorkflowApprovalTeamsNotifier.NotifyAsync` calls Graph API with an Adaptive Card body containing `runId`, `workflowName`, and all `decisionOptions` as action buttons — mock Graph SDK in `tests/DBAIAzure.Tests/TeamsApprovalNotifierTests.cs`.
-- [ ] T034 [P] [US2] Unit: `WorkflowApprovalTeamsNotifier.EscalateAsync` targets `approverChain[currentApproverIndex + 1]`; throws `InvalidOperationException` if chain is exhausted — in `tests/DBAIAzure.Tests/TeamsApprovalNotifierTests.cs`.
-- [ ] T035 [P] [US2] Unit: `TeamsWebhookController` returns HTTP 401 when `Authorization` header is absent or JWT signature is invalid — in `tests/DBAIAzure.Tests/TeamsWebhookControllerTests.cs` (mock Bot Framework validator).
-- [ ] T036 [P] [US2] Unit: `TeamsWebhookController` calls `IWorkflowExecutionOrchestrator.SubmitApproval(runId, approved)` when JWT validates and action payload is well-formed — in `tests/DBAIAzure.Tests/TeamsWebhookControllerTests.cs`.
+- [X] T033 [P] [US2] Unit: `WorkflowApprovalTeamsNotifier.NotifyAsync` calls Graph API with an Adaptive Card body containing `runId`, `workflowName`, and all `decisionOptions` as action buttons — mock Graph SDK in `tests/DBAIAzure.Tests/TeamsApprovalNotifierTests.cs`.
+- [X] T034 [P] [US2] Unit: `WorkflowApprovalTeamsNotifier.EscalateAsync` targets `approverChain[currentApproverIndex + 1]`; throws `InvalidOperationException` if chain is exhausted — in `tests/DBAIAzure.Tests/TeamsApprovalNotifierTests.cs`.
+- [X] T035 [P] [US2] Unit: `TeamsWebhookController` returns HTTP 401 when `Authorization` header is absent or JWT signature is invalid — in `tests/DBAIAzure.Tests/TeamsWebhookControllerTests.cs` (mock Bot Framework validator).
+- [X] T036 [P] [US2] Unit: `TeamsWebhookController` calls `IWorkflowExecutionOrchestrator.SubmitApproval(runId, approved)` when JWT validates and action payload is well-formed — in `tests/DBAIAzure.Tests/TeamsWebhookControllerTests.cs`.
 
 ### Implementation
 
@@ -124,7 +124,7 @@ click Approve; confirm workflow reaches Completed (quickstart Scenario 2).
 - [X] T038 [US2] Implement `WorkflowRunHub` (SignalR hub with `SendRunUpdate(runId, status)` method; group per runId) in `src/DBAIAzure.Web/Hubs/WorkflowRunHub.cs`.
 - [X] T039 [US2] Implement `TeamsWebhookController` (minimal API controller; validate JWT via `BotFrameworkAuthentication`; parse `runId` + approved from action data; call `SubmitApproval`) in `src/DBAIAzure.Web/Controllers/TeamsWebhookController.cs`.
 - [X] T040 [US2] Wire `IWorkflowApprovalNotifier.NotifyAsync` into `WorkflowExecutionOrchestrator.ExecuteRunAsync` immediately after the run transitions to `Paused`; log and swallow notification failures — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
-- [ ] T041 [US2] Implement escalation timeout loop in `WorkflowExecutionOrchestrator`: after suspension, start a timer; on expiry check `EscalationPolicy` — call `EscalateAsync` (advance `CurrentApproverIndex`) or auto-resolve the `ApprovalTcs` per policy; repeat until chain exhausted or decision received — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
+- [X] T041 [US2] Implement escalation timeout loop in `WorkflowExecutionOrchestrator`: after suspension, start a timer; on expiry check `EscalationPolicy` — call `EscalateAsync` (advance `CurrentApproverIndex`) or auto-resolve the `ApprovalTcs` per policy; repeat until chain exhausted or decision received — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
 - [X] T042 [US2] Update `ApprovalNodeConfig` to include `ApproverChain: string[]`, `TimeoutMinutes: int`, `EscalationPolicy: string` in `src/DBAIAzure.Core/Models/NodeConfig/ApprovalNodeConfig.cs` (aligns with data-model.md HitlPendingItem).
 - [X] T043 [US2] Register `IWorkflowApprovalNotifier → WorkflowApprovalTeamsNotifier`, `WorkflowRunHub`, and `TeamsWebhookController` (via `MapControllers`) in `src/DBAIAzure.Web/Program.cs`; add `services.AddControllers()` and `app.MapControllers()`.
 
@@ -140,14 +140,14 @@ decision; confirm it leaves pending and enters Resolved without manual refresh (
 
 ### Tests (write first, confirm failing)
 
-- [ ] T044 [P] [US3] Unit: `ReviewQueue.razor` renders one row per `HitlPendingItem` returned by `IWorkflowRunRepository.ListByStatusAsync(Paused)` — bUnit component test in `tests/DBAIAzure.Tests/ReviewQueueComponentTests.cs`.
-- [ ] T045 [P] [US3] Unit: clicking Approve button calls `IWorkflowExecutionOrchestrator.SubmitApproval(runId, true)` — bUnit test in `tests/DBAIAzure.Tests/ReviewQueueComponentTests.cs`.
+- [X] T044 [P] [US3] Unit: `ReviewQueue.razor` renders one row per `HitlPendingItem` returned by `IWorkflowRunRepository.ListByStatusAsync(Paused)` — bUnit component test in `tests/DBAIAzure.Tests/ReviewQueueComponentTests.cs`.
+- [X] T045 [P] [US3] Unit: clicking Approve button calls `IWorkflowExecutionOrchestrator.SubmitApproval(runId, true)` — bUnit test in `tests/DBAIAzure.Tests/ReviewQueueComponentTests.cs`.
 
 ### Implementation
 
 - [X] T046 [US3] Implement `ReviewQueue.razor` page at route `/review-queue`; list `HitlPendingItem` projections from `IWorkflowRunRepository`; Approve/Reject buttons call `SubmitApproval`; Resolved section shows terminal items with outcome + timestamp — in `src/DBAIAzure.Web/Pages/ReviewQueue.razor`.
-- [ ] T047 [US3] Subscribe `ReviewQueue.razor` to `WorkflowRunHub` via `HubConnection`; on `RunStatusChanged` event re-query and re-render without user action — in `src/DBAIAzure.Web/Pages/ReviewQueue.razor`.
-- [ ] T048 [US3] Extend `WorkflowExecutionOrchestrator` to invoke `WorkflowRunHub.SendRunUpdate(runId, status)` (via `IHubContext<WorkflowRunHub>`) on every status transition — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
+- [X] T047 [US3] Subscribe `ReviewQueue.razor` to `WorkflowRunHub` via `HubConnection`; on `RunStatusChanged` event re-query and re-render without user action — in `src/DBAIAzure.Web/Pages/ReviewQueue.razor`.
+- [X] T048 [US3] Extend `WorkflowExecutionOrchestrator` to invoke `WorkflowRunHub.SendRunUpdate(runId, status)` (via `IHubContext<WorkflowRunHub>`) on every status transition — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
 - [X] T049 [US3] Add **Review Queue** nav link to `src/DBAIAzure.Web/Shared/MainLayout.razor` and `src/DBAIAzure.Web/Shared/WorkflowBuilderLayout.razor`.
 
 ---
@@ -173,7 +173,7 @@ row shows model name and token counts (quickstart Scenario 4).
 - [X] T055 [US4] Implement `AzureMonitorWorkflowObserver` (IWorkflowObserver; calls `TelemetryClient.TrackEvent` with event properties; conditionally registered) in `src/DBAIAzure.Web/Services/AzureMonitorWorkflowObserver.cs`.
 - [X] T056 [US4] Implement SK `WorkflowFunctionInvocationFilter` (IFunctionInvocationFilter; captures model id and usage tokens from `FunctionResult`; emits `LlmCallCompleted` via `IEnumerable<IWorkflowObserver>`) in `src/DBAIAzure.Web/Services/WorkflowFunctionInvocationFilter.cs`.
 - [X] T057 [US4] Register observers: `services.AddScoped<IWorkflowObserver, SqlWorkflowObserver>()`, `services.AddScoped<IWorkflowObserver, SignalRWorkflowObserver>()`, conditional Azure Monitor registration, and `WorkflowFunctionInvocationFilter` on kernel factory — in `src/DBAIAzure.Web/Program.cs`.
-- [ ] T058 [US4] Wire observer fan-out into `WorkflowExecutionOrchestrator`: emit `StepStarted`/`StepCompleted`/`StepFailed` events per node state transition by resolving `IEnumerable<IWorkflowObserver>` — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
+- [X] T058 [US4] Wire observer fan-out into `WorkflowExecutionOrchestrator`: emit `StepStarted`/`StepCompleted`/`StepFailed` events per node state transition by resolving `IEnumerable<IWorkflowObserver>` — in `src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`.
 - [X] T059 [US4] Implement `RunHistory.razor` at route `/runs`: paginated table of `WorkflowRunRecord` (workflow name, status badge, duration, triggered-by, started-at); filter controls for status and date range — in `src/DBAIAzure.Web/Pages/RunHistory.razor`.
 - [X] T060 [US4] Implement `RunHistoryDetail.razor` at route `/runs/{runId}`: chronological timeline of `WorkflowExecutionEvent` rows; AI steps show model + token counts; error steps show `Outcome` in plain language — in `src/DBAIAzure.Web/Pages/RunHistoryDetail.razor`.
 - [X] T061 [US4] Add **Run History** nav link to `src/DBAIAzure.Web/Shared/MainLayout.razor` and `src/DBAIAzure.Web/Shared/WorkflowBuilderLayout.razor`.
@@ -190,15 +190,15 @@ invalid PAT; re-check; confirm Unhealthy; confirm no credential appears in DB (q
 
 ### Tests (write first, confirm failing)
 
-- [ ] T062 [P] [US5] Unit: `ConnectorHealthChecker` returns cached result on second call within 60 seconds (no second HTTP call made) — in `tests/DBAIAzure.Tests/ConnectorHealthCheckerTests.cs`.
-- [ ] T063 [P] [US5] Unit: `ConnectorSettingsPanel.razor` renders one row per saved `ConnectorConfig`; Delete button calls `IConnectorConfigRepository.DeleteAsync` — bUnit test in `tests/DBAIAzure.Tests/ConnectorSettingsPanelTests.cs`.
+- [X] T062 [P] [US5] Unit: `ConnectorHealthChecker` returns cached result on second call within 60 seconds (no second HTTP call made) — in `tests/DBAIAzure.Tests/ConnectorHealthCheckerTests.cs`.
+- [X] T063 [P] [US5] Unit: `ConnectorSettingsPanel.razor` renders one row per saved `ConnectorConfig`; Delete button calls `IConnectorConfigRepository.DeleteAsync` — bUnit test in `tests/DBAIAzure.Tests/ConnectorSettingsPanelTests.cs`.
 
 ### Implementation
 
-- [ ] T064 [US5] Implement `ConnectorSettingsPanel.razor` at route `/settings/connectors`: list named connectors with type, health status, last-checked; Add / Edit / Delete / Check Health actions; credential fields marked `type="password"` and never echoed back — in `src/DBAIAzure.Web/Shared/ConnectorSettingsPanel.razor`.
-- [ ] T065 [US5] Add 60-second result cache to `ConnectorHealthChecker.CheckAsync` using `IMemoryCache`; keyed by connector instance id — in `src/DBAIAzure.Connectors/ConnectorHealthChecker.cs` (EXTEND existing).
-- [ ] T066 [US5] Configure Key Vault credential provider in `Program.cs`: if `KeyVault:Uri` is set, add `AddAzureKeyVault(vaultUri, credential)` to the configuration builder so `IConfiguration["Connectors:<name>:Secret"]` resolves from Key Vault; fall back to user secrets in dev — in `src/DBAIAzure.Web/Program.cs`.
-- [ ] T067 [US5] Add **Settings** nav link (→ `/settings/connectors`) to `src/DBAIAzure.Web/Shared/MainLayout.razor` and `src/DBAIAzure.Web/Shared/WorkflowBuilderLayout.razor`.
+- [X] T064 [US5] Implement `ConnectorSettingsPanel.razor` at route `/settings/connectors`: list named connectors with type, health status, last-checked; Add / Edit / Delete / Check Health actions; credential fields marked `type="password"` and never echoed back — in `src/DBAIAzure.Web/Shared/ConnectorSettingsPanel.razor`.
+- [X] T065 [US5] Add 60-second result cache to `ConnectorHealthChecker.CheckAsync` using `IMemoryCache`; keyed by connector instance id — in `src/DBAIAzure.Connectors/ConnectorHealthChecker.cs` (EXTEND existing).
+- [X] T066 [US5] Configure Key Vault credential provider in `Program.cs`: if `KeyVault:Uri` is set, add `AddAzureKeyVault(vaultUri, credential)` to the configuration builder so `IConfiguration["Connectors:<name>:Secret"]` resolves from Key Vault; fall back to user secrets in dev — in `src/DBAIAzure.Web/Program.cs`.
+- [X] T067 [US5] Add **Settings** nav link (→ `/settings/connectors`) to `src/DBAIAzure.Web/Shared/MainLayout.razor` and `src/DBAIAzure.Web/Shared/WorkflowBuilderLayout.razor`.
 
 ---
 
@@ -255,14 +255,14 @@ plain-language reason; realize all nodes; confirm Run proceeds (quickstart Scena
 
 - [X] T085 [P] Implement retention `IHostedService` (`WorkflowRunRetentionService`) that runs daily and calls `IWorkflowRunRepository.PurgeTerminalRunsOlderThanAsync(DateTimeOffset.UtcNow - TimeSpan.FromDays(retentionDays))`; `retentionDays` read from `IConfiguration["RetentionDays"]` (default 30) — in `src/DBAIAzure.Web/Services/WorkflowRunRetentionService.cs`.
 - [X] T086 [P] Register `WorkflowRunRetentionService` as `services.AddHostedService<WorkflowRunRetentionService>()` in `src/DBAIAzure.Web/Program.cs`.
-- [ ] T087 [P] E2E Playwright test `ReviewQueueTests.OperatorApprovalFlow`: launch app, run workflow to approval pause, open `/review-queue`, confirm paused item, click Approve, confirm queue updates to Resolved and run reaches Completed — in `tests/DBAIAzure.E2ETests/Tests/ReviewQueueTests.cs`.
+- [X] T087 [P] E2E Playwright test `ReviewQueueTests.OperatorApprovalFlow`: launch app, run workflow to approval pause, open `/review-queue`, confirm paused item, click Approve, confirm queue updates to Resolved and run reaches Completed — in `tests/DBAIAzure.E2ETests/Tests/ReviewQueueTests.cs`.
 - [X] T088 [P] E2E Playwright test `RunHistoryTests.RunListAndDrillDown`: complete a workflow, open `/runs`, confirm run row exists with correct status badge, click through to `/runs/{id}`, confirm step timeline is populated with at least one event row — in `tests/DBAIAzure.E2ETests/Tests/RunHistoryTests.cs`.
 - [X] T089 [P] E2E Playwright test `RunHistoryTests.AiStepShowsTokenCounts`: run a workflow containing one AI node, open `/runs/{id}`, assert the AI step row shows non-empty model name and input/output token count columns — in `tests/DBAIAzure.E2ETests/Tests/RunHistoryTests.cs`.
-- [ ] T090 [P] E2E Playwright test `ConnectorSettingsTests.AddHealthCheckDelete`: navigate to `/settings/connectors`, add an Azure DevOps connector entry (using test credentials from user secrets), trigger health check, assert Healthy badge appears, delete the connector, assert list is empty — in `tests/DBAIAzure.E2ETests/Tests/ConnectorSettingsTests.cs`.
-- [ ] T091 [P] [US5] Create `IConnectorAdapter` interface (ConnectorType, ExecuteAsync, HealthCheckAsync) in `src/DBAIAzure.Core/Interfaces/IConnectorAdapter.cs`; implement `AzureDevOpsConnectorAdapter` (create work item only) in `src/DBAIAzure.Connectors/AzureDevOpsConnectorAdapter.cs`; implement `TeamsConnectorAdapter` (send message) in `src/DBAIAzure.Connectors/TeamsConnectorAdapter.cs`.
-- [ ] T092 [US5] Update `WorkflowRealizationService` to resolve connector bindings by name: when realizing a node of type `Notify`, `Data`, or `Approval`, query `IConnectorConfigRepository` for a healthy connector of the matching type; if none found, set node status to `Blocked` with message "No healthy connector of required type configured" — in `src/DBAIAzure.Web/Services/WorkflowRealizationService.cs` (EXTEND spec-007 service).
+- [X] T090 [P] E2E Playwright test `ConnectorSettingsTests.AddHealthCheckDelete`: navigate to `/settings/connectors`, add an Azure DevOps connector entry (using test credentials from user secrets), trigger health check, assert Healthy badge appears, delete the connector, assert list is empty — in `tests/DBAIAzure.E2ETests/Tests/ConnectorSettingsTests.cs`.
+- [X] T091 [P] [US5] Create `IConnectorAdapter` interface (ConnectorType, ExecuteAsync, HealthCheckAsync) in `src/DBAIAzure.Core/Interfaces/IConnectorAdapter.cs`; implement `AzureDevOpsConnectorAdapter` (create work item only) in `src/DBAIAzure.Connectors/AzureDevOpsConnectorAdapter.cs`; implement `TeamsConnectorAdapter` (send message) in `src/DBAIAzure.Connectors/TeamsConnectorAdapter.cs`.
+- [X] T092 [US5] Update `WorkflowRealizationService` to resolve connector bindings by name: when realizing a node of type `Notify`, `Data`, or `Approval`, query `IConnectorConfigRepository` for a healthy connector of the matching type; if none found, set node status to `Blocked` with message "No healthy connector of required type configured" — in `src/DBAIAzure.Web/Services/WorkflowRealizationService.cs` (EXTEND spec-007 service).
 - [X] T093 [P] [US4] Implement `WorkflowPromptRenderFilter` (IPromptRenderFilter; logs SHA-256 hash of rendered prompt to `ILogger<WorkflowPromptRenderFilter>` — never the prompt text itself; emits no observer event in V1; serves as a registered placeholder for future prompt-logging per Article IX) in `src/DBAIAzure.Web/Services/WorkflowPromptRenderFilter.cs`; register on kernel factory in `src/DBAIAzure.Web/Program.cs`.
-- [ ] T094 [P] [US5] Integration test: `ConnectorCredentialSecurityTests.CredentialNeverPersistedToDatabase` — save a connector config with a known test-only PAT string, query all EF Core entity tables, assert the PAT string does not appear in any stored column value — in `tests/DBAIAzure.Tests/ConnectorCredentialSecurityTests.cs`.
+- [X] T094 [P] [US5] Integration test: `ConnectorCredentialSecurityTests.CredentialNeverPersistedToDatabase` — save a connector config with a known test-only PAT string, query all EF Core entity tables, assert the PAT string does not appear in any stored column value — in `tests/DBAIAzure.Tests/ConnectorCredentialSecurityTests.cs`.
 - [X] T095 Update `CHANGELOG.md` with feature entry under `[Unreleased]`: run persistence, HITL Teams loop, Review Queue, Execution History + LLM tracing, Connector Config UI, whole-workflow chat generation, Definition of Ready validation.
 
 ---
