@@ -346,12 +346,11 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
                     ? p.GetString()
                     : null;
 
-            var processType = templateTypeId?.ToLowerInvariant() switch
-            {
-                string id when id == AgileTemplateTypeId.ToLowerInvariant() => AdoProcessType.Agile,
-                string id when id == ScrumTemplateTypeId.ToLowerInvariant() => AdoProcessType.Scrum,
-                _ => AdoProcessType.Unsupported,
-            };
+            var processType = ResolveKnownProcessType(templateTypeId);
+
+            // Custom inherited processes don't match built-in GUIDs — walk one level up to the parent.
+            if (processType == AdoProcessType.Unsupported && templateTypeId is not null)
+                processType = await ResolveInheritedParentTypeAsync(http, orgUrl, templateTypeId, ct);
 
             if (processType == AdoProcessType.Unsupported)
             {
@@ -412,6 +411,42 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
         }
         catch { /* best-effort parse */ }
         return null;
+    }
+
+    private static AdoProcessType ResolveKnownProcessType(string? templateTypeId) =>
+        templateTypeId?.ToLowerInvariant() switch
+        {
+            string id when id == AgileTemplateTypeId.ToLowerInvariant() => AdoProcessType.Agile,
+            string id when id == ScrumTemplateTypeId.ToLowerInvariant() => AdoProcessType.Scrum,
+            _ => AdoProcessType.Unsupported,
+        };
+
+    /// <summary>
+    /// Calls _apis/process/processes/{typeId} to read parentProcessTypeId.
+    /// Handles custom inherited processes whose own GUID doesn't match a built-in.
+    /// </summary>
+    private async Task<AdoProcessType> ResolveInheritedParentTypeAsync(
+        HttpClient http, string orgUrl, string typeId, CancellationToken ct)
+    {
+        var url = $"{orgUrl.TrimEnd('/')}/_apis/process/processes/{Uri.EscapeDataString(typeId)}?api-version={ApiVersion}";
+        try
+        {
+            var response = await http.GetAsync(url, ct);
+            if (!response.IsSuccessStatusCode) return AdoProcessType.Unsupported;
+
+            var body = await response.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(body);
+
+            var parentId = doc.RootElement.TryGetProperty("parentProcessTypeId", out var p)
+                ? p.GetString()
+                : null;
+
+            return ResolveKnownProcessType(parentId);
+        }
+        catch
+        {
+            return AdoProcessType.Unsupported;
+        }
     }
 
     private async Task<bool> CheckFieldExistsAsync(HttpClient http, string orgUrl, string refName, CancellationToken ct)
