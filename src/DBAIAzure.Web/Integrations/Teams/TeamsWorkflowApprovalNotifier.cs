@@ -69,8 +69,11 @@ public sealed class TeamsWorkflowApprovalNotifier : IWorkflowApprovalNotifier
         var nextIndex = currentApproverIndex + 1;
         if (nextIndex >= approverChain.Count)
         {
-            _logger.LogWarning("ApprovalNotifier: escalation chain exhausted for run {RunId}", runId);
-            return;
+            // Throwing signals the escalation caller (T041 timeout loop) that the chain is
+            // exhausted so it can auto-resolve the run rather than looping forever.
+            throw new InvalidOperationException(
+                $"Escalation chain for run {runId} is exhausted — all {approverChain.Count} approver(s) notified. " +
+                "The run must be auto-resolved by the caller per the configured EscalationPolicy.");
         }
 
         await SendAdaptiveCardAsync(runId, workflowName, nodeLabel,

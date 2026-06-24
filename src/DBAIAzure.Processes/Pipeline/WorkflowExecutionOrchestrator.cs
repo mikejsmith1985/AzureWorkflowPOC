@@ -41,6 +41,11 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
     private readonly IWorkflowApprovalNotifier? _approvalNotifier;
     private readonly IReadOnlyList<IWorkflowObserver> _observers;
 
+    // Async callback invoked on every status transition to broadcast run updates via SignalR
+    // (or any other real-time transport) to non-Blazor clients. Wired in Program.cs via
+    // IHubContext<WorkflowRunHub>; null means no external broadcast (dev/test default).
+    private readonly Func<string, string, Task>? _broadcastUpdate;
+
     // ── Constructor ────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -52,16 +57,22 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
     /// <param name="runRepository">Persists run lifecycle records; null means no persistence (dev only).</param>
     /// <param name="approvalNotifier">Sends HITL notifications on run pause; null disables Teams notifications.</param>
     /// <param name="observers">Fan-out step-event observers (SQL, SignalR, Azure Monitor); empty list is safe.</param>
+    /// <param name="broadcastUpdate">
+    /// Optional async callback invoked on every status transition with (runId, statusString).
+    /// Program.cs wires this to IHubContext&lt;WorkflowRunHub&gt; for SignalR broadcasting (T048).
+    /// </param>
     public WorkflowExecutionOrchestrator(
         Func<Kernel> kernelFactory,
         IWorkflowRunRepository? runRepository = null,
         IWorkflowApprovalNotifier? approvalNotifier = null,
-        IEnumerable<IWorkflowObserver>? observers = null)
+        IEnumerable<IWorkflowObserver>? observers = null,
+        Func<string, string, Task>? broadcastUpdate = null)
     {
         _kernelFactory    = kernelFactory;
         _runtimeBuilder   = new WorkflowRuntimeBuilder();
         _runRepository    = runRepository;
         _approvalNotifier = approvalNotifier;
+        _broadcastUpdate  = broadcastUpdate;
         _observers        = observers is not null
             ? (IReadOnlyList<IWorkflowObserver>)observers.ToList().AsReadOnly()
             : Array.Empty<IWorkflowObserver>();
@@ -167,6 +178,7 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
         };
 
         PersistRunState(runState);
+        BroadcastRunStatus(runId, WorkflowRunStatus.Cancelled);
         RunUpdated?.Invoke(runId);
     }
 
@@ -201,17 +213,65 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
             StartedAt:    record.StartedAt,
             CompletedAt:  null);
 
+        var approvalTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
         var rehydrated = new WorkflowRunState
         {
             Run          = run,
             WorkflowName = record.WorkflowName,
             TriggeredBy  = record.TriggeredBy,
             SuspendedAt  = record.SuspendedAt,
-            ApprovalTcs  = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+            ApprovalTcs  = approvalTcs,
         };
 
         _runs.TryAdd(record.RunId, rehydrated);
+
+        // T041: If the run was already past its escalation timeout before rehydration
+        // (e.g., a long server outage), auto-reject immediately so stale runs don't
+        // accumulate in the Review Queue indefinitely. The timeout threshold is the
+        // default workflow execution timeout; per-approval-node config is not available
+        // here without loading the workflow definition (a future improvement).
+        ScheduleEscalationTimeout(record.RunId, approvalTcs, record.SuspendedAt);
     }
+
+    /// <summary>
+    /// Starts a background timer for a rehydrated paused run. If no human decision arrives
+    /// within <see cref="DefaultApprovalTimeoutMinutes"/> of the run's suspension instant,
+    /// the run is auto-rejected so stale approvals do not block the queue indefinitely (T041).
+    /// </summary>
+    private static void ScheduleEscalationTimeout(
+        string runId,
+        TaskCompletionSource<bool> approvalTcs,
+        DateTimeOffset? suspendedAt)
+    {
+        if (approvalTcs.Task.IsCompleted)
+            return;
+
+        var suspendedInstant = suspendedAt ?? DateTimeOffset.UtcNow;
+        var elapsed          = DateTimeOffset.UtcNow - suspendedInstant;
+        var delay            = DefaultApprovalTimeout - elapsed;
+
+        // Run is already past the default timeout — reject synchronously.
+        if (delay <= TimeSpan.Zero)
+        {
+            approvalTcs.TrySetResult(false);
+            return;
+        }
+
+        // Schedule a fire-and-forget background timer that auto-rejects after the remaining delay.
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(delay).ConfigureAwait(false);
+            approvalTcs.TrySetResult(false); // TrySetResult is a no-op if already resolved by a human.
+        });
+    }
+
+    /// <summary>
+    /// Default duration after which a rehydrated Paused run is automatically rejected if no
+    /// human decision has been submitted. 24 hours keeps short-lived runs out of the queue while
+    /// still giving operators a full business day to respond (matches typical SLA expectations).
+    /// </summary>
+    private static readonly TimeSpan DefaultApprovalTimeout = TimeSpan.FromHours(24);
 
     // ── Background execution ───────────────────────────────────────────────────────
 
@@ -234,6 +294,25 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
             runState.Run = runState.Run with { Status = WorkflowRunStatus.Running };
             PersistRunState(runState);
             FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+            BroadcastRunStatus(runId, WorkflowRunStatus.Running);
+
+            // Emit StepStarted for each runnable node so the Run History page shows
+            // the run beginning even before per-step SK callbacks are available (T058).
+            foreach (var node in workflow.Nodes.Where(n => n.NodeType != WorkflowNodeType.Trigger))
+            {
+                DispatchEvent(new Core.Models.WorkflowExecutionEvent(
+                    EventId:         Guid.NewGuid(),
+                    RunId:           runId,
+                    NodeId:          node.Id,
+                    NodeLabel:       node.Label,
+                    EventType:       Core.Models.WorkflowEventType.StepStarted,
+                    OccurredAt:      runState.Run.StartedAt,
+                    DurationMs:      null,
+                    Outcome:         null,
+                    LlmModelName:    null,
+                    LlmInputTokens:  null,
+                    LlmOutputTokens: null));
+            }
 
             // ── Translate plain-language input to a structured workflow payload ────
             // WorkflowInputTranslator is stateless so it is safe to create per-run;
@@ -333,9 +412,10 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
 
             if (didTimeOut)
             {
+                var timedOutAt = DateTimeOffset.UtcNow;
                 var timedOutNodeStates = runState.Run.NodeStates
                     .Select(nodeState => nodeState.Status is NodeStatus.NotStarted or NodeStatus.Active
-                        ? nodeState with { Status = NodeStatus.Skipped, CompletedAt = DateTimeOffset.UtcNow }
+                        ? nodeState with { Status = NodeStatus.Skipped, CompletedAt = timedOutAt }
                         : nodeState)
                     .ToList()
                     .AsReadOnly();
@@ -344,17 +424,35 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
                 {
                     Status      = WorkflowRunStatus.TimedOut,
                     NodeStates  = timedOutNodeStates,
-                    CompletedAt = DateTimeOffset.UtcNow,
+                    CompletedAt = timedOutAt,
                 };
+
+                // Emit StepFailed for nodes that did not finish before timeout (T058).
+                foreach (var node in workflow.Nodes.Where(n => n.NodeType != WorkflowNodeType.Trigger))
+                {
+                    DispatchEvent(new Core.Models.WorkflowExecutionEvent(
+                        EventId:         Guid.NewGuid(),
+                        RunId:           runId,
+                        NodeId:          node.Id,
+                        NodeLabel:       node.Label,
+                        EventType:       Core.Models.WorkflowEventType.StepFailed,
+                        OccurredAt:      timedOutAt,
+                        DurationMs:      (long)(timedOutAt - runState.Run.StartedAt).TotalMilliseconds,
+                        Outcome:         "Timed out before completing.",
+                        LlmModelName:    null,
+                        LlmInputTokens:  null,
+                        LlmOutputTokens: null));
+                }
             }
             else
             {
+                var completedAt = DateTimeOffset.UtcNow;
                 var completedNodeStates = runState.Run.NodeStates
                     .Select(nodeState => nodeState with
                     {
                         Status      = NodeStatus.Completed,
                         StartedAt   = nodeState.StartedAt   ?? runState.Run.StartedAt,
-                        CompletedAt = nodeState.CompletedAt ?? DateTimeOffset.UtcNow,
+                        CompletedAt = nodeState.CompletedAt ?? completedAt,
                     })
                     .ToList()
                     .AsReadOnly();
@@ -363,11 +461,29 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
                 {
                     Status      = WorkflowRunStatus.Completed,
                     NodeStates  = completedNodeStates,
-                    CompletedAt = DateTimeOffset.UtcNow,
+                    CompletedAt = completedAt,
                 };
+
+                // Emit StepCompleted for each runnable node on clean completion (T058).
+                foreach (var node in workflow.Nodes.Where(n => n.NodeType != WorkflowNodeType.Trigger))
+                {
+                    DispatchEvent(new Core.Models.WorkflowExecutionEvent(
+                        EventId:         Guid.NewGuid(),
+                        RunId:           runId,
+                        NodeId:          node.Id,
+                        NodeLabel:       node.Label,
+                        EventType:       Core.Models.WorkflowEventType.StepCompleted,
+                        OccurredAt:      completedAt,
+                        DurationMs:      (long)(completedAt - runState.Run.StartedAt).TotalMilliseconds,
+                        Outcome:         "Completed",
+                        LlmModelName:    null,
+                        LlmInputTokens:  null,
+                        LlmOutputTokens: null));
+                }
             }
 
             PersistRunState(runState);
+            BroadcastRunStatus(runId, runState.Run.Status);
             FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -380,6 +496,7 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
             };
 
             PersistRunState(runState);
+            BroadcastRunStatus(runId, WorkflowRunStatus.Failed);
             DispatchEvent(new Core.Models.WorkflowExecutionEvent(
                 EventId:         Guid.NewGuid(),
                 RunId:           runId,
@@ -504,6 +621,22 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
         {
             _ = observer.RecordEventAsync(evt);
         }
+    }
+
+    /// <summary>
+    /// Invokes the optional SignalR broadcast callback (T048) so external clients (non-Blazor,
+    /// cross-server) receive run status changes without polling. Fire-and-forget — never throws.
+    /// </summary>
+    private void BroadcastRunStatus(string runId, WorkflowRunStatus status)
+    {
+        if (_broadcastUpdate is null)
+            return;
+
+        _ = Task.Run(async () =>
+        {
+            try { await _broadcastUpdate(runId, status.ToString()).ConfigureAwait(false); }
+            catch { /* Broadcast failures must never disrupt the run execution path. */ }
+        });
     }
 
     // ── Private inner class ────────────────────────────────────────────────────────

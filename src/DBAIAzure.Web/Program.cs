@@ -17,11 +17,23 @@ using DBAIAzure.Web.Services;
 using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.SemanticKernel;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.SemanticKernel.ChatCompletion;
 
 #pragma warning disable SKEXP0080
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ── Key Vault (T066): when KeyVault:Uri is set, overlay secrets from Azure Key Vault.
+// Credentials resolve via DefaultAzureCredential (managed identity in production, developer
+// credentials locally). Connector secrets referenced as "Connectors:<name>:<field>" in config
+// map transparently to Key Vault secrets with the same name (hyphens replace colons per KV rules).
+var keyVaultUri = builder.Configuration["KeyVault:Uri"];
+if (!string.IsNullOrWhiteSpace(keyVaultUri))
+{
+    var credential = new Azure.Identity.DefaultAzureCredential();
+    builder.Configuration.AddAzureKeyVault(new Uri(keyVaultUri), credential);
+}
 
 // ── Configuration ──────────────────────────────────────────────────────────────
 var anthropicKey   = builder.Configuration["Anthropic:ApiKey"]   ?? string.Empty;
@@ -309,7 +321,14 @@ builder.Services.AddSingleton<IWorkflowExecutionOrchestrator>(sp =>
     var approvalNotifier = sp.GetRequiredService<IWorkflowApprovalNotifier>();
     var observers        = sp.GetServices<IWorkflowObserver>();
 
-    return new WorkflowExecutionOrchestrator(kernelFactory, runRepo, approvalNotifier, observers);
+    // T048: broadcast run status changes to SignalR so non-Blazor clients (e.g., external dashboards)
+    // receive real-time updates without polling. The Blazor Review Queue uses the in-process
+    // RunUpdated event; this callback serves cross-process / cross-server consumers.
+    var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<WorkflowRunHub>>();
+    Func<string, string, Task> broadcastUpdate = (runId, statusText) =>
+        hubContext.Clients.All.SendAsync("RunStatusChanged", runId, statusText);
+
+    return new WorkflowExecutionOrchestrator(kernelFactory, runRepo, approvalNotifier, observers, broadcastUpdate);
 });
 
 var app = builder.Build();

@@ -16,13 +16,13 @@ public sealed class WorkflowRunHub : Hub
     /// Joins the caller to the per-run group so they receive targeted updates for that run.
     /// Called by the client immediately after connecting and navigating to a run view.
     /// </summary>
-    public Task SubscribeToRun(string runId) =>
+    public Task SubscribeToRunAsync(string runId) =>
         Groups.AddToGroupAsync(Context.ConnectionId, RunGroup(runId));
 
     /// <summary>
     /// Removes the caller from a per-run group when they navigate away.
     /// </summary>
-    public Task UnsubscribeFromRun(string runId) =>
+    public Task UnsubscribeFromRunAsync(string runId) =>
         Groups.RemoveFromGroupAsync(Context.ConnectionId, RunGroup(runId));
 
     /// <summary>Stable group name for a given run id.</summary>

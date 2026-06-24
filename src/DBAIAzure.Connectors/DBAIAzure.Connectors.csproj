@@ -11,6 +11,7 @@
          but must be explicit here since DBAIAzure.Connectors uses Microsoft.NET.Sdk (not Web).
          ILogger<T> is satisfied by the version SK already pulls transitively (no pin needed). -->
     <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.1" />
   </ItemGroup>
 
   <ItemGroup>
