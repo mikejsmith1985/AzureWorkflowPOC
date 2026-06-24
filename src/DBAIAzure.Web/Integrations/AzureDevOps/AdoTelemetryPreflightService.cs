@@ -326,19 +326,25 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
     private async Task<(AdoProcessType ProcessType, string? TemplateTypeId, string? Error)> DetectProcessTypeAsync(
         HttpClient http, string orgUrl, string project, CancellationToken ct)
     {
-        var url = $"{orgUrl.TrimEnd('/')}/{Uri.EscapeDataString(project)}/_apis/work/process/configuration?api-version={ApiVersion}";
+        // Use the projects capabilities endpoint — the only documented source for templateTypeId.
+        // _apis/work/process/configuration returns backlog config, not the process GUID.
+        var url = $"{orgUrl.TrimEnd('/')}/_apis/projects/{Uri.EscapeDataString(project)}?includeCapabilities=true&api-version={ApiVersion}";
         try
         {
             var response = await http.GetAsync(url, ct);
             if (!response.IsSuccessStatusCode)
-                return (AdoProcessType.Unsupported, null, $"Could not retrieve process configuration: {(int)response.StatusCode} {response.ReasonPhrase}");
+                return (AdoProcessType.Unsupported, null, $"Could not retrieve project capabilities: {(int)response.StatusCode} {response.ReasonPhrase}");
 
             var body = await response.Content.ReadAsStringAsync(ct);
             using var doc = JsonDocument.Parse(body);
 
-            var templateTypeId = doc.RootElement.TryGetProperty("templateTypeId", out var p)
-                ? p.GetString()
-                : null;
+            // capabilities.processTemplate.templateTypeId
+            var templateTypeId =
+                doc.RootElement.TryGetProperty("capabilities", out var caps) &&
+                caps.TryGetProperty("processTemplate", out var pt) &&
+                pt.TryGetProperty("templateTypeId", out var p)
+                    ? p.GetString()
+                    : null;
 
             var processType = templateTypeId?.ToLowerInvariant() switch
             {
@@ -349,11 +355,10 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
 
             if (processType == AdoProcessType.Unsupported)
             {
-                var typeName = templateTypeId ?? "unknown";
+                var typeName = templateTypeId ?? "not found — check PAT scope includes 'Project: Read'";
                 return (AdoProcessType.Unsupported, null,
                     $"The ADO project uses an unsupported process type (templateTypeId: {typeName}). " +
-                    "Only Agile and Scrum inherited processes are supported. " +
-                    "CMMI and hosted XML processes are not compatible with the telemetry field bootstrap.");
+                    "Only Agile and Scrum inherited processes are supported.");
             }
 
             return (processType, templateTypeId, null);
