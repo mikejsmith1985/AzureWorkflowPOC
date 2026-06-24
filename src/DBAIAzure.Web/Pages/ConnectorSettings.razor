@@ -336,6 +336,9 @@ else
             entry.IsConfigured    = true;
             entry.NonSecretConfig = nonSecretJson;
             entry.IsEditing       = false;
+            // A save invalidates the prior test result (the repository resets it too, FR-017), so clear
+            // the in-memory copy — otherwise a stale "Unhealthy" message lingers over the new credentials.
+            entry.TestResult      = null;
         }
         catch (Exception ex)
         {

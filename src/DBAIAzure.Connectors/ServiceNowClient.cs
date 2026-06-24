@@ -45,7 +45,7 @@ public sealed class ServiceNowClient
         var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}"));
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", encoded);
 
-        var url = $"{instanceUrl.TrimEnd('/')}/api/now/table/sys_properties?sysparm_limit=1";
+        var url = $"{NormalizeToOrigin(instanceUrl)}/api/now/table/sys_properties?sysparm_limit=1";
 
         try
         {
@@ -87,6 +87,28 @@ public sealed class ServiceNowClient
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Reduces a configured instance URL to its origin (scheme + host + optional port), discarding any
+    /// path, query, or fragment. Operators commonly paste the URL straight from the browser address bar
+    /// after signing in (e.g. <c>https://acme.service-now.com/login.do</c>); appending the Table API path
+    /// to that would hit <c>/login.do/api/now/...</c>, which ServiceNow 302-redirects to its login page
+    /// instead of authenticating. Normalizing here makes a correct credential set succeed regardless of
+    /// how the URL was entered.
+    /// </summary>
+    private static string NormalizeToOrigin(string instanceUrl)
+    {
+        if (Uri.TryCreate(instanceUrl, UriKind.Absolute, out var parsed) &&
+            (parsed.Scheme == Uri.UriSchemeHttp || parsed.Scheme == Uri.UriSchemeHttps))
+        {
+            // GetLeftPart(Authority) yields "https://host[:port]" with no trailing slash or path.
+            return parsed.GetLeftPart(UriPartial.Authority);
+        }
+
+        // Not a parseable absolute URL — fall back to trimming a trailing slash. A still-malformed
+        // value surfaces as a clear connection error from the live call rather than failing silently.
+        return instanceUrl.TrimEnd('/');
+    }
 
     private async Task<(string InstanceUrl, string Username, string Password)> ResolveCredentialsAsync(
         CancellationToken ct)

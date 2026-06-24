@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — ServiceNow health check failed when Instance URL included a path
+
+A ServiceNow Instance URL pasted from the browser address bar (e.g.
+`https://acme.service-now.com/login.do`) caused the health check to build
+`…/login.do/api/now/table/sys_properties`, which ServiceNow 302-redirects to its login
+page — so even valid credentials never authenticated and the connector showed "Unhealthy".
+`ServiceNowClient` now normalizes the configured URL to its origin (scheme + host)
+before appending the Table API path, so stored credentials work regardless of how the URL
+was entered. No re-entry is required for the existing stored value.
+
+Additionally, the Connector Settings page now clears the in-memory health-check result after
+a save, so a stale "Unhealthy / no credentials stored" message no longer lingers over freshly
+entered credentials.
+
 ### Fixed — ServiceNow credentials lost on app restart
 
 `AddDataProtection()` was called without key persistence. ASP.NET Core Data Protection
