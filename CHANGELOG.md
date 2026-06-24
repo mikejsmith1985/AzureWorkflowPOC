@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — ADO preflight process-type detection returns 404
+
+`DetectProcessTypeAsync` was calling `_apis/work/process/configuration` to read the project's
+process template GUID. That endpoint returns backlog/field configuration — it does not expose
+`templateTypeId` and is not available at api-version 7.1, causing a 404 for all users.
+
+Replaced with the documented projects capabilities endpoint:
+`_apis/projects/{project}?includeCapabilities=true&api-version=7.1`
+which returns `capabilities.processTemplate.templateTypeId` and works for all ADO organisations.
+Updated all unit-test HTTP mocks to match the new URL and response shape.
+
 ### Added — ADO Telemetry Field Bootstrap: preflight service bootstraps custom fields before ticket creation (spec 009)
 
 Before work items are created by the Spec Kit pipeline, a preflight step ensures the required ADO

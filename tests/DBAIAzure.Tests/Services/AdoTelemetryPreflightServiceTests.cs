@@ -107,11 +107,11 @@ public sealed class AdoTelemetryPreflightServiceTests
     {
         var handler = new FakeHttpHandler();
         handler.AddResponse(
-            url => url.Contains("/_apis/work/process/configuration"),
+            url => url.Contains("/_apis/projects/") && url.Contains("includeCapabilities=true"),
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    """{"typeId":"agile-id","templateTypeId":"6b724908-ef14-45cf-84f8-768b5384da45"}""",
+                    """{"capabilities":{"processTemplate":{"templateTypeId":"6b724908-ef14-45cf-84f8-768b5384da45"}}}""",
                     Encoding.UTF8, "application/json"),
             });
         handler.AddDefaultAdminOkResponse();
@@ -134,11 +134,11 @@ public sealed class AdoTelemetryPreflightServiceTests
     {
         var handler = new FakeHttpHandler();
         handler.AddResponse(
-            url => url.Contains("/_apis/work/process/configuration"),
+            url => url.Contains("/_apis/projects/") && url.Contains("includeCapabilities=true"),
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    """{"typeId":"scrum-id","templateTypeId":"adcc42ab-9882-485e-a3ed-7678f01f66bc"}""",
+                    """{"capabilities":{"processTemplate":{"templateTypeId":"adcc42ab-9882-485e-a3ed-7678f01f66bc"}}}""",
                     Encoding.UTF8, "application/json"),
             });
         handler.AddDefaultAdminOkResponse();
@@ -160,11 +160,11 @@ public sealed class AdoTelemetryPreflightServiceTests
     {
         var handler = new FakeHttpHandler();
         handler.AddResponse(
-            url => url.Contains("/_apis/work/process/configuration"),
+            url => url.Contains("/_apis/projects/") && url.Contains("includeCapabilities=true"),
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    """{"typeId":"cmmi-id","templateTypeId":"27450541-8e31-4150-9947-dc59f998fc01"}""",
+                    """{"capabilities":{"processTemplate":{"templateTypeId":"27450541-8e31-4150-9947-dc59f998fc01"}}}""",
                     Encoding.UTF8, "application/json"),
             });
 
@@ -172,7 +172,7 @@ public sealed class AdoTelemetryPreflightServiceTests
         var result = await service.RunPreflightAsync(MinimalFieldConfig());
 
         Assert.False(result.IsSuccess);
-        Assert.Contains("CMMI", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("unsupported process type", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     // ── T015: Bootstrap field operations ─────────────────────────────────────────
@@ -401,12 +401,13 @@ internal sealed class FakeHttpHandler : HttpMessageHandler
         var templateId = isAgile
             ? "6b724908-ef14-45cf-84f8-768b5384da45"
             : "adcc42ab-9882-485e-a3ed-7678f01f66bc";
+        // Service now calls _apis/projects/{project}?includeCapabilities=true for templateTypeId.
         AddResponse(
-            url => url.Contains("/_apis/work/process/configuration"),
+            url => url.Contains("/_apis/projects/") && url.Contains("includeCapabilities=true"),
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    $"{{\"typeId\":\"proc-id\",\"templateTypeId\":\"{templateId}\"}}",
+                    $"{{\"capabilities\":{{\"processTemplate\":{{\"templateTypeId\":\"{templateId}\"}}}}}}",
                     Encoding.UTF8, "application/json"),
             });
     }
