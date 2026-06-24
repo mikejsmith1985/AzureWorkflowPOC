@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — ServiceNow credentials lost on app restart
+
+`AddDataProtection()` was called without key persistence. ASP.NET Core Data Protection
+generates ephemeral keys by default — a restart produces new keys and all previously
+encrypted connector secrets become unreadable ("Stored credentials could not be decrypted").
+Keys are now persisted to `%APPDATA%\AzureWorkflowPOC\DataProtection-Keys` with a pinned
+application name so they survive restarts and redeploys.
+**Action required**: re-enter ServiceNow (and any other connector) credentials once after
+this restart; they will persist from then on.
+
+### Changed — LLM connector redesigned: provider dropdown + live model list
+
+The LLM connector no longer asks for a raw URL.
+
+- **Provider dropdown** — select Anthropic (Claude) or OpenAI
+- **API Key** — password field; leave blank to keep the stored key
+- **Fetch Models button** — calls the provider's live models API (`/v1/models`)
+  using the entered key (or the stored one if left blank) and populates a dropdown.
+  No model names are hardcoded; no fallback list exists.
+- On opening Edit the model list auto-fetches if a provider and stored key are already set.
+- Storage format: `NonSecretConfig` now stores `{"provider":"anthropic","modelName":"..."}`;
+  the `providerEndpoint` URL field is removed.
+
 ### Fixed — ADO preflight fails for custom inherited process templates (v1.2.3)
 
 `ResolveInheritedParentTypeAsync` was calling `_apis/process/processes/{id}` which returns the

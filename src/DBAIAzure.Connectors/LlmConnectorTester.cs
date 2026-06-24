@@ -123,7 +123,7 @@ public sealed class LlmConnectorTester
                 : null;
 
             return (
-                nonSecret?.ProviderEndpoint ?? string.Empty,
+                EndpointFromProvider(nonSecret?.Provider ?? string.Empty),
                 nonSecret?.ModelName ?? string.Empty,
                 secrets?.ApiKey ?? string.Empty
             );
@@ -133,6 +133,13 @@ public sealed class LlmConnectorTester
             return (string.Empty, string.Empty, string.Empty);
         }
     }
+
+    private static string EndpointFromProvider(string provider) => provider.ToLowerInvariant() switch
+    {
+        "anthropic" => "https://api.anthropic.com",
+        "openai"    => "https://api.openai.com",
+        _           => string.Empty,
+    };
 
     private sealed record LlmSecrets(string? ApiKey);
 }
