@@ -2,9 +2,11 @@
 @page "/settings/connectors"
 @inject IConnectorConfigRepository ConfigRepository
 @inject IConnectorHealthChecker HealthChecker
+@inject IAdoTelemetryPreflightService AdoPreflightService
 @inject ILogger<ConnectorSettings> Logger
 @using DBAIAzure.Core.Interfaces
 @using DBAIAzure.Core.Models
+@using DBAIAzure.Core.Models.AdoTelemetry
 
 <div class="flex items-center justify-between mb-6">
     <h1 class="text-xl font-semibold text-gray-100">Connector Settings</h1>
@@ -53,6 +55,16 @@ else
                                        disabled:cursor-not-allowed text-white transition-colors">
                             @(entry.IsChecking ? "Checking…" : "Check Health")
                         </button>
+                        @if (entry.ConnectorType == ConnectorType.AzureDevOps)
+                        {
+                            <button @onclick="RunAdoPreflight"
+                                    disabled="@(!entry.IsConfigured || _isPreflightRunning)"
+                                    data-testid="ado-preflight-button"
+                                    class="px-3 py-1.5 text-xs rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40
+                                           disabled:cursor-not-allowed text-white transition-colors">
+                                @(_isPreflightRunning ? "Running…" : "Test Connection")
+                            </button>
+                        }
                     </div>
                 </div>
 
@@ -60,6 +72,22 @@ else
                 @if (entry.TestResult is { Message: { Length: > 0 } msg })
                 {
                     <p class="text-xs text-gray-500 mb-3">@msg · @FormatAge(entry.TestResult.TestedAt)</p>
+                }
+
+                <!-- ── ADO preflight result badge ────────────────────────── -->
+                @if (entry.ConnectorType == ConnectorType.AzureDevOps && _preflightResult is not null)
+                {
+                    var preflightBadge = _preflightResult.IsSuccess
+                        ? "bg-green-900 text-green-300"
+                        : "bg-red-900 text-red-300";
+                    <div class="flex items-center gap-2 mb-3">
+                        <span data-testid="ado-preflight-result"
+                              class="text-xs px-2 py-0.5 rounded-full @preflightBadge">
+                            @(_preflightResult.IsSuccess
+                                ? $"Preflight OK — {_preflightResult.Manifest?.Mode}"
+                                : $"Preflight failed: {_preflightResult.ErrorMessage}")
+                        </span>
+                    </div>
                 }
 
                 <!-- ── Edit form ──────────────────────────────────────────── -->
@@ -116,6 +144,8 @@ else
 @code {
     private bool _loading = true;
     private List<ConnectorEntry> _entries = [];
+    private bool _isPreflightRunning;
+    private PreflightResult? _preflightResult;
 
     protected override async Task OnInitializedAsync()
     {
@@ -165,6 +195,26 @@ else
         finally
         {
             entry.IsSaving = false;
+        }
+    }
+
+    private async Task RunAdoPreflight()
+    {
+        _isPreflightRunning = true;
+        _preflightResult    = null;
+        StateHasChanged();
+        try
+        {
+            _preflightResult = await AdoPreflightService.RunPreflightAsync(null, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "ADO preflight threw unexpectedly from UI");
+            _preflightResult = PreflightResult.Fail($"Unexpected error: {ex.Message}");
+        }
+        finally
+        {
+            _isPreflightRunning = false;
         }
     }
 

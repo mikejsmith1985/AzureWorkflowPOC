@@ -7,6 +7,7 @@
 using Bunit;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Models.AdoTelemetry;
 using DBAIAzure.Web.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -91,6 +92,7 @@ public sealed class ConnectorSettingsPanelTests : TestContext
     {
         Services.AddSingleton<IConnectorConfigRepository>(repo);
         Services.AddSingleton(checker);
+        Services.AddSingleton<IAdoTelemetryPreflightService>(new NullPreflightService());
         Services.AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<ConnectorSettings>),
             NullLogger<ConnectorSettings>.Instance);
     }
@@ -126,6 +128,21 @@ public sealed class ConnectorSettingsPanelTests : TestContext
             Task.FromResult<string?>(null);
         public Task UpdateTestResultAsync(ConnectorType type, ConnectorTestResult result, CancellationToken ct = default) =>
             Task.CompletedTask;
+    }
+
+    private sealed class NullPreflightService : IAdoTelemetryPreflightService
+    {
+        public Task<PreflightResult> RunPreflightAsync(AdoTelemetryFieldConfig? _, CancellationToken __)
+            => Task.FromResult(PreflightResult.Succeed(new BootstrapManifest
+            {
+                Timestamp = DateTimeOffset.UtcNow,
+                OrgUrl = "https://dev.azure.com/test",
+                Project = "Test",
+                ProcessType = AdoProcessType.Agile,
+                FieldsCreated = Array.Empty<string>(),
+                FieldsExisting = Array.Empty<string>(),
+                FieldsFailed = Array.Empty<FieldBootstrapFailure>(),
+            }));
     }
 
     private sealed class NullHealthChecker : IConnectorHealthChecker

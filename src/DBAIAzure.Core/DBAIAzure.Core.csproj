@@ -9,4 +9,9 @@
     <!-- DiffPlex: MIT-licensed line-level diff engine used by WorkflowCodeDiffService -->
     <PackageReference Include="DiffPlex" Version="1.7.2" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Default telemetry field config baked into the assembly for zero-deploy defaults (T002). -->
+    <EmbeddedResource Include="Resources/default-telemetry-config.json" />
+  </ItemGroup>
 </Project>
