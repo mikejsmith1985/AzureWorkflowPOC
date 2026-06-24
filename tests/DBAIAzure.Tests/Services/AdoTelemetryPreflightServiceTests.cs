@@ -189,9 +189,9 @@ public sealed class AdoTelemetryPreflightServiceTests
                     $"{{\"capabilities\":{{\"processTemplate\":{{\"templateTypeId\":\"{customGuid}\"}}}}}}",
                     Encoding.UTF8, "application/json"),
             });
-        // Service resolves inherited parent via _apis/process/processes/{guid}
+        // Service resolves inherited parent via _apis/work/processes/{guid} (not _apis/process/processes)
         handler.AddResponse(
-            url => url.Contains($"/_apis/process/processes/{customGuid}"),
+            url => url.Contains($"/_apis/work/processes/{customGuid}"),
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
