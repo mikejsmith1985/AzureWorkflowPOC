@@ -422,13 +422,13 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
         };
 
     /// <summary>
-    /// Calls _apis/process/processes/{typeId} to read parentProcessTypeId.
-    /// Handles custom inherited processes whose own GUID doesn't match a built-in.
+    /// Calls _apis/work/processes/{typeId} (the inherited-process API) to read parentProcessTypeId.
+    /// _apis/process/processes returns the basic Process object which omits parentProcessTypeId.
     /// </summary>
     private async Task<AdoProcessType> ResolveInheritedParentTypeAsync(
         HttpClient http, string orgUrl, string typeId, CancellationToken ct)
     {
-        var url = $"{orgUrl.TrimEnd('/')}/_apis/process/processes/{Uri.EscapeDataString(typeId)}?api-version={ApiVersion}";
+        var url = $"{orgUrl.TrimEnd('/')}/_apis/work/processes/{Uri.EscapeDataString(typeId)}?api-version={ApiVersion}";
         try
         {
             var response = await http.GetAsync(url, ct);

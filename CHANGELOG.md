@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — ADO preflight fails for custom inherited process templates (v1.2.3)
+
+`ResolveInheritedParentTypeAsync` was calling `_apis/process/processes/{id}` which returns the
+basic `Process` object without `parentProcessTypeId`. The correct endpoint is
+`_apis/work/processes/{id}` (Work namespace) which includes the `parentProcessTypeId` field
+needed to walk up the inheritance chain.
+
 ### Fixed — ADO preflight fails for custom inherited process templates
 
 `DetectProcessTypeAsync` only matched the two built-in Agile and Scrum GUIDs. Projects using a
