@@ -6,8 +6,8 @@ namespace DBAIAzure.Core.Models;
 /// <c>ConnectorConfig.NonSecretConfig</c>. The API key is stored in the encrypted secrets blob.
 /// </summary>
 public record LlmConnectorConfig(
-    /// <summary>Base URL of the LLM provider (e.g., <c>https://api.anthropic.com</c>).</summary>
-    string ProviderEndpoint,
+    /// <summary>Provider identifier — "anthropic" or "openai".</summary>
+    string Provider,
 
-    /// <summary>Model identifier used in inference requests (e.g., <c>claude-sonnet-4-6</c>).</summary>
+    /// <summary>Model identifier resolved from the provider's live model list.</summary>
     string ModelName);

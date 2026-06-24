@@ -93,6 +93,7 @@ public sealed class ConnectorSettingsPanelTests : TestContext
         Services.AddSingleton<IConnectorConfigRepository>(repo);
         Services.AddSingleton(checker);
         Services.AddSingleton<IAdoTelemetryPreflightService>(new NullPreflightService());
+        Services.AddSingleton<DBAIAzure.Web.Integrations.LLM.ILlmModelFetcherService>(new NullLlmModelFetcher());
         Services.AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<ConnectorSettings>),
             NullLogger<ConnectorSettings>.Instance);
     }
@@ -128,6 +129,12 @@ public sealed class ConnectorSettingsPanelTests : TestContext
             Task.FromResult<string?>(null);
         public Task UpdateTestResultAsync(ConnectorType type, ConnectorTestResult result, CancellationToken ct = default) =>
             Task.CompletedTask;
+    }
+
+    private sealed class NullLlmModelFetcher : DBAIAzure.Web.Integrations.LLM.ILlmModelFetcherService
+    {
+        public Task<IReadOnlyList<string>> FetchModelsAsync(string provider, string apiKey, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
     }
 
     private sealed class NullPreflightService : IAdoTelemetryPreflightService

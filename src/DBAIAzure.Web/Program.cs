@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection;
 using System.Text.Json;
 using DBAIAzure.Connectors;
 using DBAIAzure.Core.Configuration;
@@ -59,7 +60,15 @@ builder.Services.AddDbContextFactory<PipelineDbContext>(options =>
 builder.Services.AddSingleton<IRunRepository, SqliteRunRepository>();
 
 // ── Data Protection — encrypts connector secrets at rest (T001, FR-019) ───────
-builder.Services.AddDataProtection();
+// Keys are persisted to AppData so they survive app restarts. Without persistence,
+// a restart generates new keys and makes all stored secrets unreadable.
+var dpKeyDir = new DirectoryInfo(Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+    "AzureWorkflowPOC", "DataProtection-Keys"));
+dpKeyDir.Create();
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(dpKeyDir)
+    .SetApplicationName("AzureWorkflowPOC");
 builder.Services.AddSingleton<ISecretProtector, DataProtectorAdapter>();
 
 // ── Connector config repository (T013) ────────────────────────────────────────
@@ -269,6 +278,12 @@ builder.Services.AddHttpClient(nameof(DBAIAzure.Web.Integrations.AzureDevOps.Ado
 builder.Services.AddScoped<DBAIAzure.Web.Integrations.AzureDevOps.ManifestPathResolver>();
 builder.Services.AddScoped<DBAIAzure.Core.Interfaces.IAdoTelemetryPreflightService,
     DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryPreflightService>();
+
+// ── LLM model fetcher — live model list from Anthropic / OpenAI ───────────────
+builder.Services.AddHttpClient(nameof(DBAIAzure.Web.Integrations.LLM.LlmModelFetcherService),
+    client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddScoped<DBAIAzure.Web.Integrations.LLM.ILlmModelFetcherService,
+    DBAIAzure.Web.Integrations.LLM.LlmModelFetcherService>();
 
 // ── Node Realization services (spec 007) ───────────────────────────────────────
 // Schema-bound LLM output for turning plain-language nodes into executable config (Article VII).
