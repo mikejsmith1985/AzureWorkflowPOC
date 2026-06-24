@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — ADO Telemetry Field Bootstrap: preflight service bootstraps custom fields before ticket creation (spec 009)
+
+Before work items are created by the Spec Kit pipeline, a preflight step ensures the required ADO
+custom telemetry fields exist. The feature operates in two modes chosen automatically at runtime:
+
+- **Bootstrap mode (US1)** — admin access detected: creates 14 custom fields (`Custom.AISessionID`,
+  `Custom.AIModelUsed`, token/cost/cache/rate counters, `Custom.SpeckitPhase` picklist) across
+  `User Story` and `Task` work item types via the ADO Inherited Process API. Retries up to 3 times
+  with exponential backoff on 429/503 HTTP errors. Writes a `.ado-bootstrap-manifest.json` to the
+  active spec feature directory.
+- **Adaptive mode (US2)** — admin probe returns 403: scans the org's existing fields and builds a
+  fallback mapping (exact match → `FallbackReferenceName` → type-level fallback → log-only). Lets the
+  pipeline continue without admin rights at the cost of telemetry fidelity.
+- **Config override (US4)** — callers can pass a custom `AdoTelemetryFieldConfig` to `RunPreflightAsync`
+  to swap the embedded default field schema without redeploying.
+- **Startup auto-run** — `app.Lifetime.ApplicationStarted` fires a fire-and-forget preflight so fields
+  are ready before the first ticket request.
+- **"Test Connection" button (US3)** — the ADO connector card on `/settings/connectors` shows a
+  dedicated "Test Connection" button. On click, `IAdoTelemetryPreflightService.RunPreflightAsync` runs
+  and the result is surfaced via a `data-testid="ado-preflight-result"` badge.
+- **SK Process step** — `AdoTelemetryPreflightStep : KernelProcessStep<AdoPreflightStepState>` wraps
+  the service for integration into the Spec Kit SK process pipeline. Emits
+  `AdoPreflightSucceeded` / `AdoPreflightFailed` events for downstream steps to react to.
+- **Unit tests** — `AdoTelemetryPreflightServiceTests` and `AdoTelemetryPreflightStepTests` (408 tests
+  total passing). `RetryDelayFactory` is publicly overridable so retry tests complete in milliseconds.
+- **E2E tests** — two new Playwright tests in `ConnectorSettingsTests`:
+  `ConnectorSettings_AdoPreflightButton_RendersOnAdoCard` (always runs) and
+  `ConnectorSettings_AdoPreflightButton_WhenClicked_ShowsResultBadge` (live-credential path gated on
+  `E2E_TEST_ADO_PAT`).
+
 ### Added — Production Platform Parity: run persistence, HITL close-loop, execution history, DoR validation (spec 008)
 
 Implements the Azure-stack completeness feature set across US1–US7:

@@ -262,6 +262,14 @@ builder.Services.AddSingleton<IWorkflowCodeDiffService, WorkflowCodeDiffService>
 // WorkflowBuilderService is scoped (one instance per session / per page).
 builder.Services.AddScoped<WorkflowBuilderService>();
 
+// ── ADO Telemetry Preflight (spec-009) ────────────────────────────────────────
+// Named HttpClient for the preflight service — reuses the ADO-scoped client pattern.
+builder.Services.AddHttpClient(nameof(DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryPreflightService),
+    client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddScoped<DBAIAzure.Web.Integrations.AzureDevOps.ManifestPathResolver>();
+builder.Services.AddScoped<DBAIAzure.Core.Interfaces.IAdoTelemetryPreflightService,
+    DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryPreflightService>();
+
 // ── Node Realization services (spec 007) ───────────────────────────────────────
 // Schema-bound LLM output for turning plain-language nodes into executable config (Article VII).
 // AnthropicChatCompletionService implements IStructuredCompletionService; registered at the app root
@@ -422,6 +430,31 @@ using (var scope = app.Services.CreateScope())
             ON WorkflowExecutionEvents (RunId, OccurredAt);
         """);
 }
+
+// ── ADO Telemetry Preflight auto-run on startup (spec-009, T034) ──────────────
+// Fire-and-forget: runs in the background so startup is not blocked. Uses a scoped service
+// lifetime inside CreateScope to avoid capturing the root provider (captive dependency guard).
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    _ = Task.Run(async () =>
+    {
+        await using var scope = app.Services.CreateAsyncScope();
+        var preflight = scope.ServiceProvider.GetRequiredService<DBAIAzure.Core.Interfaces.IAdoTelemetryPreflightService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryPreflightService>>();
+        try
+        {
+            var result = await preflight.RunPreflightAsync(null, CancellationToken.None);
+            if (result.IsSuccess)
+                logger.LogInformation("ADO preflight succeeded on startup: mode={Mode}", result.Manifest?.Mode);
+            else
+                logger.LogWarning("ADO preflight failed on startup: {Error}", result.ErrorMessage);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "ADO preflight threw unexpectedly on startup — pipeline continues.");
+        }
+    });
+});
 
 if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error");
