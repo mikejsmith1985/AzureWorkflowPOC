@@ -77,8 +77,9 @@ public sealed class ConnectorSettingsTests : E2ETestBase
         var webhookField = messagingCard.Locator("input[type='password']").First;
         await webhookField.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
 
-        // Switching platform must not throw / break the form (Save remains available).
+        // Switching platform (twice) must not throw / break the form (Save remains available).
         await platformSelect.SelectOptionAsync(new SelectOptionValue { Value = "Slack" });
+        await platformSelect.SelectOptionAsync(new SelectOptionValue { Value = "Discord" });
         await messagingCard.Locator("button:has-text('Save')").First
             .WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
     }

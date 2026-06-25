@@ -29,6 +29,10 @@ else
                 <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center gap-3">
                         <span class="text-sm font-semibold text-gray-100">@ConnectorDisplayName(entry.ConnectorType)</span>
+                        @if (entry.ConnectorType == ConnectorType.Messaging && entry.PlatformLabel is { Length: > 0 } platform)
+                        {
+                            <span class="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-300">@platform</span>
+                        }
                         @if (entry.IsConfigured)
                         {
                             <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-900 text-cyan-300">Configured</span>
@@ -196,7 +200,8 @@ else
                             <!-- Platform dropdown -->
                             <div>
                                 <label class="block text-xs text-gray-400 mb-1">Platform</label>
-                                <select @bind="entry.DraftUrl" class="@InputClass">
+                                @* Switching platform invalidates the prior health result for the old platform. *@
+                                <select @bind="entry.DraftUrl" @bind:after="() => { entry.TestResult = null; }" class="@InputClass">
                                     <option value="Teams">Microsoft Teams</option>
                                     <option value="Slack">Slack</option>
                                     <option value="Discord">Discord</option>
@@ -497,6 +502,25 @@ else
             IsConfigured    = config.IsConfigured;
             NonSecretConfig = config.NonSecretConfig;
             TestResult      = config.LastTestResult;
+        }
+
+        /// <summary>Friendly platform name for the Messaging connector, parsed from the stored config;
+        /// empty when not a Messaging connector or no platform is stored.</summary>
+        public string PlatformLabel
+        {
+            get
+            {
+                if (ConnectorType != ConnectorType.Messaging || string.IsNullOrWhiteSpace(NonSecretConfig))
+                    return string.Empty;
+                try
+                {
+                    using var doc = JsonDocument.Parse(NonSecretConfig);
+                    if (doc.RootElement.TryGetProperty("platform", out var p) && p.GetString() is { Length: > 0 } value)
+                        return value == nameof(MessagingPlatform.Teams) ? "Microsoft Teams" : value;
+                }
+                catch { /* malformed — no label */ }
+                return string.Empty;
+            }
         }
 
         /// <summary>Populates DraftUrl and DraftUsername from the stored NonSecretConfig JSON.</summary>
