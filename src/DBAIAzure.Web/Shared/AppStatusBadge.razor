@@ -1,0 +1,46 @@
+@* Colored status indicator for a monitored repo-app (feature 013).
+   Mirrors the visual language of the rest of the dark-theme UI. *@
+@using DBAIAzure.Core.Models
+
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium @ClassFor(Status)"
+      aria-label="App status: @Label(Status)">
+    <span class="w-1.5 h-1.5 rounded-full @DotFor(Status)"></span>
+    @Label(Status)
+</span>
+
+@code {
+    /// <summary>The app lifecycle status to render.</summary>
+    [Parameter, EditorRequired]
+    public AppStatus Status { get; set; }
+
+    private static string Label(AppStatus status) => status switch
+    {
+        AppStatus.Registered => "Registered",
+        AppStatus.Building => "Building",
+        AppStatus.Ready => "Ready",
+        AppStatus.BuildFailed => "Build Failed",
+        AppStatus.Running => "Running",
+        _ => status.ToString()
+    };
+
+    // Tailwind classes chosen to match the existing palette: neutral / amber / green / red / blue.
+    private static string ClassFor(AppStatus status) => status switch
+    {
+        AppStatus.Registered => "bg-gray-800 text-gray-300",
+        AppStatus.Building => "bg-amber-900/40 text-amber-300",
+        AppStatus.Ready => "bg-emerald-900/40 text-emerald-300",
+        AppStatus.BuildFailed => "bg-red-900/40 text-red-300",
+        AppStatus.Running => "bg-cyan-900/40 text-cyan-300",
+        _ => "bg-gray-800 text-gray-300"
+    };
+
+    private static string DotFor(AppStatus status) => status switch
+    {
+        AppStatus.Registered => "bg-gray-400",
+        AppStatus.Building => "bg-amber-400 animate-pulse",
+        AppStatus.Ready => "bg-emerald-400",
+        AppStatus.BuildFailed => "bg-red-400",
+        AppStatus.Running => "bg-cyan-400 animate-pulse",
+        _ => "bg-gray-400"
+    };
+}

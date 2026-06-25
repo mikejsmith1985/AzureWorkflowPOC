@@ -15,6 +15,10 @@
     <!-- Official MCP C# SDK (client only) — the Messaging connector is an MCP client over HTTP/SSE.
          Using the SDK satisfies the Framework-First gate (Article VII) vs. hand-rolling JSON-RPC. -->
     <PackageReference Include="ModelContextProtocol.Core" Version="1.4.0" />
+    <!-- Official Docker Engine API client — the repo-app executor builds/runs a target repo's app
+         in throwaway containers (feature 013). Satisfies the Framework-First gate (Article VII)
+         vs. shelling out to the docker CLI and parsing text. -->
+    <PackageReference Include="Docker.DotNet" Version="3.125.15" />
   </ItemGroup>
 
   <ItemGroup>

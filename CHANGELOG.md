@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Point at a repo, run its app in a throwaway container, monitor it (feature 013)
+
+A new **Apps** surface lets you point at a target repository by local path, build and run that repo's
+application in its own **disposable container**, and link any saved workflow to **monitor** it —
+mirroring the reference LangGraph app's repo → container build/run → workflow-monitors-it architecture
+(see `specs/013-repo-app-monitoring/`).
+
+- **App registry**: register a repo (name, local path, optional branch, optional build command,
+  required run command); owner-scoped with per-owner unique names; persisted in SQLite
+  (`MonitoredApps`). Lifecycle mirrors the reference: Registered → Building → (Ready | Build Failed);
+  Ready → Running → Ready, with a single-in-flight guard so an app is never left stuck (FR-008/016).
+- **Throwaway-container build/run**: an `IAppExecutor` seam with two implementations — a **simulated**
+  executor (default; synthesizes outcomes, no engine required) and a real **Docker** executor
+  (`Docker.DotNet`) that builds/runs in a fresh container removed by its specific id afterwards
+  (Article II), with bind-mounted read-only repo, a per-app artifact volume, captured **secret-redacted**
+  logs (Article IX), a hard timeout, and start-failure handling. The active executor is chosen at
+  startup (Docker when reachable and not in demo mode, else simulated) and shown as an indicator.
+- **Workflow monitoring**: link any saved workflow as an app's monitor. A hosted background loop builds
+  a `MonitoringSnapshot` (status + latest run outcome/summary + redacted log tail, FR-018) and, on a
+  detected problem, starts a bounded run via the existing `WorkflowExecutionOrchestrator` — the same
+  path any run uses — de-duplicated by issue signature so a recurring problem is raised once
+  (close-the-loop). Per-app monitoring health (last cycle, ok/fail, error) is surfaced.
+- **UI**: an **Apps** nav tab, an `/apps` list with status badges + register form + Build/Run/Link/Remove,
+  and an `/apps/{id}` detail page with build/run summaries, full redacted logs, the workflow link, and
+  monitoring health.
+- Reuses existing machinery (framework-first, Article VII): the workflow orchestrator, saved-workflow
+  gallery, the connector-config/`ISecretProtector` pattern, `PipelineDbContext` idempotent DDL, and the
+  in-process live-update pattern. The only new dependency is `Docker.DotNet`.
+
 ### Changed — Teams connector generalized to a multi-platform Messaging connector
 
 The single-purpose "Teams" connector is now a **Messaging** connector that targets Microsoft

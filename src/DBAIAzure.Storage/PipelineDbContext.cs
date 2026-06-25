@@ -27,6 +27,15 @@ public class PipelineDbContext : DbContext
     /// <summary>Step-level audit events produced by IWorkflowObserver (FR-21).</summary>
     public DbSet<WorkflowExecutionEventEntity> WorkflowExecutionEvents { get; set; } = null!;
 
+    /// <summary>One row per registered repo-app (feature 013); build/run results stored as JSON.</summary>
+    public DbSet<MonitoredAppRecord> MonitoredApps { get; set; } = null!;
+
+    /// <summary>One heartbeat row per monitored app (feature 013).</summary>
+    public DbSet<AppMonitoringHeartbeatRecord> AppMonitoringHeartbeats { get; set; } = null!;
+
+    /// <summary>Close-the-loop dedup signatures per monitored app (feature 013).</summary>
+    public DbSet<AppRaisedIssueRecord> AppRaisedIssues { get; set; } = null!;
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<RunRecord>(entity =>
@@ -104,6 +113,32 @@ public class PipelineDbContext : DbContext
             entity.HasIndex(r => new { r.OwnerId, r.Name }).IsUnique();
             // Covering index for the ListByOwner query — avoids a full table scan per user.
             entity.HasIndex(r => r.OwnerId);
+        });
+
+        modelBuilder.Entity<MonitoredAppRecord>(entity =>
+        {
+            entity.ToTable("MonitoredApps");
+            entity.HasKey(r => r.AppId);
+            entity.Property(r => r.AppId).ValueGeneratedNever();
+            // Each owner can have only one app with a given name (data-model: per-owner uniqueness).
+            entity.HasIndex(r => new { r.OwnerId, r.Name }).IsUnique();
+            // Covering index for the per-owner gallery query.
+            entity.HasIndex(r => r.OwnerId);
+        });
+
+        modelBuilder.Entity<AppMonitoringHeartbeatRecord>(entity =>
+        {
+            entity.ToTable("AppMonitoringHeartbeats");
+            entity.HasKey(r => r.AppId);
+            entity.Property(r => r.AppId).ValueGeneratedNever();
+        });
+
+        modelBuilder.Entity<AppRaisedIssueRecord>(entity =>
+        {
+            entity.ToTable("AppRaisedIssues");
+            entity.HasKey(r => r.Signature);
+            entity.Property(r => r.Signature).ValueGeneratedNever();
+            entity.HasIndex(r => r.AppId);
         });
     }
 }
