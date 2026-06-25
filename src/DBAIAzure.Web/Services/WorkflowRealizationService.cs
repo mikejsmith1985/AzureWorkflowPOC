@@ -110,7 +110,7 @@ public sealed class WorkflowRealizationService : IWorkflowRealizationService
 
     // Connector-category sets used to gate proposers before the LLM is called (T047).
     private static readonly IReadOnlySet<ConnectorType> MessagingConnectors =
-        new HashSet<ConnectorType> { ConnectorType.Teams };
+        new HashSet<ConnectorType> { ConnectorType.Messaging };
 
     private static readonly IReadOnlySet<ConnectorType> DataConnectors =
         new HashSet<ConnectorType> { ConnectorType.ServiceNow, ConnectorType.AzureDevOps };
@@ -317,7 +317,7 @@ public sealed class WorkflowRealizationService : IWorkflowRealizationService
 
         var config = new NotifyNodeConfig
         {
-            Connector       = ParseConnector(dto.Connector, ConnectorType.Teams),
+            Connector       = ParseConnector(dto.Connector, ConnectorType.Messaging),
             RecipientMap    = dto.RecipientMap ?? string.Empty,
             MessageTemplate = dto.MessageTemplate ?? string.Empty,
         };

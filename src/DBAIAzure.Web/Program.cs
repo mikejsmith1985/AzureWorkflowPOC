@@ -83,6 +83,17 @@ builder.Services.AddHttpClient(nameof(ServiceNowClient), client =>
     client.Timeout = TimeSpan.FromSeconds(35);
 });
 
+// ── Messaging connector — webhook delivery profiles + delivery seam (010 US1) ─────
+// One profile per platform; MessageDelivery resolves config/secrets per call and chooses the path.
+builder.Services.AddHttpClient(nameof(DBAIAzure.Connectors.Messaging.MessageDelivery));
+builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IPlatformWebhookProfile,
+    DBAIAzure.Connectors.Messaging.TeamsWebhookProfile>();
+builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IPlatformWebhookProfile,
+    DBAIAzure.Connectors.Messaging.SlackWebhookProfile>();
+builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IPlatformWebhookProfile,
+    DBAIAzure.Connectors.Messaging.DiscordWebhookProfile>();
+builder.Services.AddSingleton<IMessageDelivery, DBAIAzure.Connectors.Messaging.MessageDelivery>();
+
 // ── Teams HITL notifier ────────────────────────────────────────────────────────
 builder.Services.AddHttpClient(nameof(TeamsHitlNotifier), client =>
 {
@@ -217,7 +228,7 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
 builder.Services.AddSingleton<ServiceNowClient>();
 builder.Services.AddSingleton<AdoConnectorTester>();
 builder.Services.AddSingleton<LlmConnectorTester>();
-builder.Services.AddSingleton<TeamsConnectorTester>();
+builder.Services.AddSingleton<MessagingConnectorTester>();
 builder.Services.AddSingleton<IConnectorHealthChecker, ConnectorHealthChecker>();
 
 // ── Workflow run repository (FR-18, US1) ───────────────────────────────────────

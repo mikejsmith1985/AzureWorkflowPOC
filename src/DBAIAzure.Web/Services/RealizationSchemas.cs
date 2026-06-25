@@ -45,7 +45,7 @@ internal static class RealizationSchemas
           "properties": {
             "instruction": { "type": "string", "description": "The operating instruction the AI step follows." },
             "output_shape": { "type": "array", "description": "Structured fields the step must produce (required when a downstream step branches/transforms on its result).", "items": {{OutputFieldItems}} },
-            "tool_bindings": { "type": "array", "items": { "type": "string", "enum": ["ServiceNow", "AzureDevOps", "LLM", "Teams"] }, "description": "Connectors the step may call as tools." }
+            "tool_bindings": { "type": "array", "items": { "type": "string", "enum": ["ServiceNow", "AzureDevOps", "LLM", "Messaging"] }, "description": "Connectors the step may call as tools." }
           },
           "required": ["instruction"],
           "additionalProperties": false
@@ -106,7 +106,7 @@ internal static class RealizationSchemas
         {
           "type": "object",
           "properties": {
-            "connector": { "type": "string", "enum": ["Teams"], "description": "The messaging connector to send through." },
+            "connector": { "type": "string", "enum": ["Messaging"], "description": "The messaging connector to send through." },
             "recipient_map": { "type": "string", "description": "How the recipient is derived from workflow data. No secrets." },
             "message_template": { "type": "string", "description": "The message body, referencing upstream fields. No secrets." }
           },

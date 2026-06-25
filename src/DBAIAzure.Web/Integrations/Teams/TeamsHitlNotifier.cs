@@ -58,7 +58,7 @@ public sealed class TeamsHitlNotifier : IHitlNotifier
 
             if (_configRepo is not null)
             {
-                var secretsJson = await _configRepo.GetDecryptedSecretsAsync(ConnectorType.Teams, cancellationToken);
+                var secretsJson = await _configRepo.GetDecryptedSecretsAsync(ConnectorType.Messaging, cancellationToken);
                 if (secretsJson is not null)
                 {
                     var secrets = JsonSerializer.Deserialize<TeamsSecrets>(secretsJson, JsonOptions);

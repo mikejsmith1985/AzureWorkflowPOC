@@ -191,13 +191,25 @@ else
                                        autocomplete="new-password" class="@InputClass" />
                             </div>
                         }
-                        else if (entry.ConnectorType == ConnectorType.Teams)
+                        else if (entry.ConnectorType == ConnectorType.Messaging)
                         {
+                            <!-- Platform dropdown -->
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Platform</label>
+                                <select @bind="entry.DraftUrl" class="@InputClass">
+                                    <option value="Teams">Microsoft Teams</option>
+                                    <option value="Slack">Slack</option>
+                                    <option value="Discord">Discord</option>
+                                </select>
+                            </div>
+
+                            <!-- Webhook URL (secret) -->
                             <div>
                                 <label class="block text-xs text-gray-400 mb-1">Webhook URL</label>
                                 <input type="password" @bind="entry.DraftSecret"
-                                       placeholder="https://acme.webhook.office.com/…  (leave blank to keep existing)"
+                                       placeholder="Incoming webhook URL for the selected platform (leave blank to keep existing)"
                                        autocomplete="new-password" class="@InputClass" />
+                                <p class="text-[11px] text-gray-500 mt-1">MCP server delivery is added in a later step; for now configure the platform's incoming webhook.</p>
                             </div>
                         }
 
@@ -394,7 +406,7 @@ else
         ConnectorType.AzureDevOps => "Azure DevOps",
         ConnectorType.LLM         => "LLM Provider",
         ConnectorType.ServiceNow  => "ServiceNow",
-        ConnectorType.Teams       => "Microsoft Teams",
+        ConnectorType.Messaging   => "Messaging",
         _                         => type.ToString(),
     };
 
@@ -450,6 +462,11 @@ else
         {
             DraftUrl = DraftUsername = string.Empty;
             AvailableModels = [];
+
+            // Messaging defaults to the Teams platform when no config is stored yet.
+            if (ConnectorType == ConnectorType.Messaging)
+                DraftUrl = nameof(MessagingPlatform.Teams);
+
             if (string.IsNullOrWhiteSpace(NonSecretConfig)) return;
 
             try
@@ -461,6 +478,7 @@ else
                     ConnectorType.AzureDevOps => (Str(root, "organizationUrl"), Str(root, "projectName")),
                     ConnectorType.LLM         => (Str(root, "provider"),        Str(root, "modelName")),
                     ConnectorType.ServiceNow  => (Str(root, "instanceUrl"),     Str(root, "username")),
+                    ConnectorType.Messaging   => (Str(root, "platform"),        string.Empty),
                     _                         => (string.Empty, string.Empty),
                 };
 
@@ -484,6 +502,8 @@ else
                     JsonSerializer.Serialize(new { provider = DraftUrl, modelName = DraftUsername }),
                 ConnectorType.ServiceNow =>
                     JsonSerializer.Serialize(new { instanceUrl = DraftUrl, username = DraftUsername }),
+                ConnectorType.Messaging =>
+                    JsonSerializer.Serialize(new { platform = DraftUrl }),
                 _ => null,
             };
 
@@ -492,7 +512,7 @@ else
                 ConnectorType.AzureDevOps => JsonSerializer.Serialize(new { personalAccessToken = DraftSecret }),
                 ConnectorType.LLM         => JsonSerializer.Serialize(new { apiKey = DraftSecret }),
                 ConnectorType.ServiceNow  => JsonSerializer.Serialize(new { password = DraftSecret }),
-                ConnectorType.Teams       => JsonSerializer.Serialize(new { webhookUrl = DraftSecret }),
+                ConnectorType.Messaging   => JsonSerializer.Serialize(new { webhookUrl = DraftSecret }),
                 _                         => null,
             };
 

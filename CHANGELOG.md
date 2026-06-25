@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Teams connector generalized to a multi-platform Messaging connector (MVP)
+
+The single-purpose "Teams" connector is now a **Messaging** connector that targets Microsoft
+Teams, Slack, or Discord. This first increment delivers multi-platform **webhook** delivery; the
+MCP-first delivery path follows in a later increment (see `specs/010-messaging-connector/`).
+
+- **Platform dropdown** on the Connector Settings "Messaging" card (Teams / Slack / Discord),
+  mirroring the LLM provider dropdown. Each platform uses its own webhook payload and success
+  signal: Teams (Adaptive Card → `"1"`), Slack (`{"text"}` → `"ok"`), Discord (`{"content"}` → 204).
+- New single `IMessageDelivery` seam selects MCP-first with webhook fallback and backs the
+  Settings **Test Connection** / health check; the result names the platform and the path used.
+- `ConnectorType.Teams` renamed to `ConnectorType.Messaging`; a legacy `"Teams"` row in the
+  database is read defensively as Messaging (no migration required).
+- **Removed the duplicate legacy connector modal** (`ConnectorConfigModal`/`ConnectorSection`/
+  `ConnectorStatusBadge`); the home-page gear now opens the dedicated `/settings/connectors` page,
+  eliminating a second, divergent connector UI.
+- Secrets unchanged in handling: the webhook URL is stored encrypted with "leave blank to keep
+  existing" semantics.
+
 ### Fixed — ServiceNow health check failed when Instance URL included a path
 
 A ServiceNow Instance URL pasted from the browser address bar (e.g.

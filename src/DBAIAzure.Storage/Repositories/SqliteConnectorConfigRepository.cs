@@ -22,7 +22,17 @@ public sealed class SqliteConnectorConfigRepository : IConnectorConfigRepository
 
     /// <summary>All four connector types, used to synthesize the full list returned by GetAllAsync.</summary>
     private static readonly ConnectorType[] AllConnectorTypes =
-        [ConnectorType.ServiceNow, ConnectorType.AzureDevOps, ConnectorType.LLM, ConnectorType.Teams];
+        [ConnectorType.ServiceNow, ConnectorType.AzureDevOps, ConnectorType.LLM, ConnectorType.Messaging];
+
+    /// <summary>The connector type formerly called "Teams"; tolerated on read and mapped to Messaging (FR-013).</summary>
+    private const string LegacyMessagingType = "Teams";
+
+    /// <summary>
+    /// Normalizes a persisted connector-type string, mapping the legacy "Teams" value to "Messaging" so an
+    /// older database row never fails <see cref="Enum.Parse{ConnectorType}(string)"/> or hides the connector.
+    /// </summary>
+    private static string NormalizeStoredType(string stored) =>
+        stored == LegacyMessagingType ? nameof(ConnectorType.Messaging) : stored;
 
     public SqliteConnectorConfigRepository(
         IDbContextFactory<PipelineDbContext> factory,
@@ -36,9 +46,13 @@ public sealed class SqliteConnectorConfigRepository : IConnectorConfigRepository
     public async Task<ConnectorConfig?> GetAsync(ConnectorType type, CancellationToken ct = default)
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
+        var wanted = type.ToString();
         var record = await db.ConnectorConfigs
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.ConnectorType == type.ToString(), ct);
+            .FirstOrDefaultAsync(
+                r => r.ConnectorType == wanted ||
+                     (wanted == nameof(ConnectorType.Messaging) && r.ConnectorType == LegacyMessagingType),
+                ct);
 
         return record is null ? null : MapToConfig(record);
     }
@@ -51,7 +65,7 @@ public sealed class SqliteConnectorConfigRepository : IConnectorConfigRepository
             .AsNoTracking()
             .ToListAsync(ct);
 
-        var byType = records.ToDictionary(r => r.ConnectorType);
+        var byType = records.ToDictionary(r => NormalizeStoredType(r.ConnectorType));
         return AllConnectorTypes
             .Select(connectorType =>
             {
@@ -124,9 +138,13 @@ public sealed class SqliteConnectorConfigRepository : IConnectorConfigRepository
     public async Task<string?> GetDecryptedSecretsAsync(ConnectorType type, CancellationToken ct = default)
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
+        var wanted = type.ToString();
         var record = await db.ConnectorConfigs
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.ConnectorType == type.ToString(), ct);
+            .FirstOrDefaultAsync(
+                r => r.ConnectorType == wanted ||
+                     (wanted == nameof(ConnectorType.Messaging) && r.ConnectorType == LegacyMessagingType),
+                ct);
 
         if (record?.EncryptedSecretsJson is null)
             return null;
@@ -172,14 +190,14 @@ public sealed class SqliteConnectorConfigRepository : IConnectorConfigRepository
         {
             var isSuccess = record.LastTestResult == "Pass";
             lastResult = new ConnectorTestResult(
-                Enum.Parse<ConnectorType>(record.ConnectorType),
+                Enum.Parse<ConnectorType>(NormalizeStoredType(record.ConnectorType)),
                 isSuccess,
                 record.LastTestMessage ?? string.Empty,
                 record.LastTestedAt.Value);
         }
 
         return new ConnectorConfig(
-            Type: Enum.Parse<ConnectorType>(record.ConnectorType),
+            Type: Enum.Parse<ConnectorType>(NormalizeStoredType(record.ConnectorType)),
             NonSecretConfig: record.ConfigJson,
             HasSecrets: record.EncryptedSecretsJson is not null,
             IsConfigured: record.IsConfigured,
