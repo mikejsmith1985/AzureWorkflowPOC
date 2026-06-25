@@ -20,6 +20,7 @@
 - Q: How are MCP servers reached from the long-running web app? → A: **Remote MCP endpoint (HTTP/SSE streamable transport URL)** — no local subprocess management.
 - Q: What happens when a platform has no MCP server configured? → A: **MCP-first with webhook fallback** — delivery falls back to the platform's direct incoming-webhook URL, preserving today's working delivery path.
 - Q: Are bot/OAuth token flows, threading, or inbound message receiving in scope? → A: **No** — out of scope for v1.
+- Q: How does the connector know what argument names/shape to pass to the configured MCP tool? → A: **A configurable JSON argument template** per connector, with `{{target}}` and `{{message}}` placeholders the connector substitutes at send time (server-agnostic — works with any tool's argument names).
 
 ---
 
@@ -152,8 +153,9 @@ first delivery but prevents misconfiguration.
 - **FR-002**: The operator MUST be able to select a target **platform** — Microsoft Teams, Slack,
   or Discord — from a dropdown before entering connection details.
 - **FR-003**: The system MUST allow configuring, per messaging connector, an MCP server endpoint
-  (a remote HTTP/SSE streamable transport URL), the send-message tool name to invoke, and a
-  non-secret Target (channel or recipient identifier).
+  (a remote HTTP/SSE streamable transport URL), the send-message tool name to invoke, a non-secret
+  Target (channel or recipient identifier), and a non-secret **MCP argument template** — a JSON
+  object with `{{target}}` and `{{message}}` placeholders describing the tool's input arguments.
 - **FR-004**: The system MUST allow configuring an optional MCP authentication token and an
   optional direct incoming-webhook URL, both stored as encrypted secrets.
 - **FR-005**: When sending or testing, the system MUST prefer the MCP path when an MCP server
@@ -164,8 +166,10 @@ first delivery but prevents misconfiguration.
   Slack (text/Block Kit body; success signalled by the body "ok"), Discord (content body; success
   signalled by HTTP 204 No Content).
 - **FR-007**: The MCP delivery path MUST invoke the configured send-message tool on the configured
-  MCP server, passing the Target and message text, and MUST interpret the tool result to determine
-  success or failure.
+  MCP server, building the tool's input arguments by substituting the Target and message text into
+  the configured MCP argument template (`{{target}}`/`{{message}}` placeholders), and MUST interpret
+  the tool result to determine success or failure. When no template is configured, a sensible default
+  template (`{"target":"{{target}}","text":"{{message}}"}`) is used.
 - **FR-008**: The system MUST support the same three behaviors for both delivery paths:
   (a) HITL pause notifications, (b) workflow notify-node message sends, and (c) the Settings
   "Test Connection" / health check.
@@ -190,9 +194,9 @@ first delivery but prevents misconfiguration.
 ### Key Entities *(include if feature involves data)*
 
 - **Messaging Connector Configuration**: The single configured messaging connector. Non-secret
-  attributes: selected platform, MCP server endpoint, MCP tool name, Target (channel/recipient),
-  configured flag, last test result + timestamp. Secret attributes (encrypted): MCP auth token,
-  webhook URL.
+  attributes: selected platform, MCP server endpoint, MCP tool name, MCP argument template
+  (JSON with `{{target}}`/`{{message}}` placeholders), Target (channel/recipient), configured flag,
+  last test result + timestamp. Secret attributes (encrypted): MCP auth token, webhook URL.
 - **Messaging Platform**: An enumerated platform the connector can target — Microsoft Teams,
   Slack, Discord — each with its own webhook payload format and success signal.
 - **Delivery Path**: The route a message takes — MCP (via a per-platform MCP server's send-message
@@ -232,8 +236,9 @@ first delivery but prevents misconfiguration.
   current single-slot connector model; multiple simultaneous platforms are not required for v1.
 - The "leave blank to keep existing" secret-handling and encryption-at-rest approach already used
   by the ServiceNow, Azure DevOps, and LLM connectors is reused unchanged.
-- The MCP send-message tool accepts, at minimum, a target identifier and a text body; richer
-  capabilities (threads, attachments, blocks) are not required for v1 delivery.
+- The MCP send-message tool accepts, at minimum, a target identifier and a text body; the exact
+  argument names are not assumed — they are supplied by the operator's MCP argument template — and
+  richer capabilities (threads, attachments, blocks) are not required for v1 delivery.
 - Test Connection sends a clearly labelled, harmless test message that a human can recognize in
   the channel.
 
