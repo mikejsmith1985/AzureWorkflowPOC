@@ -28,7 +28,8 @@ Multi-project .NET solution: `src/DBAIAzure.Core`, `src/DBAIAzure.Connectors`, `
 
 **Purpose**: Model rename + shared types every story depends on. No story can start until these are done.
 
-- [ ] T002 Rename `ConnectorType.Teams` → `ConnectorType.Messaging` in `src/DBAIAzure.Core/Models/ConnectorType.cs` and update every reference across the solution (mechanical compile-driven sweep).
+- [ ] T002 Rename `ConnectorType.Teams` → `ConnectorType.Messaging` in `src/DBAIAzure.Core/Models/ConnectorType.cs` and update every reference across the solution (mechanical compile-driven sweep). The legacy connector modal is **deleted** in T002a, not renamed.
+- [ ] T002a Remove the legacy connector modal so the Messaging redesign lives in exactly one UI (FR-001): delete `src/DBAIAzure.Web/Shared/ConnectorConfigModal.razor`, `src/DBAIAzure.Web/Shared/ConnectorSection.razor`, and `src/DBAIAzure.Web/Shared/ConnectorStatusBadge.razor` (dead once the modal is gone — it is referenced only by the modal), and repoint the gear button in `src/DBAIAzure.Web/Pages/Index.razor` (`OpenConfigModal` / `_configModal`) to navigate to `/settings/connectors`. Removes the duplicate Teams UI surface and the pre-existing LLM-dropdown divergence.
 - [ ] T003 [P] Create `MessagingPlatform` enum (`Teams`, `Slack`, `Discord`) in `src/DBAIAzure.Core/Models/MessagingPlatform.cs` with XML docs noting each platform's webhook body/success signal.
 - [ ] T004 [P] Create non-secret record `MessagingConnectorConfig` (Platform, McpServerUrl, McpToolName, McpArgumentTemplate, Target) in `src/DBAIAzure.Core/Models/MessagingConnectorConfig.cs`.
 - [ ] T005 [P] Create `IMessageDelivery` interface plus `MessageDeliveryResult` record and `DeliveryPath` enum (Mcp/Webhook/NotConfigured) in `src/DBAIAzure.Core/Interfaces/IMessageDelivery.cs` per `contracts/imessage-delivery.md`.
@@ -52,6 +53,7 @@ URL returns an actionable failure.
 
 - [ ] T008 [P] [US1] Unit tests for per-platform webhook profiles — body shape + success predicate (Teams `"1"`, Slack `"ok"`, Discord `204`), incl. JSON-escaping of messages — in `tests/DBAIAzure.Tests/Messaging/PlatformWebhookProfileTests.cs`.
 - [ ] T009 [P] [US1] Unit tests for `MessageDelivery` selection: webhook path when only a webhook is stored (C2); `NotConfigured` when neither MCP nor webhook present (C3); failures returned not thrown (FR-010) — in `tests/DBAIAzure.Tests/Messaging/MessageDeliverySelectionTests.cs` (mocked `HttpMessageHandler` + fake repo).
+- [ ] T009a [P] [US1] Unit test for hot-reload (FR-015): a fake `IConnectorConfigRepository` returning changed config on a second call proves `MessageDelivery` picks up the new platform/webhook on the next `SendAsync` without restart — in `tests/DBAIAzure.Tests/Messaging/MessageDeliveryHotReloadTests.cs`.
 
 ### Implementation for User Story 1 (Green)
 
@@ -62,8 +64,8 @@ URL returns an actionable failure.
 - [ ] T014 [US1] `MessageDelivery : IMessageDelivery` — resolve config + decrypted secrets from `IConnectorConfigRepository`, select path (webhook now; MCP returns `NotConfigured` until US3), POST via the matching webhook profile, return `MessageDeliveryResult` naming platform + path — in `src/DBAIAzure.Connectors/Messaging/MessageDelivery.cs`.
 - [ ] T015 [US1] Rename `TeamsConnectorTester` → `MessagingConnectorTester`; delegate `TestConnectionAsync` to `IMessageDelivery.TestConnectionAsync` in `src/DBAIAzure.Connectors/MessagingConnectorTester.cs`.
 - [ ] T016 [US1] Map `ConnectorType.Messaging` → `MessagingConnectorTester.TestConnectionAsync` in `src/DBAIAzure.Connectors/ConnectorHealthChecker.cs`.
-- [ ] T017 [US1] Rework the Messaging card in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor`: rename to "Messaging", add Platform `<select>` (Teams/Slack/Discord), Target field, and Webhook URL secret field ("leave blank to keep"); serialize `MessagingConnectorConfig` + `{webhookUrl}` secret via `SerializeToJson`/`LoadDraftFromJson`.
-- [ ] T018 [US1] Update display name Teams → Messaging in `src/DBAIAzure.Web/Shared/ConnectorStatusBadge.razor` (and any `ConnectorDisplayName`/modal label).
+- [ ] T017 [US1] Rework the Messaging card in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor`: rename to "Messaging", add Platform `<select>` (Teams/Slack/Discord) and a Webhook URL secret field ("leave blank to keep"); serialize `MessagingConnectorConfig` + `{webhookUrl}` secret via `SerializeToJson`/`LoadDraftFromJson`. (The `Target` field is added with the MCP fields in T032.)
+- [ ] T018 [US1] Update the connector display name Teams → "Messaging" in the page's `ConnectorDisplayName` switch in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor`.
 - [ ] T019 [US1] Register the three webhook profiles, `MessageDelivery` (as `IMessageDelivery`), and `MessagingConnectorTester` in `src/DBAIAzure.Web/Program.cs`.
 - [ ] T020 [P] [US1] Playwright E2E: Messaging card renders, platform dropdown switches visible/required fields, Save round-trips non-secret fields, secret field never pre-populates — in `tests/DBAIAzure.E2ETests/Tests/ConnectorSettingsTests.cs`.
 
@@ -114,7 +116,7 @@ non-throwing.
 - [ ] T029 [P] [US3] `IMcpMessageGateway` + `McpSendRequest`/`McpSendResult` records in `src/DBAIAzure.Connectors/Messaging/IMcpMessageGateway.cs` per `contracts/mcp-gateway-and-webhook.md`.
 - [ ] T030 [US3] `McpMessageGateway` impl: build args from template, connect via `SseClientTransport` (optional bearer header), `CallToolAsync`, map `IsError`/not-found/transport errors to `McpSendResult`, per-operation connect/dispose — in `src/DBAIAzure.Connectors/Messaging/McpMessageGateway.cs`.
 - [ ] T031 [US3] Extend `MessageDelivery` to select and invoke the MCP path when `McpServerUrl` is configured (reporting `DeliveryPath.Mcp`); keep webhook as the fallback only when no MCP url is set — in `src/DBAIAzure.Connectors/Messaging/MessageDelivery.cs`.
-- [ ] T032 [US3] Add MCP fields to the Messaging card in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor`: MCP Server URL, MCP Tool Name, MCP Argument Template (non-secret, placeholder shows default), and MCP Auth Token (secret); serialize into `MessagingConnectorConfig` + `{mcpAuthToken}` secret.
+- [ ] T032 [US3] Add MCP fields to the Messaging card in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor`: MCP Server URL, MCP Tool Name, MCP Argument Template (non-secret, placeholder shows default), **Target (channel/recipient)** (non-secret), and MCP Auth Token (secret); serialize into `MessagingConnectorConfig` + `{mcpAuthToken}` secret.
 - [ ] T033 [US3] Register `IMcpMessageGateway` → `McpMessageGateway` in `src/DBAIAzure.Web/Program.cs`.
 - [ ] T034 [P] [US3] Env-gated integration tests for live Slack + Discord webhook delivery and a live MCP tool send in `tests/DBAIAzure.Tests/Integration/ConnectorFunctionalTests.cs` (skip when env vars absent).
 
@@ -139,7 +141,7 @@ prior test result.
 
 - [ ] T036 [US4] In `src/DBAIAzure.Web/Pages/ConnectorSettings.razor`, on save clear the in-memory test result and persist only the selected platform's config (field-change invalidation, FR-012).
 - [ ] T037 [US4] Ensure the result messages always include the platform name and delivery-path label (FR-009) in `src/DBAIAzure.Connectors/Messaging/MessageDelivery.cs` and `src/DBAIAzure.Connectors/MessagingConnectorTester.cs`.
-- [ ] T038 [US4] Show the platform name in the Messaging status badge/header in `src/DBAIAzure.Web/Shared/ConnectorStatusBadge.razor` and the card header.
+- [ ] T038 [US4] Show the platform name in the Messaging card header/status row in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor`.
 
 ---
 
@@ -156,8 +158,8 @@ prior test result.
 
 ```
 Setup (T001)
-  └─ Foundational (T002 → T003|T004|T005 [P] → T006 → T007)
-       └─ US1 / MVP (T008|T009 [P] → T010-T013 [P] → T014 → T015 → T016 → T017 → T018 → T019 → T020)
+  └─ Foundational (T002 → T002a → T003|T004|T005 [P] → T006 → T007)
+       └─ US1 / MVP (T008|T009|T009a [P] → T010-T013 [P] → T014 → T015 → T016 → T017 → T018 → T019 → T020)
             ├─ US2 (T021 → T022 → T023 → T024 → T025)
             ├─ US3 (T026|T027 [P] → T028 → T029 → T030 → T031 → T032 → T033 → T034)
             └─ US4 (T035 → T036 → T037 → T038)
@@ -171,7 +173,7 @@ Setup (T001)
 ## Parallel Opportunities
 
 - Foundational: **T003, T004, T005** in parallel (separate new files), then T006/T007.
-- US1: tests **T008, T009** in parallel; webhook profiles **T010–T013** in parallel before T014.
+- US1: tests **T008, T009, T009a** in parallel; webhook profiles **T010–T013** in parallel before T014.
 - US3: tests **T026, T027** in parallel; **T029** alongside test authoring.
 - Polish: **T039, T040, T042** in parallel.
 
