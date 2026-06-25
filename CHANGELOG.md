@@ -7,11 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed — Teams connector generalized to a multi-platform Messaging connector (MVP)
+### Changed — Teams connector generalized to a multi-platform Messaging connector
 
 The single-purpose "Teams" connector is now a **Messaging** connector that targets Microsoft
-Teams, Slack, or Discord. This first increment delivers multi-platform **webhook** delivery; the
-MCP-first delivery path follows in a later increment (see `specs/010-messaging-connector/`).
+Teams, Slack, or Discord, with **MCP-first delivery and a webhook fallback** (see
+`specs/010-messaging-connector/`).
+
+- **MCP-first delivery**: when an MCP server endpoint is configured, messages are delivered by
+  calling its send-message tool via the official MCP C# SDK (`ModelContextProtocol.Core`) over
+  HTTP/SSE; tool arguments are built from an operator-supplied JSON template with `{{target}}` /
+  `{{message}}` placeholders. With no MCP server configured, delivery falls back to the platform
+  webhook. Selection is configuration-based — an unreachable MCP server reports a failure rather
+  than silently using the webhook.
+- **HITL + notify-node** delivery now flows through the same delivery seam, so pause notifications
+  reach whichever platform is configured (Teams/Slack/Discord), not just Teams.
 
 - **Platform dropdown** on the Connector Settings "Messaging" card (Teams / Slack / Discord),
   mirroring the LLM provider dropdown. Each platform uses its own webhook payload and success

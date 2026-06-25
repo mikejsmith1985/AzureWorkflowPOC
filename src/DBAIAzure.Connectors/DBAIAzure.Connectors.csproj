@@ -12,6 +12,9 @@
          ILogger<T> is satisfied by the version SK already pulls transitively (no pin needed). -->
     <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.1" />
+    <!-- Official MCP C# SDK (client only) — the Messaging connector is an MCP client over HTTP/SSE.
+         Using the SDK satisfies the Framework-First gate (Article VII) vs. hand-rolling JSON-RPC. -->
+    <PackageReference Include="ModelContextProtocol.Core" Version="1.4.0" />
   </ItemGroup>
 
   <ItemGroup>

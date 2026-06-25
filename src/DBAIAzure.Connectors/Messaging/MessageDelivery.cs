@@ -29,15 +29,18 @@ public sealed class MessageDelivery : IMessageDelivery
     private readonly IConnectorConfigRepository _configRepo;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IReadOnlyDictionary<MessagingPlatform, IPlatformWebhookProfile> _webhookProfiles;
+    private readonly IMcpMessageGateway? _mcpGateway;
 
     public MessageDelivery(
         IConnectorConfigRepository configRepo,
         IHttpClientFactory httpClientFactory,
-        IEnumerable<IPlatformWebhookProfile> webhookProfiles)
+        IEnumerable<IPlatformWebhookProfile> webhookProfiles,
+        IMcpMessageGateway? mcpGateway = null)
     {
         _configRepo = configRepo;
         _httpClientFactory = httpClientFactory;
         _webhookProfiles = webhookProfiles.ToDictionary(profile => profile.Platform);
+        _mcpGateway = mcpGateway;
     }
 
     /// <inheritdoc/>
@@ -49,10 +52,9 @@ public sealed class MessageDelivery : IMessageDelivery
             return new MessageDeliveryResult(false, MessagingPlatform.Teams, DeliveryPath.NotConfigured,
                 "Messaging connector is not configured.");
 
-        // MCP-first: a configured MCP server endpoint selects the MCP path (wired in a later phase).
+        // MCP-first: a configured MCP server endpoint selects the MCP path — no silent webhook fallback.
         if (!string.IsNullOrWhiteSpace(config.McpServerUrl))
-            return new MessageDeliveryResult(false, config.Platform, DeliveryPath.Mcp,
-                $"{config.Platform}: an MCP server is configured but MCP delivery is not available in this build — configure a webhook URL to deliver now.");
+            return await SendViaMcpAsync(config, secrets, message, cancellationToken);
 
         if (!string.IsNullOrWhiteSpace(secrets?.WebhookUrl))
             return await SendViaWebhookAsync(config.Platform, secrets!.WebhookUrl!, message, cancellationToken);
@@ -81,6 +83,30 @@ public sealed class MessageDelivery : IMessageDelivery
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    private async Task<MessageDeliveryResult> SendViaMcpAsync(
+        MessagingConnectorConfig config, MessagingSecrets? secrets, string message, CancellationToken cancellationToken)
+    {
+        if (_mcpGateway is null)
+            return new MessageDeliveryResult(false, config.Platform, DeliveryPath.Mcp,
+                $"{config.Platform}: MCP delivery is not available.");
+
+        if (string.IsNullOrWhiteSpace(config.McpToolName))
+            return new MessageDeliveryResult(false, config.Platform, DeliveryPath.Mcp,
+                $"{config.Platform}: an MCP server is configured but no tool name is set.");
+
+        var request = new McpSendRequest(
+            config.McpServerUrl!, config.McpToolName!, config.McpArgumentTemplate,
+            config.Target ?? string.Empty, message, secrets?.McpAuthToken);
+
+        var result = await _mcpGateway.SendAsync(request, cancellationToken);
+
+        return new MessageDeliveryResult(
+            result.IsSuccess, config.Platform, DeliveryPath.Mcp,
+            result.IsSuccess
+                ? $"{config.Platform} accepted the message via MCP (tool '{config.McpToolName}')."
+                : result.Message);
+    }
 
     private async Task<MessageDeliveryResult> SendViaWebhookAsync(
         MessagingPlatform platform, string webhookUrl, string message, CancellationToken cancellationToken)

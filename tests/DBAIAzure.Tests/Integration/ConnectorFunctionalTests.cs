@@ -156,6 +156,67 @@ public sealed class ConnectorFunctionalTests
         Assert.Equal("1", responseBody.Trim());
     }
 
+    // ── Messaging: Slack webhook ──────────────────────────────────────────
+
+    [Fact]
+    public async Task Slack_Webhook_AcceptsTextMessage()
+    {
+        var webhookUrl = Env("SLACK_WEBHOOK_URL");
+        if (webhookUrl is null)
+            return;
+
+        var profile = new DBAIAzure.Connectors.Messaging.SlackWebhookProfile();
+        using var content = new StringContent(
+            profile.BuildBody("Integration test — AzureWorkflowPOC Messaging connector (Slack)."),
+            Encoding.UTF8, "application/json");
+
+        var response = await HttpClient.PostAsync(webhookUrl, content);
+        var body     = await response.Content.ReadAsStringAsync();
+
+        Assert.True(profile.IsSuccess((int)response.StatusCode, body),
+            $"Slack returned {(int)response.StatusCode}: {body}");
+    }
+
+    // ── Messaging: Discord webhook ────────────────────────────────────────
+
+    [Fact]
+    public async Task Discord_Webhook_AcceptsContentMessage()
+    {
+        var webhookUrl = Env("DISCORD_WEBHOOK_URL");
+        if (webhookUrl is null)
+            return;
+
+        var profile = new DBAIAzure.Connectors.Messaging.DiscordWebhookProfile();
+        using var content = new StringContent(
+            profile.BuildBody("Integration test — AzureWorkflowPOC Messaging connector (Discord)."),
+            Encoding.UTF8, "application/json");
+
+        var response = await HttpClient.PostAsync(webhookUrl, content);
+        var body     = await response.Content.ReadAsStringAsync();
+
+        Assert.True(profile.IsSuccess((int)response.StatusCode, body),
+            $"Discord returned {(int)response.StatusCode}: {body}");
+    }
+
+    // ── Messaging: MCP send-message tool ──────────────────────────────────
+
+    [Fact]
+    public async Task Mcp_SendMessageTool_DeliversMessage()
+    {
+        var serverUrl = Env("MCP_SERVER_URL");
+        var toolName  = Env("MCP_TOOL_NAME");
+        var target    = Env("MCP_TARGET");
+        if (serverUrl is null || toolName is null || target is null)
+            return;
+
+        var gateway = new DBAIAzure.Connectors.Messaging.McpMessageGateway();
+        var result  = await gateway.SendAsync(new DBAIAzure.Connectors.Messaging.McpSendRequest(
+            serverUrl, toolName, Env("MCP_ARGUMENT_TEMPLATE"), target,
+            "Integration test — AzureWorkflowPOC Messaging connector (MCP).", Env("MCP_AUTH_TOKEN")));
+
+        Assert.True(result.IsSuccess, result.Message);
+    }
+
     // ── Helper ────────────────────────────────────────────────────────────
 
     private static string? Env(string name) => Environment.GetEnvironmentVariable(name);

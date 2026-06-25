@@ -91,6 +91,10 @@ builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IPlatformWebhookPro
     DBAIAzure.Connectors.Messaging.SlackWebhookProfile>();
 builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IPlatformWebhookProfile,
     DBAIAzure.Connectors.Messaging.DiscordWebhookProfile>();
+// MCP-first delivery gateway (official MCP client SDK over HTTP/SSE); MessageDelivery uses it when an
+// MCP server endpoint is configured and falls back to the webhook profiles otherwise (010 US3).
+builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IMcpMessageGateway,
+    DBAIAzure.Connectors.Messaging.McpMessageGateway>();
 builder.Services.AddSingleton<IMessageDelivery, DBAIAzure.Connectors.Messaging.MessageDelivery>();
 
 // ── HITL notifier — delivers pause-for-input notifications via the Messaging connector (010 US2) ─

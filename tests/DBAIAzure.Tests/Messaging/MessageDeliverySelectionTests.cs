@@ -77,6 +77,62 @@ public sealed class MessageDeliverySelectionTests
     }
 
     [Fact]
+    public async Task McpConfigured_WithGateway_DeliversViaMcp_PassingTemplateAndAuth()
+    {
+        var repo = new StubConnectorConfigRepository
+        {
+            NonSecretConfigJson = JsonSerializer.Serialize(new
+            {
+                platform = nameof(MessagingPlatform.Slack),
+                mcpServerUrl = "https://mcp.example/sse",
+                mcpToolName = "slack_post_message",
+                mcpArgumentTemplate = """{"channel":"{{target}}","text":"{{message}}"}""",
+                target = "C999",
+            }),
+            DecryptedSecretsJson = """{"mcpAuthToken":"secret-token","webhookUrl":"https://hooks.example/abc"}""",
+        };
+        var gateway = new FakeMcpMessageGateway(succeeds: true);
+        var handler = new CapturingHttpHandler(HttpStatusCode.OK, "ok");
+        var delivery = new MessageDelivery(repo, new SingleHandlerHttpClientFactory(handler), Profiles(), gateway);
+
+        var result = await delivery.SendAsync("hello mcp");
+
+        Assert.True(result.IsSuccess, result.Message);
+        Assert.Equal(DeliveryPath.Mcp, result.Path);
+        Assert.Null(handler.LastRequestBody);                 // webhook never used
+        Assert.NotNull(gateway.LastRequest);
+        Assert.Equal("https://mcp.example/sse", gateway.LastRequest!.ServerUrl);
+        Assert.Equal("slack_post_message", gateway.LastRequest.ToolName);
+        Assert.Equal("C999", gateway.LastRequest.Target);
+        Assert.Equal("hello mcp", gateway.LastRequest.Message);
+        Assert.Equal("secret-token", gateway.LastRequest.AuthToken);
+    }
+
+    [Fact]
+    public async Task McpGatewayFailure_StaysOnMcpPath_DoesNotFallBackOrThrow()
+    {
+        var repo = new StubConnectorConfigRepository
+        {
+            NonSecretConfigJson = JsonSerializer.Serialize(new
+            {
+                platform = nameof(MessagingPlatform.Teams),
+                mcpServerUrl = "https://mcp.example/sse",
+                mcpToolName = "post",
+            }),
+            DecryptedSecretsJson = """{"webhookUrl":"https://hooks.example/abc"}""",
+        };
+        var gateway = new FakeMcpMessageGateway(succeeds: false, message: "could not reach MCP server");
+        var handler = new CapturingHttpHandler(HttpStatusCode.OK, "1");
+        var delivery = new MessageDelivery(repo, new SingleHandlerHttpClientFactory(handler), Profiles(), gateway);
+
+        var result = await delivery.SendAsync("hi");   // must not throw
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(DeliveryPath.Mcp, result.Path);
+        Assert.Null(handler.LastRequestBody);          // no silent webhook fallback
+    }
+
+    [Fact]
     public async Task WebhookTransportFailure_ReturnsFailure_DoesNotThrow()
     {
         var repo = new StubConnectorConfigRepository

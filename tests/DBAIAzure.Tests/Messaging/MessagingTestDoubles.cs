@@ -75,3 +75,25 @@ internal sealed class SingleHandlerHttpClientFactory : IHttpClientFactory
     public SingleHandlerHttpClientFactory(HttpMessageHandler handler) => _handler = handler;
     public HttpClient CreateClient(string name) => new(_handler, disposeHandler: false);
 }
+
+/// <summary>Records the MCP send request and returns a preset result — no real MCP server involved.</summary>
+internal sealed class FakeMcpMessageGateway : DBAIAzure.Connectors.Messaging.IMcpMessageGateway
+{
+    private readonly bool _succeeds;
+    private readonly string _message;
+
+    public FakeMcpMessageGateway(bool succeeds, string message = "ok")
+    {
+        _succeeds = succeeds;
+        _message = message;
+    }
+
+    public DBAIAzure.Connectors.Messaging.McpSendRequest? LastRequest { get; private set; }
+
+    public Task<DBAIAzure.Connectors.Messaging.McpSendResult> SendAsync(
+        DBAIAzure.Connectors.Messaging.McpSendRequest request, CancellationToken cancellationToken = default)
+    {
+        LastRequest = request;
+        return Task.FromResult(new DBAIAzure.Connectors.Messaging.McpSendResult(_succeeds, _message));
+    }
+}
