@@ -40,7 +40,6 @@ if (!string.IsNullOrWhiteSpace(keyVaultUri))
 var anthropicKey   = builder.Configuration["Anthropic:ApiKey"]   ?? string.Empty;
 var anthropicModel = builder.Configuration["Anthropic:Model"]    ?? "claude-sonnet-4-6";
 var portalBaseUrl  = builder.Configuration["Portal:BaseUrl"]     ?? "http://localhost:5000";
-var teamsWebhook   = builder.Configuration["Teams:PowerAutomateUrl"] ?? string.Empty;
 var dbPath         = builder.Configuration["Storage:SqlitePath"] ?? "pipeline.db";
 
 if (string.IsNullOrWhiteSpace(anthropicKey) || anthropicKey.StartsWith("REPLACE"))
@@ -94,18 +93,8 @@ builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IPlatformWebhookPro
     DBAIAzure.Connectors.Messaging.DiscordWebhookProfile>();
 builder.Services.AddSingleton<IMessageDelivery, DBAIAzure.Connectors.Messaging.MessageDelivery>();
 
-// ── Teams HITL notifier ────────────────────────────────────────────────────────
-builder.Services.AddHttpClient(nameof(TeamsHitlNotifier), client =>
-{
-    if (!string.IsNullOrWhiteSpace(teamsWebhook))
-        client.BaseAddress = new Uri(teamsWebhook);
-});
-// IConnectorConfigRepository is registered above, so it is injectable as optional param (FR-014).
-builder.Services.AddSingleton<IHitlNotifier>(sp =>
-    new TeamsHitlNotifier(
-        sp.GetRequiredService<IHttpClientFactory>(),
-        sp.GetRequiredService<ILogger<TeamsHitlNotifier>>(),
-        sp.GetService<IConnectorConfigRepository>()));
+// ── HITL notifier — delivers pause-for-input notifications via the Messaging connector (010 US2) ─
+builder.Services.AddSingleton<IHitlNotifier, DBAIAzure.Web.Integrations.Messaging.MessagingHitlNotifier>();
 
 // ── Pipeline orchestrator ──────────────────────────────────────────────────────
 builder.Services.AddSingleton<PipelineOrchestrator>(sp =>
