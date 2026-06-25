@@ -88,6 +88,36 @@ builder.Services.AddSingleton<DemoConnectorSeeder>();
 // ── Workflow persistence ────────────────────────────────────────────────────
 builder.Services.AddSingleton<IWorkflowRepository, SqliteWorkflowRepository>();
 
+// ── Repo-app registry + monitoring heartbeat store (feature 013) ───────────────
+// Both depend only on IDbContextFactory and create their own short-lived DbContext per call,
+// so singleton lifetime is safe (no captive dependency).
+builder.Services.AddSingleton<IAppRegistryRepository, SqliteAppRegistryRepository>();
+builder.Services.AddSingleton<IAppHeartbeatStore, SqliteAppHeartbeatStore>();
+// In-process status notifier for live Apps-page updates (mirrors the orchestrator's RunUpdated).
+builder.Services.AddSingleton<IAppStatusNotifier, DBAIAzure.Web.Services.AppStatusNotifier>();
+// The active executor is chosen at first use: a real Docker executor when an engine is reachable and
+// demo mode is off, otherwise the simulated executor — identical surfaces either way (US4, FR-015).
+builder.Services.AddSingleton<IAppExecutor>(sp =>
+{
+    var registry = sp.GetRequiredService<IAppRegistryRepository>();
+    var notifier = sp.GetRequiredService<IAppStatusNotifier>();
+    var sim = new DBAIAzure.Connectors.Apps.SimAppExecutor(registry, notifier);
+
+    var demoMode = builder.Configuration.GetValue<bool>("Apps:DemoMode");
+    Docker.DotNet.IDockerClient? dockerClient = null;
+    var dockerAvailable = !demoMode
+        && DBAIAzure.Connectors.Apps.AppExecutorSelector.TryConnectDocker(out dockerClient)
+        && dockerClient is not null;
+    DBAIAzure.Core.Interfaces.IAppExecutor docker = dockerAvailable
+        ? new DBAIAzure.Connectors.Apps.DockerAppExecutor(registry, notifier, dockerClient!)
+        : sim;
+    return DBAIAzure.Connectors.Apps.AppExecutorSelector.Select(dockerAvailable, demoMode, docker, sim);
+});
+// App monitoring: a chosen saved workflow runs (via the existing orchestrator) when a monitored app's
+// snapshot indicates a problem; a hosted loop cycles linked apps and records heartbeats (feature 013).
+builder.Services.AddSingleton<IAppMonitoringService, DBAIAzure.Processes.Monitoring.AppMonitoringService>();
+builder.Services.AddHostedService<DBAIAzure.Web.Services.AppMonitoringBackgroundService>();
+
 // ── ServiceNow outbound HTTP client — 35 s timeout, base URL set per-request (T002) ─
 builder.Services.AddHttpClient(nameof(ServiceNowClient), client =>
 {
@@ -462,6 +492,53 @@ using (var scope = app.Services.CreateScope())
             ON WorkflowExecutionEvents (OccurredAt);
         CREATE INDEX IF NOT EXISTS IX_WorkflowExecutionEvents_RunId_OccurredAt
             ON WorkflowExecutionEvents (RunId, OccurredAt);
+        """);
+
+    // Registered repo-apps, their monitoring heartbeats, and close-the-loop dedup signatures
+    // (feature 013). CREATE TABLE IF NOT EXISTS is idempotent — safe on every startup.
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS MonitoredApps (
+            AppId               TEXT    NOT NULL PRIMARY KEY,
+            Name                TEXT    NOT NULL,
+            OwnerId             TEXT    NOT NULL,
+            RepoLocalPath       TEXT    NOT NULL,
+            Branch              TEXT,
+            BuildCommand        TEXT,
+            RunCommand          TEXT    NOT NULL,
+            Status              INTEGER NOT NULL DEFAULT 0,
+            LastBuildResultJson TEXT,
+            LastRunResultJson   TEXT,
+            LinkedWorkflowId    TEXT,
+            LastBuiltAt         TEXT,
+            LastRunAt           TEXT,
+            CreatedAt           TEXT    NOT NULL DEFAULT '0001-01-01T00:00:00+00:00',
+            UpdatedAt           TEXT    NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS IX_MonitoredApps_OwnerId_Name
+            ON MonitoredApps (OwnerId, Name);
+        CREATE INDEX IF NOT EXISTS IX_MonitoredApps_OwnerId
+            ON MonitoredApps (OwnerId);
+        """);
+
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS AppMonitoringHeartbeats (
+            AppId       TEXT    NOT NULL PRIMARY KEY,
+            LastCycleAt TEXT    NOT NULL,
+            LastCycleOk INTEGER NOT NULL DEFAULT 0,
+            LastError   TEXT,
+            CycleCount  INTEGER NOT NULL DEFAULT 0
+        );
+        """);
+
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS AppRaisedIssues (
+            Signature     TEXT NOT NULL PRIMARY KEY,
+            AppId         TEXT NOT NULL,
+            WorkflowRunId TEXT,
+            CreatedAt     TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'
+        );
+        CREATE INDEX IF NOT EXISTS IX_AppRaisedIssues_AppId
+            ON AppRaisedIssues (AppId);
         """);
 
     // ── Seed the demo's back-office connectors from environment configuration (012 US5) ───
