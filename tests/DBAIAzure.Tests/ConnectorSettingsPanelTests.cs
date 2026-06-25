@@ -31,7 +31,7 @@ public sealed class ConnectorSettingsPanelTests : TestContext
         {
             MakeConfig(ConnectorType.AzureDevOps, isConfigured: true),
             MakeConfig(ConnectorType.LLM,         isConfigured: false),
-            MakeConfig(ConnectorType.Teams,        isConfigured: true),
+            MakeConfig(ConnectorType.Messaging,        isConfigured: true),
         };
 
         var repo         = new FakeConfigRepo(configs);

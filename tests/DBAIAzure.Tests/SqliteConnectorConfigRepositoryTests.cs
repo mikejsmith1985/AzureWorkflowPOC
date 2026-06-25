@@ -92,7 +92,7 @@ public sealed class SqliteConnectorConfigRepositoryTests : IDisposable
         Assert.Contains(all, c => c.Type == ConnectorType.LLM && c.IsConfigured);
         Assert.Contains(all, c => c.Type == ConnectorType.ServiceNow  && !c.IsConfigured);
         Assert.Contains(all, c => c.Type == ConnectorType.AzureDevOps && !c.IsConfigured);
-        Assert.Contains(all, c => c.Type == ConnectorType.Teams        && !c.IsConfigured);
+        Assert.Contains(all, c => c.Type == ConnectorType.Messaging        && !c.IsConfigured);
     }
 
     // ── Encryption round-trip ──────────────────────────────────────────
@@ -154,12 +154,12 @@ public sealed class SqliteConnectorConfigRepositoryTests : IDisposable
     [Fact]
     public async Task UpdateTestResultAsync_PersistsResultOnExistingRow()
     {
-        await _repo.SaveAsync(ConnectorType.Teams, null, """{"webhookUrl":"https://webhook.example"}""");
+        await _repo.SaveAsync(ConnectorType.Messaging, null, """{"webhookUrl":"https://webhook.example"}""");
 
-        var testResult = new ConnectorTestResult(ConnectorType.Teams, false, "Webhook returned 404.", DateTimeOffset.UtcNow);
-        await _repo.UpdateTestResultAsync(ConnectorType.Teams, testResult);
+        var testResult = new ConnectorTestResult(ConnectorType.Messaging, false, "Webhook returned 404.", DateTimeOffset.UtcNow);
+        await _repo.UpdateTestResultAsync(ConnectorType.Messaging, testResult);
 
-        var config = await _repo.GetAsync(ConnectorType.Teams);
+        var config = await _repo.GetAsync(ConnectorType.Messaging);
         Assert.NotNull(config?.LastTestResult);
         Assert.False(config.LastTestResult.IsSuccess);
         Assert.Equal("Webhook returned 404.", config.LastTestResult.Message);
@@ -198,6 +198,35 @@ public sealed class SqliteConnectorConfigRepositoryTests : IDisposable
 
         Assert.NotNull(snowConfig);
         Assert.Equal("""{"password":"pw"}""", decrypted);
+    }
+
+    // ── Legacy "Teams" row is read as the Messaging connector (FR-013) ─
+
+    [Fact]
+    public async Task LegacyTeamsRow_IsReadAsMessagingConnector()
+    {
+        // Simulate a database written before the Teams→Messaging rename by inserting a row whose
+        // ConnectorType string is the legacy "Teams" value, then confirm it surfaces as Messaging.
+        await using (var seed = _factory.CreateDbContext())
+        {
+            // JSON values are passed as parameters so their { } braces are not read as format placeholders.
+            seed.Database.ExecuteSqlRaw(
+                "INSERT INTO ConnectorConfigs " +
+                "(ConnectorType, ConfigJson, EncryptedSecretsJson, IsConfigured, LastUpdatedAt) " +
+                "VALUES ('Teams', {0}, {1}, 1, '2026-01-01T00:00:00+00:00');",
+                """{"platform":"Teams"}""",
+                "ENC:" + """{"webhookUrl":"https://w.example"}""");
+        }
+
+        var config    = await _repo.GetAsync(ConnectorType.Messaging);
+        var decrypted = await _repo.GetDecryptedSecretsAsync(ConnectorType.Messaging);
+        var all       = await _repo.GetAllAsync();
+
+        Assert.NotNull(config);
+        Assert.Equal(ConnectorType.Messaging, config!.Type);
+        Assert.True(config.IsConfigured);
+        Assert.Equal("""{"webhookUrl":"https://w.example"}""", decrypted);
+        Assert.True(all.Single(c => c.Type == ConnectorType.Messaging).IsConfigured);
     }
 
     // ── Shared in-memory DbContext factory ────────────────────────────

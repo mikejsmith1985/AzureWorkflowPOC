@@ -33,7 +33,7 @@ public sealed class ConnectorHealthChecker : IConnectorHealthChecker
         ServiceNowClient snowClient,
         AdoConnectorTester adoTester,
         LlmConnectorTester llmTester,
-        TeamsConnectorTester teamsTester,
+        MessagingConnectorTester messagingTester,
         IConnectorConfigRepository configRepo,
         ILogger<ConnectorHealthChecker> logger,
         IMemoryCache? cache = null)
@@ -46,7 +46,7 @@ public sealed class ConnectorHealthChecker : IConnectorHealthChecker
             [ConnectorType.ServiceNow]  = snowClient.TestConnectionAsync,
             [ConnectorType.AzureDevOps] = adoTester.TestConnectionAsync,
             [ConnectorType.LLM]         = llmTester.TestConnectionAsync,
-            [ConnectorType.Teams]       = teamsTester.TestConnectionAsync,
+            [ConnectorType.Messaging]   = messagingTester.TestConnectionAsync,
         };
     }
 

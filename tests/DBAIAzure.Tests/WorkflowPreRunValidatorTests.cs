@@ -128,7 +128,7 @@ public sealed class ConnectorsHealthyRuleTests
     [Fact]
     public async Task CheckAsync_UnconfiguredConnector_IsIgnored()
     {
-        var unconfigured = new ConnectorConfig(ConnectorType.Teams, null, false, false,
+        var unconfigured = new ConnectorConfig(ConnectorType.Messaging, null, false, false,
             DateTimeOffset.UtcNow, null);
         var result = await Rule.CheckAsync(DorTestHelpers.EmptyWorkflow(), new[] { unconfigured });
         Assert.True(result.Passed);

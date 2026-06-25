@@ -9,7 +9,7 @@ namespace DBAIAzure.Core.Models.NodeConfig;
 /// </summary>
 public sealed record NotifyNodeConfig
 {
-    /// <summary>The messaging connector this step sends through (e.g. <see cref="ConnectorType.Teams"/>).</summary>
+    /// <summary>The messaging connector this step sends through (e.g. <see cref="ConnectorType.Messaging"/>).</summary>
     public required ConnectorType Connector { get; init; }
 
     /// <summary>How the recipient is derived from upstream output. Contains no secret values.</summary>

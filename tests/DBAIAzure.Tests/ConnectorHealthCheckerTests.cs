@@ -38,7 +38,7 @@ public sealed class ConnectorHealthCheckerTests
             [ConnectorType.ServiceNow]  = PassTester(ConnectorType.ServiceNow),
             [ConnectorType.AzureDevOps] = PassTester(ConnectorType.AzureDevOps),
             [ConnectorType.LLM]         = PassTester(ConnectorType.LLM),
-            [ConnectorType.Teams]       = PassTester(ConnectorType.Teams),
+            [ConnectorType.Messaging]       = PassTester(ConnectorType.Messaging),
         };
 
     // ── All-pass ─────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ public sealed class ConnectorHealthCheckerTests
             [ConnectorType.ServiceNow]  = PassTester(ConnectorType.ServiceNow),
             [ConnectorType.AzureDevOps] = FailTester(ConnectorType.AzureDevOps, "PAT expired"),
             [ConnectorType.LLM]         = PassTester(ConnectorType.LLM),
-            [ConnectorType.Teams]       = PassTester(ConnectorType.Teams),
+            [ConnectorType.Messaging]       = PassTester(ConnectorType.Messaging),
         };
 
         var checker = BuildChecker(testers);
@@ -118,7 +118,7 @@ public sealed class ConnectorHealthCheckerTests
             [ConnectorType.ServiceNow]  = PassTester(ConnectorType.ServiceNow),
             [ConnectorType.AzureDevOps] = FailTester(ConnectorType.AzureDevOps, revokedMessage),
             [ConnectorType.LLM]         = PassTester(ConnectorType.LLM),
-            [ConnectorType.Teams]       = PassTester(ConnectorType.Teams),
+            [ConnectorType.Messaging]       = PassTester(ConnectorType.Messaging),
         };
 
         var checker  = BuildChecker(testers);
@@ -141,14 +141,14 @@ public sealed class ConnectorHealthCheckerTests
     {
         var testers = new Dictionary<ConnectorType, Func<CancellationToken, Task<ConnectorTestResult>>>
         {
-            [ConnectorType.Teams] = _ => throw new InvalidOperationException("Network error"),
+            [ConnectorType.Messaging] = _ => throw new InvalidOperationException("Network error"),
         };
 
         var checker = BuildChecker(testers);
-        var result  = await checker.TestAsync(ConnectorType.Teams);
+        var result  = await checker.TestAsync(ConnectorType.Messaging);
 
         Assert.False(result.IsSuccess);
-        Assert.Equal(ConnectorType.Teams, result.Type);
+        Assert.Equal(ConnectorType.Messaging, result.Type);
     }
 
     // ── T062: Second call within 60s returns cached result without invoking the tester ──────

@@ -4,7 +4,6 @@
 @inject PipelineOrchestrator Orchestrator
 @inject NavigationManager Nav
 
-<ConnectorConfigModal @ref="_configModal" />
 
 <div class="flex items-center justify-between mb-6">
     <h1 class="text-xl font-semibold text-gray-100">Threads</h1>
@@ -140,9 +139,8 @@ else
 @code {
     private const int PageSize = 20;
 
-    private ConnectorConfigModal _configModal = default!;
-
-    private async Task OpenConfigModal() => await _configModal.Open();
+    // The connector configuration UI lives on the dedicated Settings page; the gear button navigates there.
+    private void OpenConfigModal() => Nav.NavigateTo("/settings/connectors");
 
     private string _searchQuery = string.Empty;
     private string _statusFilter = string.Empty;

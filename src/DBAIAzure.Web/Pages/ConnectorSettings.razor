@@ -29,6 +29,10 @@ else
                 <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center gap-3">
                         <span class="text-sm font-semibold text-gray-100">@ConnectorDisplayName(entry.ConnectorType)</span>
+                        @if (entry.ConnectorType == ConnectorType.Messaging && entry.PlatformLabel is { Length: > 0 } platform)
+                        {
+                            <span class="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-300">@platform</span>
+                        }
                         @if (entry.IsConfigured)
                         {
                             <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-900 text-cyan-300">Configured</span>
@@ -191,12 +195,59 @@ else
                                        autocomplete="new-password" class="@InputClass" />
                             </div>
                         }
-                        else if (entry.ConnectorType == ConnectorType.Teams)
+                        else if (entry.ConnectorType == ConnectorType.Messaging)
                         {
+                            <!-- Platform dropdown -->
                             <div>
-                                <label class="block text-xs text-gray-400 mb-1">Webhook URL</label>
+                                <label class="block text-xs text-gray-400 mb-1">Platform</label>
+                                @* Switching platform invalidates the prior health result for the old platform. *@
+                                <select @bind="entry.DraftUrl" @bind:after="() => { entry.TestResult = null; }" class="@InputClass">
+                                    <option value="Teams">Microsoft Teams</option>
+                                    <option value="Slack">Slack</option>
+                                    <option value="Discord">Discord</option>
+                                </select>
+                            </div>
+
+                            <p class="text-[11px] text-gray-500">
+                                Delivery is MCP-first: if an MCP server is configured below it is used; otherwise the
+                                platform's incoming webhook is used.
+                            </p>
+
+                            <!-- ── MCP server (preferred path) ─────────────────────────── -->
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">MCP Server URL <span class="text-gray-600">(optional)</span></label>
+                                <input type="url" @bind="entry.DraftMcpServerUrl"
+                                       placeholder="https://mcp.example.com/sse  (leave blank to use the webhook)"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">MCP Tool Name</label>
+                                <input type="text" @bind="entry.DraftMcpToolName"
+                                       placeholder="e.g. slack_post_message" class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Target (channel / recipient)</label>
+                                <input type="text" @bind="entry.DraftTarget"
+                                       placeholder="Channel id or recipient passed to the MCP tool" class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">MCP Argument Template <span class="text-gray-600">(optional)</span></label>
+                                <input type="text" @bind="entry.DraftMcpArgTemplate"
+                                       placeholder='{"target":"{{target}}","text":"{{message}}"}'
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">MCP Auth Token <span class="text-gray-600">(optional)</span></label>
+                                <input type="password" @bind="entry.DraftMcpAuthToken"
+                                       placeholder="Bearer token for the MCP server (leave blank to keep existing)"
+                                       autocomplete="new-password" class="@InputClass" />
+                            </div>
+
+                            <!-- ── Webhook fallback ─────────────────────────────────────── -->
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Webhook URL <span class="text-gray-600">(fallback)</span></label>
                                 <input type="password" @bind="entry.DraftSecret"
-                                       placeholder="https://acme.webhook.office.com/…  (leave blank to keep existing)"
+                                       placeholder="Incoming webhook URL for the selected platform (leave blank to keep existing)"
                                        autocomplete="new-password" class="@InputClass" />
                             </div>
                         }
@@ -252,8 +303,9 @@ else
         if (entry.IsEditing)
         {
             entry.LoadDraftFromJson();
-            entry.DraftSecret = string.Empty; // never pre-populate secrets (Article IX)
-            entry.SaveError   = string.Empty;
+            entry.DraftSecret       = string.Empty; // never pre-populate secrets (Article IX)
+            entry.DraftMcpAuthToken = string.Empty; // (Messaging) MCP auth token is also a secret
+            entry.SaveError         = string.Empty;
 
             // Auto-fetch models when opening LLM edit if a provider is already stored.
             if (entry.ConnectorType == ConnectorType.LLM && !string.IsNullOrEmpty(entry.DraftUrl))
@@ -394,7 +446,7 @@ else
         ConnectorType.AzureDevOps => "Azure DevOps",
         ConnectorType.LLM         => "LLM Provider",
         ConnectorType.ServiceNow  => "ServiceNow",
-        ConnectorType.Teams       => "Microsoft Teams",
+        ConnectorType.Messaging   => "Messaging",
         _                         => type.ToString(),
     };
 
@@ -425,12 +477,19 @@ else
         public string SaveError  { get; set; } = string.Empty;
 
         // Named draft fields — mapping varies by connector type:
-        // DraftUrl      = Organization URL (ADO) | Provider id (LLM) | Instance URL (SN) | unused (Teams)
-        // DraftUsername = Project Name (ADO)      | selected model (LLM) | Username (SN)  | unused (Teams)
-        // DraftSecret   = PAT (ADO)               | API Key (LLM)     | Password (SN)     | Webhook URL (Teams)
+        // DraftUrl      = Organization URL (ADO) | Provider id (LLM) | Instance URL (SN) | Platform (Messaging)
+        // DraftUsername = Project Name (ADO)      | selected model (LLM) | Username (SN)  | unused (Messaging)
+        // DraftSecret   = PAT (ADO)               | API Key (LLM)     | Password (SN)     | Webhook URL (Messaging)
         public string DraftUrl      { get; set; } = string.Empty;
         public string DraftUsername { get; set; } = string.Empty;
         public string DraftSecret   { get; set; } = string.Empty;
+
+        // Messaging-only draft fields (MCP path). DraftMcpAuthToken is a secret.
+        public string DraftMcpServerUrl  { get; set; } = string.Empty;
+        public string DraftMcpToolName   { get; set; } = string.Empty;
+        public string DraftMcpArgTemplate { get; set; } = string.Empty;
+        public string DraftTarget        { get; set; } = string.Empty;
+        public string DraftMcpAuthToken  { get; set; } = string.Empty;
 
         // LLM-only: live model list state
         public List<string> AvailableModels  { get; set; } = [];
@@ -445,11 +504,36 @@ else
             TestResult      = config.LastTestResult;
         }
 
+        /// <summary>Friendly platform name for the Messaging connector, parsed from the stored config;
+        /// empty when not a Messaging connector or no platform is stored.</summary>
+        public string PlatformLabel
+        {
+            get
+            {
+                if (ConnectorType != ConnectorType.Messaging || string.IsNullOrWhiteSpace(NonSecretConfig))
+                    return string.Empty;
+                try
+                {
+                    using var doc = JsonDocument.Parse(NonSecretConfig);
+                    if (doc.RootElement.TryGetProperty("platform", out var p) && p.GetString() is { Length: > 0 } value)
+                        return value == nameof(MessagingPlatform.Teams) ? "Microsoft Teams" : value;
+                }
+                catch { /* malformed — no label */ }
+                return string.Empty;
+            }
+        }
+
         /// <summary>Populates DraftUrl and DraftUsername from the stored NonSecretConfig JSON.</summary>
         public void LoadDraftFromJson()
         {
             DraftUrl = DraftUsername = string.Empty;
+            DraftMcpServerUrl = DraftMcpToolName = DraftMcpArgTemplate = DraftTarget = string.Empty;
             AvailableModels = [];
+
+            // Messaging defaults to the Teams platform when no config is stored yet.
+            if (ConnectorType == ConnectorType.Messaging)
+                DraftUrl = nameof(MessagingPlatform.Teams);
+
             if (string.IsNullOrWhiteSpace(NonSecretConfig)) return;
 
             try
@@ -461,8 +545,18 @@ else
                     ConnectorType.AzureDevOps => (Str(root, "organizationUrl"), Str(root, "projectName")),
                     ConnectorType.LLM         => (Str(root, "provider"),        Str(root, "modelName")),
                     ConnectorType.ServiceNow  => (Str(root, "instanceUrl"),     Str(root, "username")),
+                    ConnectorType.Messaging   => (Str(root, "platform"),        string.Empty),
                     _                         => (string.Empty, string.Empty),
                 };
+
+                if (ConnectorType == ConnectorType.Messaging)
+                {
+                    if (string.IsNullOrEmpty(DraftUrl)) DraftUrl = nameof(MessagingPlatform.Teams);
+                    DraftMcpServerUrl   = Str(root, "mcpServerUrl");
+                    DraftMcpToolName    = Str(root, "mcpToolName");
+                    DraftMcpArgTemplate = Str(root, "mcpArgumentTemplate");
+                    DraftTarget         = Str(root, "target");
+                }
 
                 static string Str(JsonElement el, string key) =>
                     el.TryGetProperty(key, out var p) ? (p.GetString() ?? string.Empty) : string.Empty;
@@ -484,19 +578,48 @@ else
                     JsonSerializer.Serialize(new { provider = DraftUrl, modelName = DraftUsername }),
                 ConnectorType.ServiceNow =>
                     JsonSerializer.Serialize(new { instanceUrl = DraftUrl, username = DraftUsername }),
+                ConnectorType.Messaging =>
+                    JsonSerializer.Serialize(new
+                    {
+                        platform            = DraftUrl,
+                        mcpServerUrl        = NullIfBlank(DraftMcpServerUrl),
+                        mcpToolName         = NullIfBlank(DraftMcpToolName),
+                        mcpArgumentTemplate = NullIfBlank(DraftMcpArgTemplate),
+                        target              = NullIfBlank(DraftTarget),
+                    }),
                 _ => null,
             };
 
-            var secret = string.IsNullOrWhiteSpace(DraftSecret) ? null : ConnectorType switch
-            {
-                ConnectorType.AzureDevOps => JsonSerializer.Serialize(new { personalAccessToken = DraftSecret }),
-                ConnectorType.LLM         => JsonSerializer.Serialize(new { apiKey = DraftSecret }),
-                ConnectorType.ServiceNow  => JsonSerializer.Serialize(new { password = DraftSecret }),
-                ConnectorType.Teams       => JsonSerializer.Serialize(new { webhookUrl = DraftSecret }),
-                _                         => null,
-            };
+            // Messaging carries two secrets (webhook URL + MCP auth token) in one blob; the others have one.
+            string? secret = ConnectorType == ConnectorType.Messaging
+                ? SerializeMessagingSecret()
+                : string.IsNullOrWhiteSpace(DraftSecret) ? null : ConnectorType switch
+                {
+                    ConnectorType.AzureDevOps => JsonSerializer.Serialize(new { personalAccessToken = DraftSecret }),
+                    ConnectorType.LLM         => JsonSerializer.Serialize(new { apiKey = DraftSecret }),
+                    ConnectorType.ServiceNow  => JsonSerializer.Serialize(new { password = DraftSecret }),
+                    _                         => null,
+                };
 
             return (nonSecret, secret);
         }
+
+        // Returns null (preserve existing) only when BOTH messaging secrets are blank; otherwise writes the
+        // blob with whichever secrets were entered. MCP and webhook are alternative paths, so operators
+        // normally set just one.
+        private string? SerializeMessagingSecret()
+        {
+            var hasWebhook = !string.IsNullOrWhiteSpace(DraftSecret);
+            var hasToken   = !string.IsNullOrWhiteSpace(DraftMcpAuthToken);
+            if (!hasWebhook && !hasToken) return null;
+
+            return JsonSerializer.Serialize(new
+            {
+                webhookUrl   = hasWebhook ? DraftSecret : null,
+                mcpAuthToken = hasToken ? DraftMcpAuthToken : null,
+            });
+        }
+
+        private static string? NullIfBlank(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
     }
 }

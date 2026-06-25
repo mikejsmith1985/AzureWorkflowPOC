@@ -35,7 +35,7 @@ public sealed class ConnectorSettingsTests : E2ETestBase
         await NavigateAsync("/settings/connectors");
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        // Each connector type (AzureDevOps, LLM, ServiceNow, Teams) should have an Edit button.
+        // Each connector type (AzureDevOps, LLM, ServiceNow, Messaging) should have an Edit button.
         var editButtons = await Page.Locator("button:has-text('Edit')").AllAsync();
         Assert.True(editButtons.Count >= 1, "Expected at least one connector card with an Edit button.");
     }
@@ -53,6 +53,35 @@ public sealed class ConnectorSettingsTests : E2ETestBase
         // The Save button is inside the edit form — it should become visible after clicking Edit.
         var saveButton = Page.Locator("button:has-text('Save')").First;
         await saveButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+    }
+
+    [Fact]
+    public async Task MessagingCard_Edit_ShowsPlatformDropdownAndWebhookField()
+    {
+        await NavigateAsync("/settings/connectors");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        // Open the Messaging connector card's edit form.
+        var messagingCard = Page.Locator("div.rounded.bg-gray-900", new() { HasTextString = "Messaging" }).First;
+        await messagingCard.Locator("button:has-text('Edit')").First.ClickAsync();
+
+        // The platform dropdown must offer Teams, Slack, and Discord.
+        var platformSelect = messagingCard.Locator("select").First;
+        await platformSelect.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+        var optionTexts = await platformSelect.Locator("option").AllInnerTextsAsync();
+        Assert.Contains(optionTexts, text => text.Contains("Microsoft Teams"));
+        Assert.Contains(optionTexts, text => text.Contains("Slack"));
+        Assert.Contains(optionTexts, text => text.Contains("Discord"));
+
+        // A masked Webhook URL field must be present for the webhook fallback path.
+        var webhookField = messagingCard.Locator("input[type='password']").First;
+        await webhookField.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+
+        // Switching platform (twice) must not throw / break the form (Save remains available).
+        await platformSelect.SelectOptionAsync(new SelectOptionValue { Value = "Slack" });
+        await platformSelect.SelectOptionAsync(new SelectOptionValue { Value = "Discord" });
+        await messagingCard.Locator("button:has-text('Save')").First
+            .WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
     }
 
     [Fact]

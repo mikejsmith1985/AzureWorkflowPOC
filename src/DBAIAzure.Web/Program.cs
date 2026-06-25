@@ -40,7 +40,6 @@ if (!string.IsNullOrWhiteSpace(keyVaultUri))
 var anthropicKey   = builder.Configuration["Anthropic:ApiKey"]   ?? string.Empty;
 var anthropicModel = builder.Configuration["Anthropic:Model"]    ?? "claude-sonnet-4-6";
 var portalBaseUrl  = builder.Configuration["Portal:BaseUrl"]     ?? "http://localhost:5000";
-var teamsWebhook   = builder.Configuration["Teams:PowerAutomateUrl"] ?? string.Empty;
 var dbPath         = builder.Configuration["Storage:SqlitePath"] ?? "pipeline.db";
 
 if (string.IsNullOrWhiteSpace(anthropicKey) || anthropicKey.StartsWith("REPLACE"))
@@ -83,18 +82,23 @@ builder.Services.AddHttpClient(nameof(ServiceNowClient), client =>
     client.Timeout = TimeSpan.FromSeconds(35);
 });
 
-// ── Teams HITL notifier ────────────────────────────────────────────────────────
-builder.Services.AddHttpClient(nameof(TeamsHitlNotifier), client =>
-{
-    if (!string.IsNullOrWhiteSpace(teamsWebhook))
-        client.BaseAddress = new Uri(teamsWebhook);
-});
-// IConnectorConfigRepository is registered above, so it is injectable as optional param (FR-014).
-builder.Services.AddSingleton<IHitlNotifier>(sp =>
-    new TeamsHitlNotifier(
-        sp.GetRequiredService<IHttpClientFactory>(),
-        sp.GetRequiredService<ILogger<TeamsHitlNotifier>>(),
-        sp.GetService<IConnectorConfigRepository>()));
+// ── Messaging connector — webhook delivery profiles + delivery seam (010 US1) ─────
+// One profile per platform; MessageDelivery resolves config/secrets per call and chooses the path.
+builder.Services.AddHttpClient(nameof(DBAIAzure.Connectors.Messaging.MessageDelivery));
+builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IPlatformWebhookProfile,
+    DBAIAzure.Connectors.Messaging.TeamsWebhookProfile>();
+builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IPlatformWebhookProfile,
+    DBAIAzure.Connectors.Messaging.SlackWebhookProfile>();
+builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IPlatformWebhookProfile,
+    DBAIAzure.Connectors.Messaging.DiscordWebhookProfile>();
+// MCP-first delivery gateway (official MCP client SDK over HTTP/SSE); MessageDelivery uses it when an
+// MCP server endpoint is configured and falls back to the webhook profiles otherwise (010 US3).
+builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IMcpMessageGateway,
+    DBAIAzure.Connectors.Messaging.McpMessageGateway>();
+builder.Services.AddSingleton<IMessageDelivery, DBAIAzure.Connectors.Messaging.MessageDelivery>();
+
+// ── HITL notifier — delivers pause-for-input notifications via the Messaging connector (010 US2) ─
+builder.Services.AddSingleton<IHitlNotifier, DBAIAzure.Web.Integrations.Messaging.MessagingHitlNotifier>();
 
 // ── Pipeline orchestrator ──────────────────────────────────────────────────────
 builder.Services.AddSingleton<PipelineOrchestrator>(sp =>
@@ -217,7 +221,7 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
 builder.Services.AddSingleton<ServiceNowClient>();
 builder.Services.AddSingleton<AdoConnectorTester>();
 builder.Services.AddSingleton<LlmConnectorTester>();
-builder.Services.AddSingleton<TeamsConnectorTester>();
+builder.Services.AddSingleton<MessagingConnectorTester>();
 builder.Services.AddSingleton<IConnectorHealthChecker, ConnectorHealthChecker>();
 
 // ── Workflow run repository (FR-18, US1) ───────────────────────────────────────
