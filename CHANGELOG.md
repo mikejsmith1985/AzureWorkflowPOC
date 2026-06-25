@@ -36,6 +36,31 @@ mirroring the reference LangGraph app's repo → container build/run → workflo
   gallery, the connector-config/`ISecretProtector` pattern, `PipelineDbContext` idempotent DDL, and the
   in-process live-update pattern. The only new dependency is `Docker.DotNet`.
 
+### Added — One-URL Azure Container demo deployment (foundation)
+
+The app can now be packaged as a single public-URL Azure Container Apps demo that mirrors the
+reference LangGraph app: scale-to-zero when idle, back-office connectors pre-seeded from the Forge
+Vault, and the visitor supplying only their own LLM key (see `specs/012-azure-container-deploy/`).
+This change set is the buildable foundation; the live cloud deploy + validation are operator steps.
+
+- **Boot-time connector seeding** (`DemoConnectorSeeder`): on each (ephemeral) startup, the demo's
+  ServiceNow, Azure DevOps, and Messaging connectors are seeded from `ConnectorSeed__*` environment
+  variables (vault-injected at deploy time) through the existing connector repository, so secrets are
+  encrypted at rest and seeded rows are indistinguishable from UI-configured ones. The **LLM
+  connector is never seeded** — each visitor enters their own key (FR-004).
+- **Design-time LLM hot-reload** (`HotReloadAnthropicService`): the Workflow Builder AI assistant and
+  Node Realization now resolve the LLM key + model from the stored LLM connector on each call
+  (config fallback), matching the per-run execution paths — so the single visitor-entered key powers
+  every LLM feature without an app restart.
+- **Configurable Data Protection key ring** via `DataProtection:KeyRingPath` — points at a writable,
+  ephemeral container path so secrets encrypt/decrypt within a container lifetime and reset on cold
+  start; falls back to `%APPDATA%` locally.
+- **Container + deploy assets**: root `Dockerfile` (multi-stage, non-root, Kestrel on `:8080`,
+  ephemeral SQLite) + `.dockerignore`; `deploy/aca/` local `az` deploy (`deploy.ps1`,
+  `seed-secrets.ps1`, `team.env.example`) creating an ACA app with `--ingress external
+  --min-replicas 0 --max-replicas 1` and vault-sourced ACA secrets. No GitHub Actions (Article VIII);
+  no secret value committed (Article IX).
+
 ### Changed — Teams connector generalized to a multi-platform Messaging connector
 
 The single-purpose "Teams" connector is now a **Messaging** connector that targets Microsoft

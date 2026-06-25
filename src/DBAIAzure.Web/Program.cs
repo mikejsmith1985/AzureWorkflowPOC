@@ -59,11 +59,17 @@ builder.Services.AddDbContextFactory<PipelineDbContext>(options =>
 builder.Services.AddSingleton<IRunRepository, SqliteRunRepository>();
 
 // ── Data Protection — encrypts connector secrets at rest (T001, FR-019) ───────
-// Keys are persisted to AppData so they survive app restarts. Without persistence,
-// a restart generates new keys and makes all stored secrets unreadable.
-var dpKeyDir = new DirectoryInfo(Path.Combine(
-    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-    "AzureWorkflowPOC", "DataProtection-Keys"));
+// The key ring location is configurable via DataProtection:KeyRingPath. In the container it points at
+// a writable, EPHEMERAL path (set in the Dockerfile) so keys live only for the container lifetime —
+// every cold start resets them along with the rest of the demo state (FR-016). Locally it falls back
+// to %APPDATA% so keys survive dev restarts. SetApplicationName is pinned so keys stay valid within a
+// lifetime/deployment.
+var configuredKeyRingPath = builder.Configuration["DataProtection:KeyRingPath"];
+var dpKeyDir = new DirectoryInfo(!string.IsNullOrWhiteSpace(configuredKeyRingPath)
+    ? configuredKeyRingPath
+    : Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "AzureWorkflowPOC", "DataProtection-Keys"));
 dpKeyDir.Create();
 builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(dpKeyDir)
@@ -72,6 +78,12 @@ builder.Services.AddSingleton<ISecretProtector, DataProtectorAdapter>();
 
 // ── Connector config repository (T013) ────────────────────────────────────────
 builder.Services.AddSingleton<IConnectorConfigRepository, SqliteConnectorConfigRepository>();
+
+// ── Demo connector seeding (012 US5) ──────────────────────────────────────────
+// Bind the vault-injected seed values and register the boot seeder that pre-wires the demo's
+// back-office connectors (ServiceNow/AzureDevOps/Messaging) on each cold start. Never seeds the LLM.
+builder.Services.Configure<ConnectorSeedOptions>(builder.Configuration.GetSection(ConnectorSeedOptions.SectionName));
+builder.Services.AddSingleton<DemoConnectorSeeder>();
 
 // ── Workflow persistence ────────────────────────────────────────────────────
 builder.Services.AddSingleton<IWorkflowRepository, SqliteWorkflowRepository>();
@@ -290,11 +302,15 @@ builder.Services.AddApplicationInsightsTelemetry(builder.Configuration);
 // ── Workflow structural validator (spec 004) ───────────────────────────────────
 builder.Services.AddSingleton<IWorkflowValidator, WorkflowValidator>();
 
-// ── Visual Workflow Builder services (T046–T049) ───────────────────────────────
-// A singleton IChatCompletionService for the Visual Workflow Builder (separate from the
-// per-run kernel factory used by the pipeline orchestrator).
-builder.Services.AddSingleton<IChatCompletionService>(
-    new AnthropicChatCompletionService(anthropicKey, anthropicModel));
+// ── Design-time LLM services (Workflow Builder assistant + Node Realization) ───────────
+// These resolve the LLM key+model from the LLM connector's DB row on each call (config fallback),
+// so the single key a visitor enters in the UI powers the builder assistant and node realization
+// without an app restart — matching the per-run execution factories (research Decision 7;
+// FR-003/FR-004/SC-006). One shared instance backs both IChatCompletionService and
+// IStructuredCompletionService.
+builder.Services.AddSingleton<HotReloadAnthropicService>(sp =>
+    new HotReloadAnthropicService(sp.GetRequiredService<IConnectorConfigRepository>(), anthropicKey, anthropicModel));
+builder.Services.AddSingleton<IChatCompletionService>(sp => sp.GetRequiredService<HotReloadAnthropicService>());
 
 builder.Services.AddSingleton<WorkflowTopologySerializer>();
 builder.Services.AddSingleton<ILlmAvailabilityMonitor, LlmAvailabilityMonitor>();
@@ -321,10 +337,9 @@ builder.Services.AddScoped<DBAIAzure.Web.Integrations.LLM.ILlmModelFetcherServic
 
 // ── Node Realization services (spec 007) ───────────────────────────────────────
 // Schema-bound LLM output for turning plain-language nodes into executable config (Article VII).
-// AnthropicChatCompletionService implements IStructuredCompletionService; registered at the app root
-// (the existing IStructuredCompletionService lives only inside the per-run pipeline kernel).
-builder.Services.AddSingleton<IStructuredCompletionService>(
-    new AnthropicChatCompletionService(anthropicKey, anthropicModel));
+// Resolves to the same hot-reloading service as the builder assistant, so node realization uses the
+// visitor-entered key from the DB rather than a key captured at startup (research Decision 7).
+builder.Services.AddSingleton<IStructuredCompletionService>(sp => sp.GetRequiredService<HotReloadAnthropicService>());
 // Scoped to mirror WorkflowBuilderService — one realization/readiness instance per session.
 builder.Services.AddScoped<IWorkflowRealizationService, WorkflowRealizationService>();
 builder.Services.AddScoped<IWorkflowReadinessService, WorkflowReadinessService>();
@@ -525,6 +540,13 @@ using (var scope = app.Services.CreateScope())
         CREATE INDEX IF NOT EXISTS IX_AppRaisedIssues_AppId
             ON AppRaisedIssues (AppId);
         """);
+
+    // ── Seed the demo's back-office connectors from environment configuration (012 US5) ───
+    // Runs after the ConnectorConfigs table exists and before the app serves traffic. Never seeds
+    // the LLM connector. On the demo's ephemeral container this re-populates connectors on every
+    // cold start (research Decision 4); locally it is a no-op when no seed env vars are present.
+    var demoSeeder = scope.ServiceProvider.GetRequiredService<DemoConnectorSeeder>();
+    await demoSeeder.SeedAsync();
 }
 
 // ── ADO Telemetry Preflight auto-run on startup (spec-009, T034) ──────────────
