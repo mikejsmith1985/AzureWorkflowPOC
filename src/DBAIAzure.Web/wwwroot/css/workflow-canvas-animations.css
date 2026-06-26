@@ -72,3 +72,16 @@
     font-size: 0.875rem;
     pointer-events: none;
 }
+
+/* ── Settings UX polish (spec-009): section fade-in + save success flash ─────── */
+@keyframes fade-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.section-enter { animation: fade-in 150ms ease-out both; }
+
+@keyframes success-flash {
+    0%   { background-color: rgb(21 128 61); }  /* Tailwind green-700 */
+    100% { background-color: inherit; }
+}
+.btn-success-flash { animation: success-flash 1500ms ease-out; }

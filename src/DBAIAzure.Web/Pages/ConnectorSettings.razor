@@ -5,9 +5,11 @@
 @inject IAdoTelemetryPreflightService AdoPreflightService
 @inject DBAIAzure.Web.Integrations.LLM.ILlmModelFetcherService LlmModelFetcher
 @inject ILogger<ConnectorSettings> Logger
+@inject NavigationManager Nav
 @using DBAIAzure.Core.Interfaces
 @using DBAIAzure.Core.Models
 @using DBAIAzure.Core.Models.AdoTelemetry
+@using DBAIAzure.Web.Components.Settings
 @using System.Text.Json
 
 <div class="flex items-center justify-between mb-6">
@@ -103,7 +105,8 @@ else
                         @if (entry.ConnectorType == ConnectorType.AzureDevOps)
                         {
                             <div>
-                                <label class="block text-xs text-gray-400 mb-1">Organization URL</label>
+                                <label class="text-xs text-gray-400 mb-1 flex items-center gap-1.5">Organization URL
+                                    <InfoTip Content="The web address of your Azure DevOps organization." Example="https://dev.azure.com/your-org" /></label>
                                 <input type="url" @bind="entry.DraftUrl"
                                        placeholder="https://dev.azure.com/your-org"
                                        class="@InputClass" />
@@ -115,7 +118,8 @@ else
                                        class="@InputClass" />
                             </div>
                             <div>
-                                <label class="block text-xs text-gray-400 mb-1">Personal Access Token</label>
+                                <label class="text-xs text-gray-400 mb-1 flex items-center gap-1.5">Personal Access Token
+                                    <InfoTip Content="Authorizes work-item access. In Azure DevOps → User settings → Personal access tokens, create one with Work Items (read & write). Stored encrypted; leave blank to keep the existing one." /></label>
                                 <input type="password" @bind="entry.DraftSecret"
                                        placeholder="Leave blank to keep existing"
                                        autocomplete="new-password" class="@InputClass" />
@@ -135,7 +139,8 @@ else
 
                             <!-- API key -->
                             <div>
-                                <label class="block text-xs text-gray-400 mb-1">API Key</label>
+                                <label class="text-xs text-gray-400 mb-1 flex items-center gap-1.5">API Key
+                                    <InfoTip Content="Your provider API key (e.g. Anthropic or OpenAI). It's stored encrypted and never displayed again after saving — leave blank to keep the existing one." /></label>
                                 <input type="password" @bind="entry.DraftSecret"
                                        placeholder="Leave blank to keep existing"
                                        autocomplete="new-password" class="@InputClass" />
@@ -177,7 +182,8 @@ else
                         else if (entry.ConnectorType == ConnectorType.ServiceNow)
                         {
                             <div>
-                                <label class="block text-xs text-gray-400 mb-1">Instance URL</label>
+                                <label class="text-xs text-gray-400 mb-1 flex items-center gap-1.5">Instance URL
+                                    <InfoTip Content="The base address of your ServiceNow instance." Example="https://acme.service-now.com" /></label>
                                 <input type="url" @bind="entry.DraftUrl"
                                        placeholder="https://acme.service-now.com"
                                        class="@InputClass" />
@@ -189,7 +195,8 @@ else
                                        class="@InputClass" />
                             </div>
                             <div>
-                                <label class="block text-xs text-gray-400 mb-1">Password</label>
+                                <label class="text-xs text-gray-400 mb-1 flex items-center gap-1.5">Password
+                                    <InfoTip Content="Password for the ServiceNow integration user. Stored encrypted; leave blank to keep the existing one." /></label>
                                 <input type="password" @bind="entry.DraftSecret"
                                        placeholder="Leave blank to keep existing"
                                        autocomplete="new-password" class="@InputClass" />
@@ -245,7 +252,8 @@ else
 
                             <!-- ── Webhook fallback ─────────────────────────────────────── -->
                             <div>
-                                <label class="block text-xs text-gray-400 mb-1">Webhook URL <span class="text-gray-600">(fallback)</span></label>
+                                <label class="text-xs text-gray-400 mb-1 flex items-center gap-1.5">Webhook URL <span class="text-gray-600">(fallback)</span>
+                                    <InfoTip Content="Incoming webhook URL for the selected platform — used when no MCP server is configured above." Example="https://hooks.slack.com/services/…" /></label>
                                 <input type="password" @bind="entry.DraftSecret"
                                        placeholder="Incoming webhook URL for the selected platform (leave blank to keep existing)"
                                        autocomplete="new-password" class="@InputClass" />
@@ -295,6 +303,22 @@ else
             .Select(c => new ConnectorEntry(c))
             .ToList();
         _loading = false;
+        ExpandFromQuery();
+    }
+
+    /// <summary>
+    /// Honors a <c>?expand=&lt;ConnectorType&gt;</c> query parameter (the onboarding banner's deep-links)
+    /// by opening that connector's edit form on load so the user lands directly on the right field.
+    /// </summary>
+    private void ExpandFromQuery()
+    {
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(Nav.ToAbsoluteUri(Nav.Uri).Query);
+        if (!query.TryGetValue("expand", out var requested)) return;
+
+        var match = _entries.FirstOrDefault(
+            e => string.Equals(e.ConnectorType.ToString(), requested, StringComparison.OrdinalIgnoreCase));
+        if (match is { IsEditing: false })
+            ToggleEdit(match);
     }
 
     private void ToggleEdit(ConnectorEntry entry)

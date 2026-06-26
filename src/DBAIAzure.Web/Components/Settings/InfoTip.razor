@@ -1,0 +1,37 @@
+@* Small "ⓘ" help icon shown next to a connector field (spec-009 US2). On hover/focus it measures its
+   own position and asks ITooltipService to show a description + example in the layout-root portal, so
+   the tooltip is never clipped by a parent's overflow. *@
+@inject ITooltipService Tooltip
+@inject IJSRuntime JS
+@using DBAIAzure.Web.Services
+
+<button type="button" id="@_elementId"
+        @onmouseenter="ShowAsync" @onmouseleave="Hide"
+        @onfocus="ShowAsync" @onblur="Hide"
+        aria-label="More information"
+        class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-700 text-gray-300
+               text-[10px] leading-none hover:bg-cyan-700 hover:text-white transition-colors cursor-help align-middle">
+    i
+</button>
+
+@code {
+    /// <summary>The plain-language description shown in the tooltip (required).</summary>
+    [Parameter, EditorRequired] public string Content { get; set; } = string.Empty;
+
+    /// <summary>An optional concrete example value shown beneath the description.</summary>
+    [Parameter] public string? Example { get; set; }
+
+    // Stable per-instance DOM id so getRectById can measure this exact icon.
+    private readonly string _elementId = $"infotip-{Guid.NewGuid():N}";
+
+    /// <summary>Measures the icon and shows the tooltip anchored to it; no-op if the rect can't be read.</summary>
+    private async Task ShowAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Content)) return;
+        var anchor = await JS.InvokeAsync<TooltipAnchor?>("getRectById", _elementId);
+        if (anchor is not null)
+            Tooltip.Show(Content, Example, anchor);
+    }
+
+    private void Hide() => Tooltip.Hide();
+}

@@ -1,4 +1,9 @@
 @inherits LayoutComponentBase
+@implements IDisposable
+@inject IOnboardingStateService Onboarding
+@inject ITooltipService Tooltip
+@using DBAIAzure.Web.Services
+@using DBAIAzure.Web.Components.Settings
 
 <div class="flex flex-col min-h-screen bg-gray-950 text-gray-100">
     <header class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center gap-4">
@@ -16,6 +21,9 @@
         </nav>
     </header>
 
+    @* First-run onboarding banner — renders itself only when the LLM connector isn't healthy yet (US3). *@
+    <OnboardingBanner />
+
     <main class="flex-1 px-6 py-6 max-w-6xl mx-auto w-full">
         @Body
     </main>
@@ -24,3 +32,46 @@
         SK Process Framework · Anthropic claude-sonnet-4-6 · Blazor Server
     </footer>
 </div>
+
+@* Field-tooltip portal (US2): rendered at layout root with position:fixed so no parent overflow clips it. *@
+@if (Tooltip.Active is { } tip)
+{
+    <div class="fixed z-[9999] max-w-xs pointer-events-none"
+         data-testid="field-tooltip"
+         style="left:@Px(tip.Anchor.Left); @VerticalStyle(tip)">
+        <div class="rounded-lg border border-gray-700 bg-gray-800 shadow-xl px-3 py-2">
+            <p class="text-xs text-gray-200">@tip.Content</p>
+            @if (!string.IsNullOrWhiteSpace(tip.Example))
+            {
+                <p class="text-[11px] text-gray-400 mt-1"><span class="text-gray-500">e.g.</span> @tip.Example</p>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    // Gap in pixels between the anchor icon and the tooltip panel.
+    private const double TooltipGapPx = 8;
+
+    protected override void OnInitialized() => Tooltip.OnChange += OnTooltipChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        // localStorage + the LLM health check are only available after the first interactive render.
+        await Onboarding.InitialiseAsync();
+        StateHasChanged();
+    }
+
+    private void OnTooltipChanged() => InvokeAsync(StateHasChanged);
+
+    private static string Px(double value) => $"{value.ToString(System.Globalization.CultureInfo.InvariantCulture)}px";
+
+    /// <summary>Positions the panel below the icon when it flips below, otherwise above it.</summary>
+    private static string VerticalStyle(TooltipContext tip) =>
+        tip.ShowBelow
+            ? $"top:{Px(tip.Anchor.Bottom + TooltipGapPx)}"
+            : $"bottom:{Px(tip.Anchor.ViewportHeight - tip.Anchor.Top + TooltipGapPx)}";
+
+    public void Dispose() => Tooltip.OnChange -= OnTooltipChanged;
+}

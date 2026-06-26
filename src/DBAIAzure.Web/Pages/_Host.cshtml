@@ -40,6 +40,21 @@
             const rect = element.getBoundingClientRect();
             return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
         };
+        // Safe localStorage access for the onboarding banner dismissal (spec-009). Both swallow
+        // errors so private-mode / storage-disabled browsers degrade gracefully (banner just reappears).
+        window.localStorageGet = function (key) {
+            try { return window.localStorage.getItem(key); } catch (e) { return null; }
+        };
+        window.localStorageSet = function (key, value) {
+            try { window.localStorage.setItem(key, value); } catch (e) { /* storage unavailable — ignore */ }
+        };
+        // Returns the bounding rect of a DOM element by id — used to anchor the field tooltip portal (spec-009).
+        window.getRectById = function (id) {
+            const el = document.getElementById(id);
+            if (!el) return null;
+            const r = el.getBoundingClientRect();
+            return { left: r.left, top: r.top, width: r.width, height: r.height, bottom: r.bottom, viewportHeight: window.innerHeight };
+        };
     </script>
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen antialiased">
