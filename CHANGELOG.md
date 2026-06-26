@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — ACA deploy script now runs against the real subscription (spec-012)
+
+`deploy/aca/deploy.ps1` had never been executed end-to-end and failed on three real blockers; all are
+now resolved so `./deploy/aca/deploy.ps1` produces a live public URL:
+
+- **PowerShell parse error**: a native-command redirection (`2>$null`) inside a grouping `(...)`
+  expression is a syntax error — split into a bare command + a separate `$LASTEXITCODE` check.
+- **Server-side ACR build is disabled on this subscription** (`TasksOperationsNotAllowed`): replaced
+  `az acr build` with a local `docker build` + `docker push`, gated by a Docker-running pre-check and
+  tagged with a unique immutable tag (git SHA + UTC timestamp) so ACA never serves a stale `:latest`.
+- **One Container Apps environment per region cap** (`MaxNumberOfRegionalEnvironmentsInSubExceeded`):
+  reuse the shared `dbai-poc-env` environment instead of creating a new one; the registry now lives in
+  its own resource group (`-AcrResourceGroup`) since its name is globally unique. Env-create is now
+  reuse-or-create, and app-create / FQDN resolution halt on failure instead of printing an empty URL.
+
 ### Added — Admin Console UX: first-run onboarding + field tooltips (spec-009)
 
 Net-new guidance layer on top of the already-typed connector settings (the spec's earlier "retire the
