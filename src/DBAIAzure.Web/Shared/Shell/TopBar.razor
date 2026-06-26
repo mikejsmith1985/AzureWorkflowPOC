@@ -1,0 +1,26 @@
+@* Global top bar: the active section title on the left, and a right-hand control cluster. The
+   text-size control and connection indicator are slotted in here by US5; US1 establishes the bar. *@
+@using DBAIAzure.Web.Navigation
+@using Microsoft.AspNetCore.Components.Routing
+@implements IDisposable
+@inject NavigationManager Nav
+
+<div class="flex items-center w-full gap-4" data-testid="topbar">
+    <h2 class="text-sm font-semibold text-fg">@Title</h2>
+    <div class="ml-auto flex items-center gap-3" data-testid="topbar-controls">
+        @ControlsSlot
+    </div>
+</div>
+
+@code {
+    /// <summary>Optional right-aligned controls (text-size, connection indicator) provided by the shell.</summary>
+    [Parameter] public RenderFragment? ControlsSlot { get; set; }
+
+    private string Title => NavModel.ActiveSection(new Uri(Nav.Uri).AbsolutePath)?.Label ?? "Admin Console";
+
+    protected override void OnInitialized() => Nav.LocationChanged += OnLocationChanged;
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+}

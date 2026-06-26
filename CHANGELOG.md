@@ -19,6 +19,12 @@ feature (spec-015). Landing incrementally:
   a `NavModel` single source for the five sidebar sections + User Guide; a `UiPreferenceService` that
   persists text size and Assistant-panel state via the existing `localStorage` interop; and an
   `AppShell` layout skeleton.
+- **Console shell live (US1)**: the flat top-nav `MainLayout` is replaced by an `AppShell` — a
+  persistent left `SidebarNav` (branded "Admin Console / Control Plane", five sections + separated
+  User Guide + version footer, accent active-state, collapses to an icon rail below `lg`), a `TopBar`,
+  and a right-hand `AssistantPanel` rail — set as the default layout. The Workflow Builder now renders
+  inside a full-bleed variant of the same shell (`WorkflowBuilderLayout`) so the canvas keeps its space
+  while gaining the sidebar/top bar. The onboarding banner and field-tooltip portal moved into the shell.
 
 ### Added — Admin Console UX: first-run onboarding + field tooltips (spec-009)
 

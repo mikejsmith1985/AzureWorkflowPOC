@@ -1,23 +1,22 @@
-@* Full-viewport layout for the Workflow Builder — no max-width or padding constraints
-   so the palette + canvas fill the entire browser window. *@
+@* Full-bleed variant of the Admin Console shell for the Workflow Builder. It shows the same sidebar
+   and top bar as the rest of the console (so the shell is consistent — C-SHELL-6), but the content
+   region is unpadded and overflow-hidden so the palette + canvas fill the viewport. The Builder keeps
+   its own embedded chat panel as its assistant until US4 unifies it into the shell-level rail. *@
 @inherits LayoutComponentBase
+@using DBAIAzure.Web.Shared.Shell
 
-<div class="flex flex-col min-h-screen bg-gray-950 text-gray-100">
-    <header class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center gap-4">
-        <span class="text-cyan-400 font-bold text-lg tracking-tight">DBAIAzure</span>
-        <span class="text-gray-600 text-sm">Intake Pipeline</span>
-        <nav class="ml-auto flex gap-6">
-            <a href="/" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Threads</a>
-            <a href="/graph" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Graph</a>
-            <a href="/new-ticket" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">New Ticket</a>
-            <a href="/workflow-builder" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Workflow Builder</a>
-            <a href="/runs" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Run History</a>
-            <a href="/review-queue" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Review Queue</a>
-            <a href="/settings/connectors" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Settings</a>
-        </nav>
-    </header>
+<div class="flex min-h-screen bg-app text-fg">
+    <aside class="w-14 lg:w-60 shrink-0 border-r border-line bg-raised" data-testid="app-sidebar">
+        <SidebarNav />
+    </aside>
 
-    <main class="flex-1 overflow-hidden">
-        @Body
-    </main>
+    <div class="flex-1 flex flex-col min-w-0">
+        <header class="h-14 shrink-0 border-b border-line bg-raised flex items-center px-4" data-testid="app-topbar">
+            <TopBar />
+        </header>
+
+        <main class="flex-1 overflow-hidden">
+            @Body
+        </main>
+    </div>
 </div>

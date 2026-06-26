@@ -1,0 +1,24 @@
+@* Right-hand Assistant rail (presentation chrome). US1 ships the static chrome — header, intro,
+   suggestion chips, and an input — so the shell matches the reference. US4 adds collapse/persist
+   behaviour and hosts the existing Workflow Builder assistant; feature 015 makes it intelligent. *@
+<div class="flex flex-col h-full" data-testid="assistant-panel">
+    <div class="flex items-center gap-2 px-4 py-3 border-b border-line">
+        <span class="inline-flex h-6 w-6 items-center justify-center rounded bg-accent text-onaccent text-[11px] font-bold">AI</span>
+        <span class="text-sm font-semibold text-fg">Assistant</span>
+    </div>
+
+    <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3 text-sm">
+        <p class="text-muted">Describe what you want to build — an agent or a workflow — or ask how anything in the console works.</p>
+        <div class="space-y-2">
+            <div class="rounded-md border border-line bg-surface px-3 py-2 text-fg cursor-default">Show me the workflow templates</div>
+            <div class="rounded-md border border-line bg-surface px-3 py-2 text-fg cursor-default">How does the review queue work?</div>
+        </div>
+    </div>
+
+    <div class="px-3 py-3 border-t border-line">
+        <div class="flex items-center gap-2">
+            <div class="flex-1 rounded-md border border-line bg-surface px-3 py-2 text-sm text-muted">Ask anything, or describe what to build…</div>
+            <button type="button" disabled class="rounded-md bg-accent text-onaccent text-sm px-3 py-2 opacity-60">Send</button>
+        </div>
+    </div>
+</div>
