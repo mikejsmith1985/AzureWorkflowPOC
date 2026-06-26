@@ -71,9 +71,9 @@ xUnit unit tests. No new NuGet packages, no DB changes.
 
 **Independent Test**: No Graph sidebar entry; `/graph` lands on the Builder (no 404); the Builder shows the loaded workflow's nodes/edges; the fixed topology appears nowhere.
 
-- [ ] T016 [P] [US2] Write FAILING E2E `tests/DBAIAzure.E2ETests/Tests/GraphRedirectTests.cs`: sidebar has no "Graph" entry; visiting `/graph` ends on `/workflow-builder`; loading a saved workflow shows its own nodes/edges; the old fixed intake diagram is absent. (C-NAV-3/4)
-- [ ] T017 [US2] Create `src/DBAIAzure.Web/Pages/GraphRedirect.razor` at route `/graph` that navigates to `/workflow-builder` (FR-009).
-- [ ] T018 [US2] Delete `src/DBAIAzure.Web/Pages/Graph.razor` and remove its `NavModel`/sidebar reference; confirm the Mermaid CDN include and `window.mermaidRender` in `_Host.cshtml` REMAIN (still used by `Pages/RunDetail.razor`).
+- [X] T016 [P] [US2] Write FAILING E2E `tests/DBAIAzure.E2ETests/Tests/GraphRedirectTests.cs`: sidebar has no "Graph" entry; visiting `/graph` ends on `/workflow-builder`; loading a saved workflow shows its own nodes/edges; the old fixed intake diagram is absent. (C-NAV-3/4)
+- [X] T017 [US2] Create `src/DBAIAzure.Web/Pages/GraphRedirect.razor` at route `/graph` that navigates to `/workflow-builder` (FR-009).
+- [X] T018 [US2] Delete `src/DBAIAzure.Web/Pages/Graph.razor` and remove its `NavModel`/sidebar reference; confirm the Mermaid CDN include and `window.mermaidRender` in `_Host.cshtml` REMAIN (still used by `Pages/RunDetail.razor`).
 - [ ] T019 [US2] Confirm/expose the Builder's loaded-workflow graph view (Z.Blazor.Diagrams already renders it); add an in-Builder graph affordance if not already obvious. Make `GraphRedirectTests` pass.
 
 **Checkpoint**: Graph folded in; old route safe.

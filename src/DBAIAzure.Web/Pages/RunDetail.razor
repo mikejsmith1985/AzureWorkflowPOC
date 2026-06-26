@@ -18,10 +18,6 @@ else
         <span class="font-mono text-cyan-400 text-sm">@RunId</span>
         <StatusBadge Status="@_run.Status" />
         <SourceBadge Source="@_run.InitialTicket.Source" />
-        <a href="/graph"
-           class="ml-auto text-xs text-gray-600 hover:text-cyan-400 transition-colors">
-            Topology →
-        </a>
     </div>
 
     <!-- ── Ticket header ─────────────────────────────────────────────── -->
@@ -208,8 +204,7 @@ else
     {
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 mb-4">
             <div class="text-xs text-gray-500 mb-3">
-                Pipeline topology — active step highlighted.
-                <a href="/graph" class="text-cyan-600 hover:text-cyan-400 ml-2">Full page →</a>
+                This run's step graph — active step highlighted.
             </div>
             <div id="@RunGraphContainerId" class="text-center overflow-x-auto"></div>
         </div>

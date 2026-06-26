@@ -25,6 +25,10 @@ feature (spec-015). Landing incrementally:
   and a right-hand `AssistantPanel` rail — set as the default layout. The Workflow Builder now renders
   inside a full-bleed variant of the same shell (`WorkflowBuilderLayout`) so the canvas keeps its space
   while gaining the sidebar/top bar. The onboarding banner and field-tooltip portal moved into the shell.
+- **Graph folded into the Builder (US2)**: the standalone Graph page and its fixed intake-pipeline
+  diagram are retired (the Builder already renders the loaded workflow's own graph); the old `/graph`
+  route now redirects to the Workflow Builder so existing links never 404. Mermaid is retained for the
+  per-run step graph on the Run detail page. Obsolete "Topology/Full page" links removed from RunDetail.
 
 ### Added — Admin Console UX: first-run onboarding + field tooltips (spec-009)
 
