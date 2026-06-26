@@ -27,9 +27,9 @@ xUnit unit tests. No new NuGet packages, no DB changes.
 
 **Purpose**: Scaffolding the redesign needs before any shell work.
 
-- [ ] T001 [P] Create `design-tokens.css` at `src/DBAIAzure.Web/wwwroot/css/design-tokens.css` (empty `:root {}` scaffold) and link it in `src/DBAIAzure.Web/Pages/_Host.cshtml` immediately after the Tailwind CDN script.
-- [ ] T002 Add a runtime `tailwind.config` `<script>` block in `src/DBAIAzure.Web/Pages/_Host.cshtml` mapping semantic colour names (`app`, `surface`, `surface-raised`, `border-default`, `default`, `muted`, `accent`, `on-accent`, `status-ok|warn|error`) to `var(--…)` per `contracts/theming-tokens.md`.
-- [ ] T003 [P] Create folders `src/DBAIAzure.Web/Shared/Shell/` and `src/DBAIAzure.Web/Navigation/` (add a `.gitkeep` or first file) for the new shell components and nav model.
+- [X] T001 [P] Create `design-tokens.css` at `src/DBAIAzure.Web/wwwroot/css/design-tokens.css` (empty `:root {}` scaffold) and link it in `src/DBAIAzure.Web/Pages/_Host.cshtml` immediately after the Tailwind CDN script.
+- [X] T002 Add a runtime `tailwind.config` `<script>` block in `src/DBAIAzure.Web/Pages/_Host.cshtml` mapping semantic colour names (`app`, `surface`, `surface-raised`, `border-default`, `default`, `muted`, `accent`, `on-accent`, `status-ok|warn|error`) to `var(--…)` per `contracts/theming-tokens.md`.
+- [X] T003 [P] Create folders `src/DBAIAzure.Web/Shared/Shell/` and `src/DBAIAzure.Web/Navigation/` (add a `.gitkeep` or first file) for the new shell components and nav model.
 
 ---
 
@@ -37,11 +37,11 @@ xUnit unit tests. No new NuGet packages, no DB changes.
 
 **Purpose**: Shared building blocks every story renders on. **⚠️ No story work begins until this phase is complete.**
 
-- [ ] T004 [P] Define the dark-theme semantic tokens (all variables in `contracts/theming-tokens.md`, including `--text-scale` and `--focus-ring`) in `src/DBAIAzure.Web/wwwroot/css/design-tokens.css`.
-- [ ] T005 [P] Create the navigation model in `src/DBAIAzure.Web/Navigation/NavModel.cs` — `NavSection`/`NavSubView` records plus the five sections + separated User Guide and their sub-view→route map per `contracts/navigation-ia.md` (XML doc comments per Article IV).
-- [ ] T006 [P] Write FAILING unit tests for the preferences service in `tests/DBAIAzure.Tests/UiPreferenceServiceTests.cs` (mock `IJSRuntime`: default text size = Normal, default assistant open; read/write of `ui.textSize` and `ui.assistantOpen`; graceful default when storage throws).
-- [ ] T007 Implement `UiPreferenceService` in `src/DBAIAzure.Web/Services/UiPreferenceService.cs` using the existing `localStorageGet`/`localStorageSet` interop; register it in `src/DBAIAzure.Web/Program.cs` DI. Make T006 pass.
-- [ ] T008 Create the `AppShell.razor` skeleton in `src/DBAIAzure.Web/Shared/AppShell.razor` with named regions (sidebar / top bar / content / right rail) using token classes — not yet wired as default layout.
+- [X] T004 [P] Define the dark-theme semantic tokens (all variables in `contracts/theming-tokens.md`, including `--text-scale` and `--focus-ring`) in `src/DBAIAzure.Web/wwwroot/css/design-tokens.css`.
+- [X] T005 [P] Create the navigation model in `src/DBAIAzure.Web/Navigation/NavModel.cs` — `NavSection`/`NavSubView` records plus the five sections + separated User Guide and their sub-view→route map per `contracts/navigation-ia.md` (XML doc comments per Article IV).
+- [X] T006 [P] Write FAILING unit tests for the preferences service in `tests/DBAIAzure.Tests/UiPreferenceServiceTests.cs` (mock `IJSRuntime`: default text size = Normal, default assistant open; read/write of `ui.textSize` and `ui.assistantOpen`; graceful default when storage throws).
+- [X] T007 Implement `UiPreferenceService` in `src/DBAIAzure.Web/Services/UiPreferenceService.cs` using the existing `localStorageGet`/`localStorageSet` interop; register it in `src/DBAIAzure.Web/Program.cs` DI. Make T006 pass.
+- [X] T008 Create the `AppShell.razor` skeleton in `src/DBAIAzure.Web/Shared/AppShell.razor` with named regions (sidebar / top bar / content / right rail) using token classes — not yet wired as default layout.
 
 **Checkpoint**: Tokens, nav model, preferences service, and shell skeleton exist.
 

@@ -1,0 +1,29 @@
+@* Admin Console app shell — the persistent frame around every screen: a left sidebar, a top bar, the
+   routed content region, and a right-hand Assistant rail. Built on semantic design tokens. This is the
+   skeleton (foundational); the sidebar, top bar, and Assistant panel are filled by their components in
+   the shell user stories, and this layout is wired as the default in App.razor at that point. *@
+@inherits LayoutComponentBase
+
+<div class="flex min-h-screen bg-app text-fg">
+    @* Left sidebar (SidebarNav — US1) *@
+    <aside class="w-60 shrink-0 border-r border-line bg-raised" data-testid="app-sidebar">
+        <!-- sidebar content -->
+    </aside>
+
+    <div class="flex-1 flex flex-col min-w-0">
+        @* Global top bar (TopBar — US1; text-size + connection controls — US5) *@
+        <header class="h-14 shrink-0 border-b border-line bg-raised flex items-center px-4" data-testid="app-topbar">
+            <!-- top bar content -->
+        </header>
+
+        @* Routed content region — the only part that changes on navigation. *@
+        <main class="flex-1 overflow-auto p-6">
+            @Body
+        </main>
+    </div>
+
+    @* Right-hand Assistant rail (AssistantPanel — US1 chrome / US4 behaviour). *@
+    <aside class="w-80 shrink-0 border-l border-line bg-raised" data-testid="assistant-rail">
+        <!-- assistant panel -->
+    </aside>
+</div>

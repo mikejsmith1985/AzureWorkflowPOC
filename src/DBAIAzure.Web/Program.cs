@@ -271,6 +271,9 @@ builder.Services.AddSingleton<IConnectorHealthChecker, ConnectorHealthChecker>()
 // first-run onboarding banner; the field-tooltip portal service holds the active tooltip per session.
 builder.Services.AddScoped<IOnboardingStateService, OnboardingStateService>();
 builder.Services.AddScoped<ITooltipService, TooltipService>();
+// Per-circuit shell presentation preferences (text size + Assistant panel open/closed), persisted in
+// browser localStorage. Scoped so each visitor session restores its own choices on first render.
+builder.Services.AddScoped<IUiPreferenceService, UiPreferenceService>();
 
 // ── Workflow run repository (FR-18, US1) ───────────────────────────────────────
 builder.Services.AddSingleton<IWorkflowRunRepository, EfWorkflowRunRepository>();

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Admin Console look-and-feel redesign (spec-014, in progress)
+
+Reworking the console to the reference "Admin Console / Control Plane" look-and-feel (gh #31): a
+persistent left-sidebar shell, grouped sections with sub-tabs, a dark-first themeable token system, and
+the standalone Graph folded into the Workflow Builder. The intelligent/agentic Assistant is a separate
+feature (spec-015). Landing incrementally:
+
+- **Shell foundations**: `design-tokens.css` semantic CSS variables (dark theme) + a runtime
+  `tailwind.config` mapping semantic colour aliases, so a future light theme needs no per-screen edits;
+  a `NavModel` single source for the five sidebar sections + User Guide; a `UiPreferenceService` that
+  persists text size and Assistant-panel state via the existing `localStorage` interop; and an
+  `AppShell` layout skeleton.
+
 ### Added — Admin Console UX: first-run onboarding + field tooltips (spec-009)
 
 Net-new guidance layer on top of the already-typed connector settings (the spec's earlier "retire the

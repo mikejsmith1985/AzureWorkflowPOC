@@ -9,6 +9,31 @@
     <title>DBAIAzure — Pipeline Dashboard</title>
     <base href="~/" />
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Map semantic colour names to the design tokens (see css/design-tokens.css). Screens use these
+         semantic aliases (bg-surface, text-accent, …) so a future light theme only flips the CSS vars. -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        app: 'var(--bg)',
+                        surface: 'var(--surface)',
+                        raised: 'var(--raised)',
+                        line: 'var(--line)',
+                        fg: 'var(--fg)',
+                        muted: 'var(--muted)',
+                        accent: 'var(--accent)',
+                        onaccent: 'var(--accent-contrast)',
+                        ok: 'var(--ok)',
+                        warn: 'var(--warn)',
+                        err: 'var(--err)'
+                    }
+                }
+            }
+        };
+    </script>
+    <!-- Admin Console design tokens (semantic colours + text scaling + focus/motion). -->
+    <link href="css/design-tokens.css" rel="stylesheet" />
     <!-- Z.Blazor.Diagrams — canvas library for the Visual Workflow Builder -->
     <link href="_content/Z.Blazor.Diagrams/style.min.css" rel="stylesheet" />
     <!-- Workflow canvas animations — execution-flow dot and directional edge accent (spec 004) -->
