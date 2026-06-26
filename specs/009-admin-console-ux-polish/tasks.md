@@ -1,5 +1,17 @@
 # Tasks: Admin Console UX Polish — Configuration & Visual Parity
 
+> **Implementation status (2026-06-26):** This spec predated work that already shipped. Re-baselined
+> against current `main` before implementing:
+> - **Already shipped (no-op):** US1 typed connector forms (no JSON textarea; `ConnectorSettings.razor`
+>   already field-per-property), the modal/`ConnectorSection` retirement (those files are already gone),
+>   and US5 header health badges (Configured / Healthy / Unhealthy already render).
+> - **Implemented now (net-new):** US3 onboarding banner (`OnboardingStateService` + `OnboardingBanner`
+>   + localStorage JS + `?expand=` deep-links) and US2 field tooltips (`TooltipService` + `InfoTip` +
+>   layout-root portal), plus the `section-enter` / `btn-success-flash` polish keyframes. Unit tests:
+>   `OnboardingStateTests`, `TooltipServiceTests` (14 green); solution builds 0 errors.
+> - **Deferred:** Playwright E2E tasks (T012/T019/T023/T028/T034) and the full US4 button spinner/
+>   success-flash wiring (T035–T037) — the CSS primitives exist but the button bindings weren't added.
+
 **Input**: Design documents from `specs/009-admin-console-ux-polish/`
 
 **Prerequisites**: plan.md ✓ | spec.md ✓ | research.md ✓ | data-model.md ✓ | contracts/ ✓ | quickstart.md ✓

@@ -266,6 +266,12 @@ builder.Services.AddSingleton<LlmConnectorTester>();
 builder.Services.AddSingleton<MessagingConnectorTester>();
 builder.Services.AddSingleton<IConnectorHealthChecker, ConnectorHealthChecker>();
 
+// ── Admin Console UX (spec-009) ───────────────────────────────────────────────
+// Scoped (per Blazor circuit): reads browser localStorage + runs an LLM health check to drive the
+// first-run onboarding banner; the field-tooltip portal service holds the active tooltip per session.
+builder.Services.AddScoped<IOnboardingStateService, OnboardingStateService>();
+builder.Services.AddScoped<ITooltipService, TooltipService>();
+
 // ── Workflow run repository (FR-18, US1) ───────────────────────────────────────
 builder.Services.AddSingleton<IWorkflowRunRepository, EfWorkflowRunRepository>();
 

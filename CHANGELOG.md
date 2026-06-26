@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — Point at a repo, run its app in a throwaway container, monitor it (feature 013)
+### Added — Admin Console UX: first-run onboarding + field tooltips (spec-009)
+
+Net-new guidance layer on top of the already-typed connector settings (the spec's earlier "retire the
+JSON modal / build typed forms" work was already shipped).
+
+- **First-run onboarding banner** (`OnboardingBanner` + `OnboardingStateService`): when the LLM
+  connector isn't healthy yet, a dismissible banner guides the visitor to add their LLM key (the one
+  required step) with optional deep-links to the other connectors. A failed/throwing health check is
+  treated as "not healthy" so first-timers are always guided. Dismissal persists in `localStorage`.
+- **Contextual field tooltips** (`InfoTip` + `ITooltipService`): an info icon beside connector fields
+  opens a description + example in a layout-root portal (`position: fixed`) so it is never clipped by a
+  parent's overflow; it flips above/below the icon based on viewport position.
+- **Settings deep-links**: `/settings/connectors?expand=<ConnectorType>` opens that connector's form on
+  load (used by the onboarding banner).
+- **Visual polish primitives**: `section-enter` fade-in and `btn-success-flash` keyframes added for the
+  settings surface.
 
 A new **Apps** surface lets you point at a target repository by local path, build and run that repo's
 application in its own **disposable container**, and link any saved workflow to **monitor** it —
