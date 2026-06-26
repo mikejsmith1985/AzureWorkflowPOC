@@ -29,6 +29,11 @@ feature (spec-015). Landing incrementally:
   diagram are retired (the Builder already renders the loaded workflow's own graph); the old `/graph`
   route now redirects to the Workflow Builder so existing links never 404. Mermaid is retained for the
   per-run step graph on the Run detail page. Obsolete "Topology/Full page" links removed from RunDetail.
+- **Grouped sub-tabs (US3)**: a `SectionTabs` strip renders a section's views as sub-tabs (Monitor →
+  Threads / Run History; Automation → Workflow Builder / Workflow Gallery) with the active tab tracking
+  the route; single-view sections show none. Active section/sub-view resolution is most-specific-prefix
+  (with an alternate prefix so the intake run detail also maps to Monitor); 19 NavModel unit tests cover
+  it. Every pre-redesign route resolves under a section (no orphans).
 
 ### Added — Admin Console UX: first-run onboarding + field tooltips (spec-009)
 

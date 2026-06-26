@@ -25,6 +25,9 @@
         @* First-run onboarding banner — renders itself only when the LLM connector isn't healthy yet. *@
         <OnboardingBanner />
 
+        @* Per-section sub-tabs (renders only when the active section has more than one view). *@
+        <SectionTabs />
+
         <main class="flex-1 overflow-auto p-6">
             <div class="max-w-6xl mx-auto w-full">
                 @Body

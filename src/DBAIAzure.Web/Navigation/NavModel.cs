@@ -13,9 +13,9 @@ namespace DBAIAzure.Web.Navigation;
 /// Optional route prefix that keeps this sub-view active on its detail pages (for example
 /// <c>/runs</c> staying active on <c>/runs/{id}</c>). Falls back to <see cref="Route"/>.
 /// </param>
-public sealed record NavSubView(string Label, string Route, string? MatchPrefix = null)
+public sealed record NavSubView(string Label, string Route, string? MatchPrefix = null, string? AltPrefix = null)
 {
-    /// <summary>The prefix used to decide whether the current URL activates this sub-view.</summary>
+    /// <summary>The primary prefix used to decide whether the current URL activates this sub-view.</summary>
     public string ActivePrefix => MatchPrefix ?? Route;
 }
 
@@ -51,7 +51,8 @@ public static class NavModel
         new NavSection("monitor", "Monitor", "activity", new[]
         {
             new NavSubView("Threads", "/"),
-            new NavSubView("Run History", "/runs", MatchPrefix: "/run"),
+            // Covers the run-history list + its detail (/runs, /runs/{id}) and the intake run detail (/run/{id}).
+            new NavSubView("Run History", "/runs", AltPrefix: "/run"),
         }),
         new NavSection("review", "Review Queue", "inbox", new[]
         {
@@ -89,13 +90,50 @@ public static class NavModel
         {
             foreach (var subView in section.SubViews)
             {
-                if (!IsMatch(relativePath, subView.ActivePrefix)) continue;
-                if (subView.ActivePrefix.Length <= bestLength) continue;
+                var length = MatchLength(relativePath, subView);
+                if (length <= bestLength) continue;
                 best = section;
-                bestLength = subView.ActivePrefix.Length;
+                bestLength = length;
             }
         }
         return best;
+    }
+
+    /// <summary>
+    /// Finds the sub-view (within the active section) that best matches the current path — used to
+    /// highlight the active sub-tab. Returns null when nothing matches.
+    /// </summary>
+    /// <param name="relativePath">The current path beginning with "/", without query or fragment.</param>
+    public static NavSubView? ActiveSubView(string relativePath)
+    {
+        var section = ActiveSection(relativePath);
+        if (section is null) return null;
+
+        NavSubView? best = null;
+        var bestLength = -1;
+        foreach (var subView in section.SubViews)
+        {
+            var length = MatchLength(relativePath, subView);
+            if (length <= bestLength) continue;
+            best = subView;
+            bestLength = length;
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// The length of the longest of a sub-view's prefixes (primary or alternate) that matches the
+    /// path, or -1 if neither matches. Longer matches are more specific and win.
+    /// </summary>
+    private static int MatchLength(string relativePath, NavSubView subView)
+    {
+        var length = -1;
+        if (IsMatch(relativePath, subView.ActivePrefix)) length = Math.Max(length, subView.ActivePrefix.Length);
+        if (subView.AltPrefix is not null && IsMatch(relativePath, subView.AltPrefix))
+        {
+            length = Math.Max(length, subView.AltPrefix.Length);
+        }
+        return length;
     }
 
     /// <summary>True when the path equals the prefix, or (for non-root prefixes) starts with it.</summary>

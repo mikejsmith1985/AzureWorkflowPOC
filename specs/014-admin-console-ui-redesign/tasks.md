@@ -86,10 +86,10 @@ xUnit unit tests. No new NuGet packages, no DB changes.
 
 **Independent Test**: Each section exposes its sub-views as sub-tabs with correct active state; every pre-redesign route resolves under a section.
 
-- [ ] T020 [P] [US3] Write FAILING E2E `tests/DBAIAzure.E2ETests/Tests/SectionTabsTests.cs`: Automation section shows Workflow Builder + Gallery sub-tabs with active state tracking the route; a route inventory asserts every pre-redesign route renders (no 404/orphan). (C-NAV-1/2)
-- [ ] T021 [US3] Implement `src/DBAIAzure.Web/Shared/Shell/SectionTabs.razor` rendering the active section's sub-views from `NavModel`, with active sub-tab styling (FR-011).
-- [ ] T022 [US3] Wire `SectionTabs` into the `AppShell` content header and compute active section/sub-view from the current URI (use `MatchPrefix` for detail routes like `/apps/{id}`, `/runs/{id}`, `/run/{id}`).
-- [ ] T023 [US3] Audit every pre-redesign route against `NavModel`; update inter-page links to the grouped IA; make `SectionTabsTests` pass (FR-012/SC-003).
+- [X] T020 [P] [US3] Write FAILING E2E `tests/DBAIAzure.E2ETests/Tests/SectionTabsTests.cs`: Automation section shows Workflow Builder + Gallery sub-tabs with active state tracking the route; a route inventory asserts every pre-redesign route renders (no 404/orphan). (C-NAV-1/2)
+- [X] T021 [US3] Implement `src/DBAIAzure.Web/Shared/Shell/SectionTabs.razor` rendering the active section's sub-views from `NavModel`, with active sub-tab styling (FR-011).
+- [X] T022 [US3] Wire `SectionTabs` into the `AppShell` content header and compute active section/sub-view from the current URI (use `MatchPrefix` for detail routes like `/apps/{id}`, `/runs/{id}`, `/run/{id}`).
+- [X] T023 [US3] Audit every pre-redesign route against `NavModel`; update inter-page links to the grouped IA; make `SectionTabsTests` pass (FR-012/SC-003).
 
 **Checkpoint**: Grouped IA complete; nothing orphaned.
 
