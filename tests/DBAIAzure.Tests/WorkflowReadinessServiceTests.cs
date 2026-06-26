@@ -30,13 +30,13 @@ public sealed class WorkflowReadinessServiceTests
             .WithRealizedNode(agent.Id, WorkflowNodeType.AgenticReason,
                 new AgentNodeConfig { Instruction = "Classify urgency.", ModelRef = "claude-test-model" })
             .WithRealizedNode(notify.Id, WorkflowNodeType.FunctionNotify,
-                new NotifyNodeConfig { Connector = ConnectorType.Teams, RecipientMap = "team", MessageTemplate = "urgent" });
+                new NotifyNodeConfig { Connector = ConnectorType.Messaging, RecipientMap = "team", MessageTemplate = "urgent" });
     }
 
     [Fact]
     public async Task Fully_realized_workflow_with_healthy_connectors_is_production_ready()
     {
-        var report = await BuildService(ConnectorType.Teams).EvaluateAsync(FullyRealized());
+        var report = await BuildService(ConnectorType.Messaging).EvaluateAsync(FullyRealized());
 
         Assert.True(report.IsProductionReady);
         Assert.All(report.Nodes, node => Assert.Equal(NodeRealizationStatus.Realized, node.Status));
@@ -52,7 +52,7 @@ public sealed class WorkflowReadinessServiceTests
         var realized = workflow.WithRealizedNode(trigger.Id, WorkflowNodeType.Trigger,
             new TriggerNodeConfig { InitialDataDescription = "A ticket is created." });
 
-        var report = await BuildService(ConnectorType.Teams).EvaluateAsync(realized);
+        var report = await BuildService(ConnectorType.Messaging).EvaluateAsync(realized);
 
         Assert.False(report.IsProductionReady);
         Assert.Contains(report.Nodes, node => node.Status == NodeRealizationStatus.Draft);
@@ -78,9 +78,9 @@ public sealed class WorkflowReadinessServiceTests
         var workflow = FullyRealized();
         var notifyId = workflow.Nodes.Single(node => node.NodeType == WorkflowNodeType.FunctionNotify).Id;
         var broken = workflow.WithRealizedNode(notifyId, WorkflowNodeType.FunctionNotify,
-            new NotifyNodeConfig { Connector = ConnectorType.Teams, RecipientMap = "team", MessageTemplate = "" });
+            new NotifyNodeConfig { Connector = ConnectorType.Messaging, RecipientMap = "team", MessageTemplate = "" });
 
-        var report = await BuildService(ConnectorType.Teams).EvaluateAsync(broken);
+        var report = await BuildService(ConnectorType.Messaging).EvaluateAsync(broken);
 
         Assert.False(report.IsProductionReady);
         Assert.Equal(NodeRealizationStatus.NeedsInput, report.Nodes.Single(node => node.NodeId == notifyId).Status);
@@ -90,14 +90,14 @@ public sealed class WorkflowReadinessServiceTests
     public async Task Blocked_node_reason_names_the_missing_connector()
     {
         // T044: the blocking reason surfaced to the user must name the specific connector so they know what
-        // to configure — "Teams" must appear in the reason text, not a generic "a connector is missing".
+        // to configure — "Messaging" must appear in the reason text, not a generic "a connector is missing".
         var workflow = FullyRealized();
         var notifyId = workflow.Nodes.Single(node => node.NodeType == WorkflowNodeType.FunctionNotify).Id;
 
         var report = await BuildService(/* nothing healthy */).EvaluateAsync(workflow);
 
         var notifyReason = report.Nodes.Single(node => node.NodeId == notifyId).Reasons.Single();
-        Assert.Contains("Teams", notifyReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Messaging", notifyReason, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(notifyReason, report.BlockingSummary);
     }
 
@@ -120,7 +120,7 @@ public sealed class WorkflowReadinessServiceTests
         };
 
         // Baseline: intent unchanged → the node is Realized, not out-of-date.
-        var baseline = await BuildService(ConnectorType.Teams).EvaluateAsync(withProvenance);
+        var baseline = await BuildService(ConnectorType.Messaging).EvaluateAsync(withProvenance);
         Assert.Equal(NodeRealizationStatus.Realized, baseline.Nodes.Single(node => node.NodeId == agentId).Status);
 
         // Re-word the node's goal → its intent hash changes → it must flip to OutOfDate.
@@ -129,7 +129,7 @@ public sealed class WorkflowReadinessServiceTests
             .ToList();
         var mutated = withProvenance with { Nodes = mutatedNodes };
 
-        var report = await BuildService(ConnectorType.Teams).EvaluateAsync(mutated);
+        var report = await BuildService(ConnectorType.Messaging).EvaluateAsync(mutated);
 
         Assert.Equal(NodeRealizationStatus.OutOfDate, report.Nodes.Single(node => node.NodeId == agentId).Status);
         Assert.False(report.IsProductionReady);
@@ -140,7 +140,7 @@ public sealed class WorkflowReadinessServiceTests
     {
         // VAL-007 cross-node: a branch with two outgoing edges but only one condition is inconsistent.
         var workflow = BuildRouteWorkflowWithTwoBranches(out var routeId);
-        var report   = await BuildService(ConnectorType.Teams).EvaluateAsync(workflow);
+        var report   = await BuildService(ConnectorType.Messaging).EvaluateAsync(workflow);
 
         Assert.False(report.IsProductionReady);
         Assert.Equal(NodeRealizationStatus.NeedsInput, report.Nodes.Single(node => node.NodeId == routeId).Status);
@@ -207,8 +207,8 @@ public sealed class WorkflowReadinessServiceTests
                     DefaultPortId = "low",
                 })
             .WithRealizedNode(sinkHigh.Id, WorkflowNodeType.FunctionNotify,
-                new NotifyNodeConfig { Connector = ConnectorType.Teams, RecipientMap = "oncall", MessageTemplate = "page" })
+                new NotifyNodeConfig { Connector = ConnectorType.Messaging, RecipientMap = "oncall", MessageTemplate = "page" })
             .WithRealizedNode(sinkLow.Id, WorkflowNodeType.FunctionNotify,
-                new NotifyNodeConfig { Connector = ConnectorType.Teams, RecipientMap = "log", MessageTemplate = "logged" });
+                new NotifyNodeConfig { Connector = ConnectorType.Messaging, RecipientMap = "log", MessageTemplate = "logged" });
     }
 }

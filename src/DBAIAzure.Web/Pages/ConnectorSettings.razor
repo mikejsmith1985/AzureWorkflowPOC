@@ -1,10 +1,14 @@
-@* Connector configuration administration page — list, edit, and health-check each connector (FR-05, US5). *@
+@* Connector configuration administration page — simple labeled fields per connector type (FR-05, US5). *@
 @page "/settings/connectors"
 @inject IConnectorConfigRepository ConfigRepository
 @inject IConnectorHealthChecker HealthChecker
+@inject IAdoTelemetryPreflightService AdoPreflightService
+@inject DBAIAzure.Web.Integrations.LLM.ILlmModelFetcherService LlmModelFetcher
 @inject ILogger<ConnectorSettings> Logger
 @using DBAIAzure.Core.Interfaces
 @using DBAIAzure.Core.Models
+@using DBAIAzure.Core.Models.AdoTelemetry
+@using System.Text.Json
 
 <div class="flex items-center justify-between mb-6">
     <h1 class="text-xl font-semibold text-gray-100">Connector Settings</h1>
@@ -24,7 +28,11 @@ else
                 <!-- ── Header ──────────────────────────────────────────────── -->
                 <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center gap-3">
-                        <span class="text-sm font-semibold text-gray-100">@entry.ConnectorType</span>
+                        <span class="text-sm font-semibold text-gray-100">@ConnectorDisplayName(entry.ConnectorType)</span>
+                        @if (entry.ConnectorType == ConnectorType.Messaging && entry.PlatformLabel is { Length: > 0 } platform)
+                        {
+                            <span class="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-300">@platform</span>
+                        }
                         @if (entry.IsConfigured)
                         {
                             <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-900 text-cyan-300">Configured</span>
@@ -53,47 +61,203 @@ else
                                        disabled:cursor-not-allowed text-white transition-colors">
                             @(entry.IsChecking ? "Checking…" : "Check Health")
                         </button>
+                        @if (entry.ConnectorType == ConnectorType.AzureDevOps)
+                        {
+                            <button @onclick="RunAdoPreflight"
+                                    disabled="@(!entry.IsConfigured || _isPreflightRunning)"
+                                    data-testid="ado-preflight-button"
+                                    class="px-3 py-1.5 text-xs rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40
+                                           disabled:cursor-not-allowed text-white transition-colors">
+                                @(_isPreflightRunning ? "Running…" : "Test Connection")
+                            </button>
+                        }
                     </div>
                 </div>
 
-                <!-- ── Last test message ──────────────────────────────────── -->
+                <!-- ── Last health-check message ──────────────────────────── -->
                 @if (entry.TestResult is { Message: { Length: > 0 } msg })
                 {
                     <p class="text-xs text-gray-500 mb-3">@msg · @FormatAge(entry.TestResult.TestedAt)</p>
+                }
+
+                <!-- ── ADO preflight result badge ─────────────────────────── -->
+                @if (entry.ConnectorType == ConnectorType.AzureDevOps && _preflightResult is not null)
+                {
+                    var preflightBadge = _preflightResult.IsSuccess
+                        ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300";
+                    <div class="flex items-center gap-2 mb-3">
+                        <span data-testid="ado-preflight-result"
+                              class="text-xs px-2 py-0.5 rounded-full @preflightBadge">
+                            @(_preflightResult.IsSuccess
+                                ? $"Preflight OK — {_preflightResult.Manifest?.Mode}"
+                                : $"Preflight failed: {_preflightResult.ErrorMessage}")
+                        </span>
+                    </div>
                 }
 
                 <!-- ── Edit form ──────────────────────────────────────────── -->
                 @if (entry.IsEditing)
                 {
                     <div class="mt-3 space-y-3 border-t border-gray-700 pt-3">
-                        <div>
-                            <label class="block text-xs text-gray-400 mb-1">Non-secret configuration (JSON)</label>
-                            <textarea @bind="entry.DraftNonSecretJson" rows="3"
-                                      placeholder='e.g. {"modelName": "claude-sonnet-4-6"}'
-                                      class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm
-                                             text-gray-100 font-mono placeholder-gray-600
-                                             focus:outline-none focus:border-cyan-500" />
-                        </div>
-                        <div>
-                            <label class="block text-xs text-gray-400 mb-1">
-                                Secret / credentials (JSON — stored encrypted, never displayed again)
-                            </label>
-                            <!-- type="password" prevents the browser from caching or autofilling secret values (Article IX). -->
-                            <input type="password" @bind="entry.DraftSecretJson"
-                                   placeholder='e.g. {"apiKey": "sk-..."}'
-                                   autocomplete="new-password"
-                                   class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm
-                                          text-gray-100 font-mono placeholder-gray-600
-                                          focus:outline-none focus:border-cyan-500" />
-                            <p class="text-xs text-gray-600 mt-1">
-                                Leave blank to keep the existing secret unchanged.
+
+                        @if (entry.ConnectorType == ConnectorType.AzureDevOps)
+                        {
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Organization URL</label>
+                                <input type="url" @bind="entry.DraftUrl"
+                                       placeholder="https://dev.azure.com/your-org"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Project Name</label>
+                                <input type="text" @bind="entry.DraftUsername"
+                                       placeholder="MyProject"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Personal Access Token</label>
+                                <input type="password" @bind="entry.DraftSecret"
+                                       placeholder="Leave blank to keep existing"
+                                       autocomplete="new-password" class="@InputClass" />
+                            </div>
+                        }
+                        else if (entry.ConnectorType == ConnectorType.LLM)
+                        {
+                            <!-- Provider dropdown -->
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Provider</label>
+                                <select @bind="entry.DraftUrl" class="@InputClass">
+                                    <option value="">— select provider —</option>
+                                    <option value="anthropic">Anthropic (Claude)</option>
+                                    <option value="openai">OpenAI</option>
+                                </select>
+                            </div>
+
+                            <!-- API key -->
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">API Key</label>
+                                <input type="password" @bind="entry.DraftSecret"
+                                       placeholder="Leave blank to keep existing"
+                                       autocomplete="new-password" class="@InputClass" />
+                            </div>
+
+                            <!-- Model — live dropdown loaded on demand -->
+                            <div>
+                                <div class="flex items-center justify-between mb-1">
+                                    <label class="text-xs text-gray-400">Model</label>
+                                    <button type="button"
+                                            @onclick="() => FetchLlmModelsAsync(entry)"
+                                            disabled="@(string.IsNullOrEmpty(entry.DraftUrl) || entry.IsFetchingModels)"
+                                            class="text-xs px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600
+                                                   text-gray-300 disabled:opacity-40 transition-colors">
+                                        @(entry.IsFetchingModels ? "Loading…" : "Fetch Models")
+                                    </button>
+                                </div>
+                                @if (entry.ModelFetchError is not null)
+                                {
+                                    <p class="text-xs text-red-400 mb-1">@entry.ModelFetchError</p>
+                                }
+                                @if (entry.AvailableModels.Count > 0)
+                                {
+                                    <select @bind="entry.DraftUsername" class="@InputClass">
+                                        @foreach (var model in entry.AvailableModels)
+                                        {
+                                            <option value="@model">@model</option>
+                                        }
+                                    </select>
+                                }
+                                else
+                                {
+                                    <input type="text" @bind="entry.DraftUsername"
+                                           placeholder="Select provider and click Fetch Models"
+                                           class="@InputClass" />
+                                }
+                            </div>
+                        }
+                        else if (entry.ConnectorType == ConnectorType.ServiceNow)
+                        {
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Instance URL</label>
+                                <input type="url" @bind="entry.DraftUrl"
+                                       placeholder="https://acme.service-now.com"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Username</label>
+                                <input type="text" @bind="entry.DraftUsername"
+                                       placeholder="svc-account"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Password</label>
+                                <input type="password" @bind="entry.DraftSecret"
+                                       placeholder="Leave blank to keep existing"
+                                       autocomplete="new-password" class="@InputClass" />
+                            </div>
+                        }
+                        else if (entry.ConnectorType == ConnectorType.Messaging)
+                        {
+                            <!-- Platform dropdown -->
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Platform</label>
+                                @* Switching platform invalidates the prior health result for the old platform. *@
+                                <select @bind="entry.DraftUrl" @bind:after="() => { entry.TestResult = null; }" class="@InputClass">
+                                    <option value="Teams">Microsoft Teams</option>
+                                    <option value="Slack">Slack</option>
+                                    <option value="Discord">Discord</option>
+                                </select>
+                            </div>
+
+                            <p class="text-[11px] text-gray-500">
+                                Delivery is MCP-first: if an MCP server is configured below it is used; otherwise the
+                                platform's incoming webhook is used.
                             </p>
-                        </div>
+
+                            <!-- ── MCP server (preferred path) ─────────────────────────── -->
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">MCP Server URL <span class="text-gray-600">(optional)</span></label>
+                                <input type="url" @bind="entry.DraftMcpServerUrl"
+                                       placeholder="https://mcp.example.com/sse  (leave blank to use the webhook)"
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">MCP Tool Name</label>
+                                <input type="text" @bind="entry.DraftMcpToolName"
+                                       placeholder="e.g. slack_post_message" class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Target (channel / recipient)</label>
+                                <input type="text" @bind="entry.DraftTarget"
+                                       placeholder="Channel id or recipient passed to the MCP tool" class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">MCP Argument Template <span class="text-gray-600">(optional)</span></label>
+                                <input type="text" @bind="entry.DraftMcpArgTemplate"
+                                       placeholder='{"target":"{{target}}","text":"{{message}}"}'
+                                       class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">MCP Auth Token <span class="text-gray-600">(optional)</span></label>
+                                <input type="password" @bind="entry.DraftMcpAuthToken"
+                                       placeholder="Bearer token for the MCP server (leave blank to keep existing)"
+                                       autocomplete="new-password" class="@InputClass" />
+                            </div>
+
+                            <!-- ── Webhook fallback ─────────────────────────────────────── -->
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Webhook URL <span class="text-gray-600">(fallback)</span></label>
+                                <input type="password" @bind="entry.DraftSecret"
+                                       placeholder="Incoming webhook URL for the selected platform (leave blank to keep existing)"
+                                       autocomplete="new-password" class="@InputClass" />
+                            </div>
+                        }
+
                         @if (!string.IsNullOrEmpty(entry.SaveError))
                         {
                             <p class="text-xs text-red-400">@entry.SaveError</p>
                         }
-                        <div class="flex gap-2">
+
+                        <div class="flex gap-2 pt-1">
                             <button @onclick="() => SaveEntry(entry)"
                                     disabled="@entry.IsSaving"
                                     class="px-4 py-1.5 text-xs rounded bg-cyan-600 hover:bg-cyan-500
@@ -114,8 +278,14 @@ else
 }
 
 @code {
+    private const string InputClass =
+        "w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-gray-100 " +
+        "placeholder-gray-600 focus:outline-none focus:border-cyan-500";
+
     private bool _loading = true;
     private List<ConnectorEntry> _entries = [];
+    private bool _isPreflightRunning;
+    private PreflightResult? _preflightResult;
 
     protected override async Task OnInitializedAsync()
     {
@@ -127,35 +297,100 @@ else
         _loading = false;
     }
 
-    private static void ToggleEdit(ConnectorEntry entry)
+    private void ToggleEdit(ConnectorEntry entry)
     {
         entry.IsEditing = !entry.IsEditing;
         if (entry.IsEditing)
         {
-            entry.DraftNonSecretJson = entry.NonSecretConfig ?? string.Empty;
-            entry.DraftSecretJson    = string.Empty; // never pre-populate secrets (Article IX)
-            entry.SaveError          = string.Empty;
+            entry.LoadDraftFromJson();
+            entry.DraftSecret       = string.Empty; // never pre-populate secrets (Article IX)
+            entry.DraftMcpAuthToken = string.Empty; // (Messaging) MCP auth token is also a secret
+            entry.SaveError         = string.Empty;
+
+            // Auto-fetch models when opening LLM edit if a provider is already stored.
+            if (entry.ConnectorType == ConnectorType.LLM && !string.IsNullOrEmpty(entry.DraftUrl))
+                _ = InvokeAsync(async () => await FetchLlmModelsAsync(entry));
+        }
+    }
+
+    private async Task FetchLlmModelsAsync(ConnectorEntry entry)
+    {
+        if (string.IsNullOrEmpty(entry.DraftUrl))
+        {
+            entry.ModelFetchError = "Select a provider first.";
+            StateHasChanged();
+            return;
+        }
+
+        // Use the draft key if the user has entered one; otherwise decrypt the stored key.
+        var apiKey = entry.DraftSecret;
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            try
+            {
+                var stored = await ConfigRepository.GetDecryptedSecretsAsync(ConnectorType.LLM);
+                if (stored is not null)
+                {
+                    using var doc = JsonDocument.Parse(stored);
+                    if (doc.RootElement.TryGetProperty("apiKey", out var kp))
+                        apiKey = kp.GetString() ?? string.Empty;
+                }
+            }
+            catch { /* decryption failure — user must enter key manually */ }
+        }
+
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            entry.ModelFetchError = "Enter an API key and click Fetch Models.";
+            StateHasChanged();
+            return;
+        }
+
+        entry.IsFetchingModels = true;
+        entry.ModelFetchError  = null;
+        entry.AvailableModels  = [];
+        StateHasChanged();
+
+        try
+        {
+            var models = await LlmModelFetcher.FetchModelsAsync(entry.DraftUrl, apiKey);
+            entry.AvailableModels = models.ToList();
+
+            // Keep current model selection if it's still in the list; otherwise take the first.
+            if (!entry.AvailableModels.Contains(entry.DraftUsername))
+                entry.DraftUsername = entry.AvailableModels.FirstOrDefault() ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "LLM model fetch failed for provider {Provider}", entry.DraftUrl);
+            entry.ModelFetchError = $"Could not fetch models: {ex.Message}";
+        }
+        finally
+        {
+            entry.IsFetchingModels = false;
+            StateHasChanged();
         }
     }
 
     private async Task SaveEntry(ConnectorEntry entry)
     {
-        entry.IsSaving   = true;
-        entry.SaveError  = string.Empty;
+        entry.IsSaving  = true;
+        entry.SaveError = string.Empty;
         StateHasChanged();
 
         try
         {
-            // Pass null for secrets when the field is blank — leaves existing encrypted blob intact.
-            var secretsToSave = string.IsNullOrWhiteSpace(entry.DraftSecretJson)
-                ? null
-                : entry.DraftSecretJson;
+            var (nonSecretJson, secretJson) = entry.SerializeToJson();
 
-            await ConfigRepository.SaveAsync(entry.ConnectorType, entry.DraftNonSecretJson, secretsToSave);
+            // null secretJson leaves the existing encrypted blob intact (Article IX).
+            await ConfigRepository.SaveAsync(entry.ConnectorType, nonSecretJson, secretJson);
 
             entry.IsConfigured    = true;
-            entry.NonSecretConfig = entry.DraftNonSecretJson;
+            entry.NonSecretConfig = nonSecretJson;
             entry.IsEditing       = false;
+            // A save invalidates the prior test result (the repository resets it too, FR-017), so clear
+            // the in-memory copy — otherwise a stale "Unhealthy" message lingers over the new credentials.
+            entry.TestResult      = null;
         }
         catch (Exception ex)
         {
@@ -165,6 +400,26 @@ else
         finally
         {
             entry.IsSaving = false;
+        }
+    }
+
+    private async Task RunAdoPreflight()
+    {
+        _isPreflightRunning = true;
+        _preflightResult    = null;
+        StateHasChanged();
+        try
+        {
+            _preflightResult = await AdoPreflightService.RunPreflightAsync(null, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "ADO preflight threw unexpectedly from UI");
+            _preflightResult = PreflightResult.Fail($"Unexpected error: {ex.Message}");
+        }
+        finally
+        {
+            _isPreflightRunning = false;
         }
     }
 
@@ -186,6 +441,15 @@ else
         }
     }
 
+    private static string ConnectorDisplayName(ConnectorType type) => type switch
+    {
+        ConnectorType.AzureDevOps => "Azure DevOps",
+        ConnectorType.LLM         => "LLM Provider",
+        ConnectorType.ServiceNow  => "ServiceNow",
+        ConnectorType.Messaging   => "Messaging",
+        _                         => type.ToString(),
+    };
+
     private static string FormatAge(DateTimeOffset at)
     {
         var age = DateTimeOffset.UtcNow - at;
@@ -196,22 +460,41 @@ else
     }
 
     /// <summary>
-    /// Mutable view-model wrapping a <see cref="ConnectorConfig"/> for the settings panel.
-    /// Holds UI state (edit mode, draft values, saving flag) alongside the persisted data.
+    /// Mutable view-model for one connector card. Exposes simple named draft fields;
+    /// JSON serialization/deserialization is encapsulated here, invisible to the template.
     /// </summary>
     private sealed class ConnectorEntry
     {
-        public ConnectorType   ConnectorType   { get; }
-        public bool            IsConfigured    { get; set; }
-        public string?         NonSecretConfig { get; set; }
-        public ConnectorTestResult? TestResult { get; set; }
+        public ConnectorType        ConnectorType   { get; }
+        public bool                 IsConfigured    { get; set; }
+        public string?              NonSecretConfig { get; set; }
+        public ConnectorTestResult? TestResult      { get; set; }
 
-        public bool   IsEditing        { get; set; }
-        public bool   IsSaving         { get; set; }
-        public bool   IsChecking       { get; set; }
-        public string DraftNonSecretJson { get; set; } = string.Empty;
-        public string DraftSecretJson    { get; set; } = string.Empty;
-        public string SaveError          { get; set; } = string.Empty;
+        // UI state
+        public bool   IsEditing  { get; set; }
+        public bool   IsSaving   { get; set; }
+        public bool   IsChecking { get; set; }
+        public string SaveError  { get; set; } = string.Empty;
+
+        // Named draft fields — mapping varies by connector type:
+        // DraftUrl      = Organization URL (ADO) | Provider id (LLM) | Instance URL (SN) | Platform (Messaging)
+        // DraftUsername = Project Name (ADO)      | selected model (LLM) | Username (SN)  | unused (Messaging)
+        // DraftSecret   = PAT (ADO)               | API Key (LLM)     | Password (SN)     | Webhook URL (Messaging)
+        public string DraftUrl      { get; set; } = string.Empty;
+        public string DraftUsername { get; set; } = string.Empty;
+        public string DraftSecret   { get; set; } = string.Empty;
+
+        // Messaging-only draft fields (MCP path). DraftMcpAuthToken is a secret.
+        public string DraftMcpServerUrl  { get; set; } = string.Empty;
+        public string DraftMcpToolName   { get; set; } = string.Empty;
+        public string DraftMcpArgTemplate { get; set; } = string.Empty;
+        public string DraftTarget        { get; set; } = string.Empty;
+        public string DraftMcpAuthToken  { get; set; } = string.Empty;
+
+        // LLM-only: live model list state
+        public List<string> AvailableModels  { get; set; } = [];
+        public bool         IsFetchingModels { get; set; }
+        public string?      ModelFetchError  { get; set; }
 
         public ConnectorEntry(ConnectorConfig config)
         {
@@ -220,5 +503,123 @@ else
             NonSecretConfig = config.NonSecretConfig;
             TestResult      = config.LastTestResult;
         }
+
+        /// <summary>Friendly platform name for the Messaging connector, parsed from the stored config;
+        /// empty when not a Messaging connector or no platform is stored.</summary>
+        public string PlatformLabel
+        {
+            get
+            {
+                if (ConnectorType != ConnectorType.Messaging || string.IsNullOrWhiteSpace(NonSecretConfig))
+                    return string.Empty;
+                try
+                {
+                    using var doc = JsonDocument.Parse(NonSecretConfig);
+                    if (doc.RootElement.TryGetProperty("platform", out var p) && p.GetString() is { Length: > 0 } value)
+                        return value == nameof(MessagingPlatform.Teams) ? "Microsoft Teams" : value;
+                }
+                catch { /* malformed — no label */ }
+                return string.Empty;
+            }
+        }
+
+        /// <summary>Populates DraftUrl and DraftUsername from the stored NonSecretConfig JSON.</summary>
+        public void LoadDraftFromJson()
+        {
+            DraftUrl = DraftUsername = string.Empty;
+            DraftMcpServerUrl = DraftMcpToolName = DraftMcpArgTemplate = DraftTarget = string.Empty;
+            AvailableModels = [];
+
+            // Messaging defaults to the Teams platform when no config is stored yet.
+            if (ConnectorType == ConnectorType.Messaging)
+                DraftUrl = nameof(MessagingPlatform.Teams);
+
+            if (string.IsNullOrWhiteSpace(NonSecretConfig)) return;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(NonSecretConfig);
+                var root = doc.RootElement;
+                (DraftUrl, DraftUsername) = ConnectorType switch
+                {
+                    ConnectorType.AzureDevOps => (Str(root, "organizationUrl"), Str(root, "projectName")),
+                    ConnectorType.LLM         => (Str(root, "provider"),        Str(root, "modelName")),
+                    ConnectorType.ServiceNow  => (Str(root, "instanceUrl"),     Str(root, "username")),
+                    ConnectorType.Messaging   => (Str(root, "platform"),        string.Empty),
+                    _                         => (string.Empty, string.Empty),
+                };
+
+                if (ConnectorType == ConnectorType.Messaging)
+                {
+                    if (string.IsNullOrEmpty(DraftUrl)) DraftUrl = nameof(MessagingPlatform.Teams);
+                    DraftMcpServerUrl   = Str(root, "mcpServerUrl");
+                    DraftMcpToolName    = Str(root, "mcpToolName");
+                    DraftMcpArgTemplate = Str(root, "mcpArgumentTemplate");
+                    DraftTarget         = Str(root, "target");
+                }
+
+                static string Str(JsonElement el, string key) =>
+                    el.TryGetProperty(key, out var p) ? (p.GetString() ?? string.Empty) : string.Empty;
+            }
+            catch { /* malformed — start blank */ }
+        }
+
+        /// <summary>
+        /// Returns the (nonSecretJson, secretJson) pair ready for <see cref="IConnectorConfigRepository.SaveAsync"/>.
+        /// secretJson is null when DraftSecret is blank, which preserves the existing encrypted secret.
+        /// </summary>
+        public (string? nonSecretJson, string? secretJson) SerializeToJson()
+        {
+            var nonSecret = ConnectorType switch
+            {
+                ConnectorType.AzureDevOps =>
+                    JsonSerializer.Serialize(new { organizationUrl = DraftUrl, projectName = DraftUsername }),
+                ConnectorType.LLM =>
+                    JsonSerializer.Serialize(new { provider = DraftUrl, modelName = DraftUsername }),
+                ConnectorType.ServiceNow =>
+                    JsonSerializer.Serialize(new { instanceUrl = DraftUrl, username = DraftUsername }),
+                ConnectorType.Messaging =>
+                    JsonSerializer.Serialize(new
+                    {
+                        platform            = DraftUrl,
+                        mcpServerUrl        = NullIfBlank(DraftMcpServerUrl),
+                        mcpToolName         = NullIfBlank(DraftMcpToolName),
+                        mcpArgumentTemplate = NullIfBlank(DraftMcpArgTemplate),
+                        target              = NullIfBlank(DraftTarget),
+                    }),
+                _ => null,
+            };
+
+            // Messaging carries two secrets (webhook URL + MCP auth token) in one blob; the others have one.
+            string? secret = ConnectorType == ConnectorType.Messaging
+                ? SerializeMessagingSecret()
+                : string.IsNullOrWhiteSpace(DraftSecret) ? null : ConnectorType switch
+                {
+                    ConnectorType.AzureDevOps => JsonSerializer.Serialize(new { personalAccessToken = DraftSecret }),
+                    ConnectorType.LLM         => JsonSerializer.Serialize(new { apiKey = DraftSecret }),
+                    ConnectorType.ServiceNow  => JsonSerializer.Serialize(new { password = DraftSecret }),
+                    _                         => null,
+                };
+
+            return (nonSecret, secret);
+        }
+
+        // Returns null (preserve existing) only when BOTH messaging secrets are blank; otherwise writes the
+        // blob with whichever secrets were entered. MCP and webhook are alternative paths, so operators
+        // normally set just one.
+        private string? SerializeMessagingSecret()
+        {
+            var hasWebhook = !string.IsNullOrWhiteSpace(DraftSecret);
+            var hasToken   = !string.IsNullOrWhiteSpace(DraftMcpAuthToken);
+            if (!hasWebhook && !hasToken) return null;
+
+            return JsonSerializer.Serialize(new
+            {
+                webhookUrl   = hasWebhook ? DraftSecret : null,
+                mcpAuthToken = hasToken ? DraftMcpAuthToken : null,
+            });
+        }
+
+        private static string? NullIfBlank(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
     }
 }

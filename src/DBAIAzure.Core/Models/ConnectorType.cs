@@ -13,6 +13,6 @@ public enum ConnectorType
     /// <summary>Language model provider (e.g., Anthropic Claude) — AI inference for phase execution.</summary>
     LLM,
 
-    /// <summary>Microsoft Teams channel — HITL notifications and approval routing.</summary>
-    Teams,
+    /// <summary>Messaging connector (Teams/Slack/Discord) — HITL notifications and notify-node sends.</summary>
+    Messaging,
 }

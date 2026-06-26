@@ -7,6 +7,7 @@
 using Bunit;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Models.AdoTelemetry;
 using DBAIAzure.Web.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -30,7 +31,7 @@ public sealed class ConnectorSettingsPanelTests : TestContext
         {
             MakeConfig(ConnectorType.AzureDevOps, isConfigured: true),
             MakeConfig(ConnectorType.LLM,         isConfigured: false),
-            MakeConfig(ConnectorType.Teams,        isConfigured: true),
+            MakeConfig(ConnectorType.Messaging,        isConfigured: true),
         };
 
         var repo         = new FakeConfigRepo(configs);
@@ -91,6 +92,8 @@ public sealed class ConnectorSettingsPanelTests : TestContext
     {
         Services.AddSingleton<IConnectorConfigRepository>(repo);
         Services.AddSingleton(checker);
+        Services.AddSingleton<IAdoTelemetryPreflightService>(new NullPreflightService());
+        Services.AddSingleton<DBAIAzure.Web.Integrations.LLM.ILlmModelFetcherService>(new NullLlmModelFetcher());
         Services.AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<ConnectorSettings>),
             NullLogger<ConnectorSettings>.Instance);
     }
@@ -126,6 +129,27 @@ public sealed class ConnectorSettingsPanelTests : TestContext
             Task.FromResult<string?>(null);
         public Task UpdateTestResultAsync(ConnectorType type, ConnectorTestResult result, CancellationToken ct = default) =>
             Task.CompletedTask;
+    }
+
+    private sealed class NullLlmModelFetcher : DBAIAzure.Web.Integrations.LLM.ILlmModelFetcherService
+    {
+        public Task<IReadOnlyList<string>> FetchModelsAsync(string provider, string apiKey, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+    }
+
+    private sealed class NullPreflightService : IAdoTelemetryPreflightService
+    {
+        public Task<PreflightResult> RunPreflightAsync(AdoTelemetryFieldConfig? _, CancellationToken __)
+            => Task.FromResult(PreflightResult.Succeed(new BootstrapManifest
+            {
+                Timestamp = DateTimeOffset.UtcNow,
+                OrgUrl = "https://dev.azure.com/test",
+                Project = "Test",
+                ProcessType = AdoProcessType.Agile,
+                FieldsCreated = Array.Empty<string>(),
+                FieldsExisting = Array.Empty<string>(),
+                FieldsFailed = Array.Empty<FieldBootstrapFailure>(),
+            }));
     }
 
     private sealed class NullHealthChecker : IConnectorHealthChecker

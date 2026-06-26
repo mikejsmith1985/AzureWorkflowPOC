@@ -38,7 +38,7 @@ public sealed class ThreadsPageTests : E2ETestBase
     }
 
     [Fact]
-    public async Task GearIcon_Click_OpensConnectorModal()
+    public async Task GearIcon_Click_NavigatesToConnectorSettings()
     {
         await NavigateAsync("/");
 
@@ -46,9 +46,9 @@ public sealed class ThreadsPageTests : E2ETestBase
         await gear.WaitForAsync(new() { State = WaitForSelectorState.Visible });
         await gear.ClickAsync();
 
-        // ConnectorConfigModal.razor renders a fixed-position overlay with an h2 header.
-        var modal = Page.Locator("h2:has-text('Connector Configuration'), div.fixed.inset-0.z-50").First;
-        await modal.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        // The gear now navigates to the dedicated Connector Settings page (the legacy modal was removed).
+        var heading = Page.Locator("h1:has-text('Connector Settings')").First;
+        await heading.WaitForAsync(new() { State = WaitForSelectorState.Visible });
     }
 
     [Fact]

@@ -8,7 +8,7 @@ namespace DBAIAzure.Web.Integrations.SpecKit;
 
 /// <summary>
 /// Pushes the validation summary + gaps + portal link to the Forge Terminal decision card when a run
-/// pauses for review. Fire-and-forget and failure-tolerant (mirrors <c>TeamsHitlNotifier</c>): a
+/// pauses for review. Fire-and-forget and failure-tolerant (mirrors <c>MessagingHitlNotifier</c>): a
 /// missed push must never block the run from entering its awaiting-approval state.
 /// </summary>
 public sealed class ForgeApprovalNotifier : IPhaseApprovalNotifier

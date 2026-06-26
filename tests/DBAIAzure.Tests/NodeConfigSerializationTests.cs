@@ -37,7 +37,7 @@ public sealed class NodeConfigSerializationTests
     {
         var original = new NotifyNodeConfig
         {
-            Connector       = ConnectorType.Teams,
+            Connector       = ConnectorType.Messaging,
             RecipientMap    = "on-call channel",
             MessageTemplate = "Ticket {id} is urgent.",
         };
@@ -46,7 +46,7 @@ public sealed class NodeConfigSerializationTests
         var restored = NodeConfigSerializer.ReadConfig<NotifyNodeConfig>(json);
 
         Assert.NotNull(restored);
-        Assert.Equal(ConnectorType.Teams, restored!.Connector);
+        Assert.Equal(ConnectorType.Messaging, restored!.Connector);
         Assert.Equal(original.RecipientMap, restored.RecipientMap);
         Assert.Equal(original.MessageTemplate, restored.MessageTemplate);
     }
@@ -88,7 +88,7 @@ public sealed class NodeConfigSerializationTests
     {
         var config = new NotifyNodeConfig
         {
-            Connector       = ConnectorType.Teams,
+            Connector       = ConnectorType.Messaging,
             RecipientMap    = "team",
             MessageTemplate = "hello",
         };

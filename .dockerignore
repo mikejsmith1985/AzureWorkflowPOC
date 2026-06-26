@@ -1,0 +1,35 @@
+# Keeps the Docker build context small and ensures no secret or local state is ever copied into an
+# image layer. Only the .NET source needed to publish DBAIAzure.Web should reach the build stage.
+
+# Build outputs
+**/bin/
+**/obj/
+publish/
+
+# Version control & editor/tooling metadata
+.git/
+.github/
+.vs/
+.vscode/
+.idea/
+.forge/
+
+# Spec tree, docs, and tests — not needed to build the runtime image
+specs/
+src/DBAIAzure.Web/specs/
+tests/
+**/*.md
+
+# Local databases — ephemeral demo state must never be baked into the image
+**/*.db
+**/*.db-wal
+**/*.db-shm
+
+# Secrets — never copy any env file into the build context (Article IX)
+**/team.env
+**/*.env
+!**/*.env.example
+
+# Misc
+**/.DS_Store
+**/Thumbs.db

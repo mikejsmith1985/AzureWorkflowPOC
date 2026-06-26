@@ -35,7 +35,7 @@ public sealed class ConnectorSettingsTests : E2ETestBase
         await NavigateAsync("/settings/connectors");
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        // Each connector type (AzureDevOps, LLM, ServiceNow, Teams) should have an Edit button.
+        // Each connector type (AzureDevOps, LLM, ServiceNow, Messaging) should have an Edit button.
         var editButtons = await Page.Locator("button:has-text('Edit')").AllAsync();
         Assert.True(editButtons.Count >= 1, "Expected at least one connector card with an Edit button.");
     }
@@ -56,6 +56,35 @@ public sealed class ConnectorSettingsTests : E2ETestBase
     }
 
     [Fact]
+    public async Task MessagingCard_Edit_ShowsPlatformDropdownAndWebhookField()
+    {
+        await NavigateAsync("/settings/connectors");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        // Open the Messaging connector card's edit form.
+        var messagingCard = Page.Locator("div.rounded.bg-gray-900", new() { HasTextString = "Messaging" }).First;
+        await messagingCard.Locator("button:has-text('Edit')").First.ClickAsync();
+
+        // The platform dropdown must offer Teams, Slack, and Discord.
+        var platformSelect = messagingCard.Locator("select").First;
+        await platformSelect.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+        var optionTexts = await platformSelect.Locator("option").AllInnerTextsAsync();
+        Assert.Contains(optionTexts, text => text.Contains("Microsoft Teams"));
+        Assert.Contains(optionTexts, text => text.Contains("Slack"));
+        Assert.Contains(optionTexts, text => text.Contains("Discord"));
+
+        // A masked Webhook URL field must be present for the webhook fallback path.
+        var webhookField = messagingCard.Locator("input[type='password']").First;
+        await webhookField.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+
+        // Switching platform (twice) must not throw / break the form (Save remains available).
+        await platformSelect.SelectOptionAsync(new SelectOptionValue { Value = "Slack" });
+        await platformSelect.SelectOptionAsync(new SelectOptionValue { Value = "Discord" });
+        await messagingCard.Locator("button:has-text('Save')").First
+            .WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+    }
+
+    [Fact]
     public async Task ConnectorSettings_NavigationFromMainNav_ReachesPage()
     {
         await NavigateAsync("/");
@@ -68,6 +97,59 @@ public sealed class ConnectorSettingsTests : E2ETestBase
         await heading.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
 
         Assert.True(await IsBlazorConnectedAsync());
+    }
+
+    /// <summary>
+    /// T035 / T036: "Test Connection" button on the ADO card triggers the preflight service.
+    /// Without live credentials the button renders disabled; with E2E_TEST_ADO_PAT the badge appears.
+    /// </summary>
+    [Fact]
+    public async Task ConnectorSettings_AdoPreflightButton_RendersOnAdoCard()
+    {
+        await NavigateAsync("/settings/connectors");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        // The button must be present on the page (even if disabled because ADO is not yet configured).
+        var preflightButton = Page.Locator("[data-testid='ado-preflight-button']");
+        await preflightButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+
+        var bodyText = await Page.InnerTextAsync("body");
+        Assert.DoesNotContain("An unhandled error has occurred", bodyText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ConnectorSettings_AdoPreflightButton_WhenClicked_ShowsResultBadge()
+    {
+        // Only runs when live ADO credentials are injected via the environment variable.
+        var testPat = Environment.GetEnvironmentVariable("E2E_TEST_ADO_PAT");
+        if (testPat is null)
+        {
+            // Without credentials the button is disabled — just assert the badge is not pre-shown.
+            await NavigateAsync("/settings/connectors");
+            await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+            var badge = Page.Locator("[data-testid='ado-preflight-result']");
+            Assert.Equal(0, await badge.CountAsync());
+            return;
+        }
+
+        await NavigateAsync("/settings/connectors");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        // Configure ADO credentials so the button becomes enabled.
+        var adoCard = Page.Locator("div[class*='rounded']").Filter(new() { HasText = "AzureDevOps" }).First;
+        await adoCard.Locator("button:has-text('Edit')").ClickAsync();
+        await adoCard.Locator("input[type='password']").FillAsync($"{{\"personalAccessToken\":\"{testPat}\"}}");
+        await adoCard.Locator("button:has-text('Save')").ClickAsync();
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        // Click "Test Connection" — the result badge should appear.
+        await Page.Locator("[data-testid='ado-preflight-button']").ClickAsync();
+        var resultBadge = Page.Locator("[data-testid='ado-preflight-result']");
+        await resultBadge.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 30_000 });
+
+        var badgeText = await resultBadge.InnerTextAsync();
+        Assert.True(badgeText.Contains("OK") || badgeText.Contains("failed"),
+            $"Result badge should say 'OK' or 'failed', got: {badgeText}");
     }
 
     /// <summary>

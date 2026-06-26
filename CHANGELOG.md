@@ -7,6 +7,185 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Point at a repo, run its app in a throwaway container, monitor it (feature 013)
+
+A new **Apps** surface lets you point at a target repository by local path, build and run that repo's
+application in its own **disposable container**, and link any saved workflow to **monitor** it —
+mirroring the reference LangGraph app's repo → container build/run → workflow-monitors-it architecture
+(see `specs/013-repo-app-monitoring/`).
+
+- **App registry**: register a repo (name, local path, optional branch, optional build command,
+  required run command); owner-scoped with per-owner unique names; persisted in SQLite
+  (`MonitoredApps`). Lifecycle mirrors the reference: Registered → Building → (Ready | Build Failed);
+  Ready → Running → Ready, with a single-in-flight guard so an app is never left stuck (FR-008/016).
+- **Throwaway-container build/run**: an `IAppExecutor` seam with two implementations — a **simulated**
+  executor (default; synthesizes outcomes, no engine required) and a real **Docker** executor
+  (`Docker.DotNet`) that builds/runs in a fresh container removed by its specific id afterwards
+  (Article II), with bind-mounted read-only repo, a per-app artifact volume, captured **secret-redacted**
+  logs (Article IX), a hard timeout, and start-failure handling. The active executor is chosen at
+  startup (Docker when reachable and not in demo mode, else simulated) and shown as an indicator.
+- **Workflow monitoring**: link any saved workflow as an app's monitor. A hosted background loop builds
+  a `MonitoringSnapshot` (status + latest run outcome/summary + redacted log tail, FR-018) and, on a
+  detected problem, starts a bounded run via the existing `WorkflowExecutionOrchestrator` — the same
+  path any run uses — de-duplicated by issue signature so a recurring problem is raised once
+  (close-the-loop). Per-app monitoring health (last cycle, ok/fail, error) is surfaced.
+- **UI**: an **Apps** nav tab, an `/apps` list with status badges + register form + Build/Run/Link/Remove,
+  and an `/apps/{id}` detail page with build/run summaries, full redacted logs, the workflow link, and
+  monitoring health.
+- Reuses existing machinery (framework-first, Article VII): the workflow orchestrator, saved-workflow
+  gallery, the connector-config/`ISecretProtector` pattern, `PipelineDbContext` idempotent DDL, and the
+  in-process live-update pattern. The only new dependency is `Docker.DotNet`.
+
+### Added — One-URL Azure Container demo deployment (foundation)
+
+The app can now be packaged as a single public-URL Azure Container Apps demo that mirrors the
+reference LangGraph app: scale-to-zero when idle, back-office connectors pre-seeded from the Forge
+Vault, and the visitor supplying only their own LLM key (see `specs/012-azure-container-deploy/`).
+This change set is the buildable foundation; the live cloud deploy + validation are operator steps.
+
+- **Boot-time connector seeding** (`DemoConnectorSeeder`): on each (ephemeral) startup, the demo's
+  ServiceNow, Azure DevOps, and Messaging connectors are seeded from `ConnectorSeed__*` environment
+  variables (vault-injected at deploy time) through the existing connector repository, so secrets are
+  encrypted at rest and seeded rows are indistinguishable from UI-configured ones. The **LLM
+  connector is never seeded** — each visitor enters their own key (FR-004).
+- **Design-time LLM hot-reload** (`HotReloadAnthropicService`): the Workflow Builder AI assistant and
+  Node Realization now resolve the LLM key + model from the stored LLM connector on each call
+  (config fallback), matching the per-run execution paths — so the single visitor-entered key powers
+  every LLM feature without an app restart.
+- **Configurable Data Protection key ring** via `DataProtection:KeyRingPath` — points at a writable,
+  ephemeral container path so secrets encrypt/decrypt within a container lifetime and reset on cold
+  start; falls back to `%APPDATA%` locally.
+- **Container + deploy assets**: root `Dockerfile` (multi-stage, non-root, Kestrel on `:8080`,
+  ephemeral SQLite) + `.dockerignore`; `deploy/aca/` local `az` deploy (`deploy.ps1`,
+  `seed-secrets.ps1`, `team.env.example`) creating an ACA app with `--ingress external
+  --min-replicas 0 --max-replicas 1` and vault-sourced ACA secrets. No GitHub Actions (Article VIII);
+  no secret value committed (Article IX).
+
+### Changed — Teams connector generalized to a multi-platform Messaging connector
+
+The single-purpose "Teams" connector is now a **Messaging** connector that targets Microsoft
+Teams, Slack, or Discord, with **MCP-first delivery and a webhook fallback** (see
+`specs/010-messaging-connector/`).
+
+- **MCP-first delivery**: when an MCP server endpoint is configured, messages are delivered by
+  calling its send-message tool via the official MCP C# SDK (`ModelContextProtocol.Core`) over
+  HTTP/SSE; tool arguments are built from an operator-supplied JSON template with `{{target}}` /
+  `{{message}}` placeholders. With no MCP server configured, delivery falls back to the platform
+  webhook. Selection is configuration-based — an unreachable MCP server reports a failure rather
+  than silently using the webhook.
+- **HITL + notify-node** delivery now flows through the same delivery seam, so pause notifications
+  reach whichever platform is configured (Teams/Slack/Discord), not just Teams.
+
+- **Platform dropdown** on the Connector Settings "Messaging" card (Teams / Slack / Discord),
+  mirroring the LLM provider dropdown. Each platform uses its own webhook payload and success
+  signal: Teams (Adaptive Card → `"1"`), Slack (`{"text"}` → `"ok"`), Discord (`{"content"}` → 204).
+- New single `IMessageDelivery` seam selects MCP-first with webhook fallback and backs the
+  Settings **Test Connection** / health check; the result names the platform and the path used.
+- `ConnectorType.Teams` renamed to `ConnectorType.Messaging`; a legacy `"Teams"` row in the
+  database is read defensively as Messaging (no migration required).
+- **Removed the duplicate legacy connector modal** (`ConnectorConfigModal`/`ConnectorSection`/
+  `ConnectorStatusBadge`); the home-page gear now opens the dedicated `/settings/connectors` page,
+  eliminating a second, divergent connector UI.
+- Secrets unchanged in handling: the webhook URL is stored encrypted with "leave blank to keep
+  existing" semantics.
+
+### Fixed — ServiceNow health check failed when Instance URL included a path
+
+A ServiceNow Instance URL pasted from the browser address bar (e.g.
+`https://acme.service-now.com/login.do`) caused the health check to build
+`…/login.do/api/now/table/sys_properties`, which ServiceNow 302-redirects to its login
+page — so even valid credentials never authenticated and the connector showed "Unhealthy".
+`ServiceNowClient` now normalizes the configured URL to its origin (scheme + host)
+before appending the Table API path, so stored credentials work regardless of how the URL
+was entered. No re-entry is required for the existing stored value.
+
+Additionally, the Connector Settings page now clears the in-memory health-check result after
+a save, so a stale "Unhealthy / no credentials stored" message no longer lingers over freshly
+entered credentials.
+
+### Fixed — ServiceNow credentials lost on app restart
+
+`AddDataProtection()` was called without key persistence. ASP.NET Core Data Protection
+generates ephemeral keys by default — a restart produces new keys and all previously
+encrypted connector secrets become unreadable ("Stored credentials could not be decrypted").
+Keys are now persisted to `%APPDATA%\AzureWorkflowPOC\DataProtection-Keys` with a pinned
+application name so they survive restarts and redeploys.
+**Action required**: re-enter ServiceNow (and any other connector) credentials once after
+this restart; they will persist from then on.
+
+### Changed — LLM connector redesigned: provider dropdown + live model list
+
+The LLM connector no longer asks for a raw URL.
+
+- **Provider dropdown** — select Anthropic (Claude) or OpenAI
+- **API Key** — password field; leave blank to keep the stored key
+- **Fetch Models button** — calls the provider's live models API (`/v1/models`)
+  using the entered key (or the stored one if left blank) and populates a dropdown.
+  No model names are hardcoded; no fallback list exists.
+- On opening Edit the model list auto-fetches if a provider and stored key are already set.
+- Storage format: `NonSecretConfig` now stores `{"provider":"anthropic","modelName":"..."}`;
+  the `providerEndpoint` URL field is removed.
+
+### Fixed — ADO preflight fails for custom inherited process templates (v1.2.3)
+
+`ResolveInheritedParentTypeAsync` was calling `_apis/process/processes/{id}` which returns the
+basic `Process` object without `parentProcessTypeId`. The correct endpoint is
+`_apis/work/processes/{id}` (Work namespace) which includes the `parentProcessTypeId` field
+needed to walk up the inheritance chain.
+
+### Fixed — ADO preflight fails for custom inherited process templates
+
+`DetectProcessTypeAsync` only matched the two built-in Agile and Scrum GUIDs. Projects using a
+custom inherited process (e.g. a process named "Agentic" that inherits from Agile) have a unique
+GUID that doesn't match either built-in, causing a spurious "unsupported process type" error even
+though the process is perfectly compatible.
+
+Fix: when the project's `templateTypeId` is not a known built-in GUID, the service now calls
+`_apis/process/processes/{typeId}` to read `parentProcessTypeId`. If the parent matches Agile or
+Scrum, the project is treated accordingly. Covers the most common case — custom inherited processes
+created in any ADO organisation.
+
+### Fixed — ADO preflight process-type detection returns 404
+
+`DetectProcessTypeAsync` was calling `_apis/work/process/configuration` to read the project's
+process template GUID. That endpoint returns backlog/field configuration — it does not expose
+`templateTypeId` and is not available at api-version 7.1, causing a 404 for all users.
+
+Replaced with the documented projects capabilities endpoint:
+`_apis/projects/{project}?includeCapabilities=true&api-version=7.1`
+which returns `capabilities.processTemplate.templateTypeId` and works for all ADO organisations.
+Updated all unit-test HTTP mocks to match the new URL and response shape.
+
+### Added — ADO Telemetry Field Bootstrap: preflight service bootstraps custom fields before ticket creation (spec 009)
+
+Before work items are created by the Spec Kit pipeline, a preflight step ensures the required ADO
+custom telemetry fields exist. The feature operates in two modes chosen automatically at runtime:
+
+- **Bootstrap mode (US1)** — admin access detected: creates 14 custom fields (`Custom.AISessionID`,
+  `Custom.AIModelUsed`, token/cost/cache/rate counters, `Custom.SpeckitPhase` picklist) across
+  `User Story` and `Task` work item types via the ADO Inherited Process API. Retries up to 3 times
+  with exponential backoff on 429/503 HTTP errors. Writes a `.ado-bootstrap-manifest.json` to the
+  active spec feature directory.
+- **Adaptive mode (US2)** — admin probe returns 403: scans the org's existing fields and builds a
+  fallback mapping (exact match → `FallbackReferenceName` → type-level fallback → log-only). Lets the
+  pipeline continue without admin rights at the cost of telemetry fidelity.
+- **Config override (US4)** — callers can pass a custom `AdoTelemetryFieldConfig` to `RunPreflightAsync`
+  to swap the embedded default field schema without redeploying.
+- **Startup auto-run** — `app.Lifetime.ApplicationStarted` fires a fire-and-forget preflight so fields
+  are ready before the first ticket request.
+- **"Test Connection" button (US3)** — the ADO connector card on `/settings/connectors` shows a
+  dedicated "Test Connection" button. On click, `IAdoTelemetryPreflightService.RunPreflightAsync` runs
+  and the result is surfaced via a `data-testid="ado-preflight-result"` badge.
+- **SK Process step** — `AdoTelemetryPreflightStep : KernelProcessStep<AdoPreflightStepState>` wraps
+  the service for integration into the Spec Kit SK process pipeline. Emits
+  `AdoPreflightSucceeded` / `AdoPreflightFailed` events for downstream steps to react to.
+- **Unit tests** — `AdoTelemetryPreflightServiceTests` and `AdoTelemetryPreflightStepTests` (408 tests
+  total passing). `RetryDelayFactory` is publicly overridable so retry tests complete in milliseconds.
+- **E2E tests** — two new Playwright tests in `ConnectorSettingsTests`:
+  `ConnectorSettings_AdoPreflightButton_RendersOnAdoCard` (always runs) and
+  `ConnectorSettings_AdoPreflightButton_WhenClicked_ShowsResultBadge` (live-credential path gated on
+  `E2E_TEST_ADO_PAT`).
+
 ### Added — Production Platform Parity: run persistence, HITL close-loop, execution history, DoR validation (spec 008)
 
 Implements the Azure-stack completeness feature set across US1–US7:

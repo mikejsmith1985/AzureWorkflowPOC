@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection;
 using System.Text.Json;
 using DBAIAzure.Connectors;
 using DBAIAzure.Core.Configuration;
@@ -39,7 +40,6 @@ if (!string.IsNullOrWhiteSpace(keyVaultUri))
 var anthropicKey   = builder.Configuration["Anthropic:ApiKey"]   ?? string.Empty;
 var anthropicModel = builder.Configuration["Anthropic:Model"]    ?? "claude-sonnet-4-6";
 var portalBaseUrl  = builder.Configuration["Portal:BaseUrl"]     ?? "http://localhost:5000";
-var teamsWebhook   = builder.Configuration["Teams:PowerAutomateUrl"] ?? string.Empty;
 var dbPath         = builder.Configuration["Storage:SqlitePath"] ?? "pipeline.db";
 
 if (string.IsNullOrWhiteSpace(anthropicKey) || anthropicKey.StartsWith("REPLACE"))
@@ -59,14 +59,64 @@ builder.Services.AddDbContextFactory<PipelineDbContext>(options =>
 builder.Services.AddSingleton<IRunRepository, SqliteRunRepository>();
 
 // ── Data Protection — encrypts connector secrets at rest (T001, FR-019) ───────
-builder.Services.AddDataProtection();
+// The key ring location is configurable via DataProtection:KeyRingPath. In the container it points at
+// a writable, EPHEMERAL path (set in the Dockerfile) so keys live only for the container lifetime —
+// every cold start resets them along with the rest of the demo state (FR-016). Locally it falls back
+// to %APPDATA% so keys survive dev restarts. SetApplicationName is pinned so keys stay valid within a
+// lifetime/deployment.
+var configuredKeyRingPath = builder.Configuration["DataProtection:KeyRingPath"];
+var dpKeyDir = new DirectoryInfo(!string.IsNullOrWhiteSpace(configuredKeyRingPath)
+    ? configuredKeyRingPath
+    : Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "AzureWorkflowPOC", "DataProtection-Keys"));
+dpKeyDir.Create();
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(dpKeyDir)
+    .SetApplicationName("AzureWorkflowPOC");
 builder.Services.AddSingleton<ISecretProtector, DataProtectorAdapter>();
 
 // ── Connector config repository (T013) ────────────────────────────────────────
 builder.Services.AddSingleton<IConnectorConfigRepository, SqliteConnectorConfigRepository>();
 
+// ── Demo connector seeding (012 US5) ──────────────────────────────────────────
+// Bind the vault-injected seed values and register the boot seeder that pre-wires the demo's
+// back-office connectors (ServiceNow/AzureDevOps/Messaging) on each cold start. Never seeds the LLM.
+builder.Services.Configure<ConnectorSeedOptions>(builder.Configuration.GetSection(ConnectorSeedOptions.SectionName));
+builder.Services.AddSingleton<DemoConnectorSeeder>();
+
 // ── Workflow persistence ────────────────────────────────────────────────────
 builder.Services.AddSingleton<IWorkflowRepository, SqliteWorkflowRepository>();
+
+// ── Repo-app registry + monitoring heartbeat store (feature 013) ───────────────
+// Both depend only on IDbContextFactory and create their own short-lived DbContext per call,
+// so singleton lifetime is safe (no captive dependency).
+builder.Services.AddSingleton<IAppRegistryRepository, SqliteAppRegistryRepository>();
+builder.Services.AddSingleton<IAppHeartbeatStore, SqliteAppHeartbeatStore>();
+// In-process status notifier for live Apps-page updates (mirrors the orchestrator's RunUpdated).
+builder.Services.AddSingleton<IAppStatusNotifier, DBAIAzure.Web.Services.AppStatusNotifier>();
+// The active executor is chosen at first use: a real Docker executor when an engine is reachable and
+// demo mode is off, otherwise the simulated executor — identical surfaces either way (US4, FR-015).
+builder.Services.AddSingleton<IAppExecutor>(sp =>
+{
+    var registry = sp.GetRequiredService<IAppRegistryRepository>();
+    var notifier = sp.GetRequiredService<IAppStatusNotifier>();
+    var sim = new DBAIAzure.Connectors.Apps.SimAppExecutor(registry, notifier);
+
+    var demoMode = builder.Configuration.GetValue<bool>("Apps:DemoMode");
+    Docker.DotNet.IDockerClient? dockerClient = null;
+    var dockerAvailable = !demoMode
+        && DBAIAzure.Connectors.Apps.AppExecutorSelector.TryConnectDocker(out dockerClient)
+        && dockerClient is not null;
+    DBAIAzure.Core.Interfaces.IAppExecutor docker = dockerAvailable
+        ? new DBAIAzure.Connectors.Apps.DockerAppExecutor(registry, notifier, dockerClient!)
+        : sim;
+    return DBAIAzure.Connectors.Apps.AppExecutorSelector.Select(dockerAvailable, demoMode, docker, sim);
+});
+// App monitoring: a chosen saved workflow runs (via the existing orchestrator) when a monitored app's
+// snapshot indicates a problem; a hosted loop cycles linked apps and records heartbeats (feature 013).
+builder.Services.AddSingleton<IAppMonitoringService, DBAIAzure.Processes.Monitoring.AppMonitoringService>();
+builder.Services.AddHostedService<DBAIAzure.Web.Services.AppMonitoringBackgroundService>();
 
 // ── ServiceNow outbound HTTP client — 35 s timeout, base URL set per-request (T002) ─
 builder.Services.AddHttpClient(nameof(ServiceNowClient), client =>
@@ -74,18 +124,23 @@ builder.Services.AddHttpClient(nameof(ServiceNowClient), client =>
     client.Timeout = TimeSpan.FromSeconds(35);
 });
 
-// ── Teams HITL notifier ────────────────────────────────────────────────────────
-builder.Services.AddHttpClient(nameof(TeamsHitlNotifier), client =>
-{
-    if (!string.IsNullOrWhiteSpace(teamsWebhook))
-        client.BaseAddress = new Uri(teamsWebhook);
-});
-// IConnectorConfigRepository is registered above, so it is injectable as optional param (FR-014).
-builder.Services.AddSingleton<IHitlNotifier>(sp =>
-    new TeamsHitlNotifier(
-        sp.GetRequiredService<IHttpClientFactory>(),
-        sp.GetRequiredService<ILogger<TeamsHitlNotifier>>(),
-        sp.GetService<IConnectorConfigRepository>()));
+// ── Messaging connector — webhook delivery profiles + delivery seam (010 US1) ─────
+// One profile per platform; MessageDelivery resolves config/secrets per call and chooses the path.
+builder.Services.AddHttpClient(nameof(DBAIAzure.Connectors.Messaging.MessageDelivery));
+builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IPlatformWebhookProfile,
+    DBAIAzure.Connectors.Messaging.TeamsWebhookProfile>();
+builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IPlatformWebhookProfile,
+    DBAIAzure.Connectors.Messaging.SlackWebhookProfile>();
+builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IPlatformWebhookProfile,
+    DBAIAzure.Connectors.Messaging.DiscordWebhookProfile>();
+// MCP-first delivery gateway (official MCP client SDK over HTTP/SSE); MessageDelivery uses it when an
+// MCP server endpoint is configured and falls back to the webhook profiles otherwise (010 US3).
+builder.Services.AddSingleton<DBAIAzure.Connectors.Messaging.IMcpMessageGateway,
+    DBAIAzure.Connectors.Messaging.McpMessageGateway>();
+builder.Services.AddSingleton<IMessageDelivery, DBAIAzure.Connectors.Messaging.MessageDelivery>();
+
+// ── HITL notifier — delivers pause-for-input notifications via the Messaging connector (010 US2) ─
+builder.Services.AddSingleton<IHitlNotifier, DBAIAzure.Web.Integrations.Messaging.MessagingHitlNotifier>();
 
 // ── Pipeline orchestrator ──────────────────────────────────────────────────────
 builder.Services.AddSingleton<PipelineOrchestrator>(sp =>
@@ -208,7 +263,7 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
 builder.Services.AddSingleton<ServiceNowClient>();
 builder.Services.AddSingleton<AdoConnectorTester>();
 builder.Services.AddSingleton<LlmConnectorTester>();
-builder.Services.AddSingleton<TeamsConnectorTester>();
+builder.Services.AddSingleton<MessagingConnectorTester>();
 builder.Services.AddSingleton<IConnectorHealthChecker, ConnectorHealthChecker>();
 
 // ── Workflow run repository (FR-18, US1) ───────────────────────────────────────
@@ -247,11 +302,15 @@ builder.Services.AddApplicationInsightsTelemetry(builder.Configuration);
 // ── Workflow structural validator (spec 004) ───────────────────────────────────
 builder.Services.AddSingleton<IWorkflowValidator, WorkflowValidator>();
 
-// ── Visual Workflow Builder services (T046–T049) ───────────────────────────────
-// A singleton IChatCompletionService for the Visual Workflow Builder (separate from the
-// per-run kernel factory used by the pipeline orchestrator).
-builder.Services.AddSingleton<IChatCompletionService>(
-    new AnthropicChatCompletionService(anthropicKey, anthropicModel));
+// ── Design-time LLM services (Workflow Builder assistant + Node Realization) ───────────
+// These resolve the LLM key+model from the LLM connector's DB row on each call (config fallback),
+// so the single key a visitor enters in the UI powers the builder assistant and node realization
+// without an app restart — matching the per-run execution factories (research Decision 7;
+// FR-003/FR-004/SC-006). One shared instance backs both IChatCompletionService and
+// IStructuredCompletionService.
+builder.Services.AddSingleton<HotReloadAnthropicService>(sp =>
+    new HotReloadAnthropicService(sp.GetRequiredService<IConnectorConfigRepository>(), anthropicKey, anthropicModel));
+builder.Services.AddSingleton<IChatCompletionService>(sp => sp.GetRequiredService<HotReloadAnthropicService>());
 
 builder.Services.AddSingleton<WorkflowTopologySerializer>();
 builder.Services.AddSingleton<ILlmAvailabilityMonitor, LlmAvailabilityMonitor>();
@@ -262,12 +321,25 @@ builder.Services.AddSingleton<IWorkflowCodeDiffService, WorkflowCodeDiffService>
 // WorkflowBuilderService is scoped (one instance per session / per page).
 builder.Services.AddScoped<WorkflowBuilderService>();
 
+// ── ADO Telemetry Preflight (spec-009) ────────────────────────────────────────
+// Named HttpClient for the preflight service — reuses the ADO-scoped client pattern.
+builder.Services.AddHttpClient(nameof(DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryPreflightService),
+    client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddScoped<DBAIAzure.Web.Integrations.AzureDevOps.ManifestPathResolver>();
+builder.Services.AddScoped<DBAIAzure.Core.Interfaces.IAdoTelemetryPreflightService,
+    DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryPreflightService>();
+
+// ── LLM model fetcher — live model list from Anthropic / OpenAI ───────────────
+builder.Services.AddHttpClient(nameof(DBAIAzure.Web.Integrations.LLM.LlmModelFetcherService),
+    client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddScoped<DBAIAzure.Web.Integrations.LLM.ILlmModelFetcherService,
+    DBAIAzure.Web.Integrations.LLM.LlmModelFetcherService>();
+
 // ── Node Realization services (spec 007) ───────────────────────────────────────
 // Schema-bound LLM output for turning plain-language nodes into executable config (Article VII).
-// AnthropicChatCompletionService implements IStructuredCompletionService; registered at the app root
-// (the existing IStructuredCompletionService lives only inside the per-run pipeline kernel).
-builder.Services.AddSingleton<IStructuredCompletionService>(
-    new AnthropicChatCompletionService(anthropicKey, anthropicModel));
+// Resolves to the same hot-reloading service as the builder assistant, so node realization uses the
+// visitor-entered key from the DB rather than a key captured at startup (research Decision 7).
+builder.Services.AddSingleton<IStructuredCompletionService>(sp => sp.GetRequiredService<HotReloadAnthropicService>());
 // Scoped to mirror WorkflowBuilderService — one realization/readiness instance per session.
 builder.Services.AddScoped<IWorkflowRealizationService, WorkflowRealizationService>();
 builder.Services.AddScoped<IWorkflowReadinessService, WorkflowReadinessService>();
@@ -421,7 +493,86 @@ using (var scope = app.Services.CreateScope())
         CREATE INDEX IF NOT EXISTS IX_WorkflowExecutionEvents_RunId_OccurredAt
             ON WorkflowExecutionEvents (RunId, OccurredAt);
         """);
+
+    // Registered repo-apps, their monitoring heartbeats, and close-the-loop dedup signatures
+    // (feature 013). CREATE TABLE IF NOT EXISTS is idempotent — safe on every startup.
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS MonitoredApps (
+            AppId               TEXT    NOT NULL PRIMARY KEY,
+            Name                TEXT    NOT NULL,
+            OwnerId             TEXT    NOT NULL,
+            RepoLocalPath       TEXT    NOT NULL,
+            Branch              TEXT,
+            BuildCommand        TEXT,
+            RunCommand          TEXT    NOT NULL,
+            Status              INTEGER NOT NULL DEFAULT 0,
+            LastBuildResultJson TEXT,
+            LastRunResultJson   TEXT,
+            LinkedWorkflowId    TEXT,
+            LastBuiltAt         TEXT,
+            LastRunAt           TEXT,
+            CreatedAt           TEXT    NOT NULL DEFAULT '0001-01-01T00:00:00+00:00',
+            UpdatedAt           TEXT    NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS IX_MonitoredApps_OwnerId_Name
+            ON MonitoredApps (OwnerId, Name);
+        CREATE INDEX IF NOT EXISTS IX_MonitoredApps_OwnerId
+            ON MonitoredApps (OwnerId);
+        """);
+
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS AppMonitoringHeartbeats (
+            AppId       TEXT    NOT NULL PRIMARY KEY,
+            LastCycleAt TEXT    NOT NULL,
+            LastCycleOk INTEGER NOT NULL DEFAULT 0,
+            LastError   TEXT,
+            CycleCount  INTEGER NOT NULL DEFAULT 0
+        );
+        """);
+
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS AppRaisedIssues (
+            Signature     TEXT NOT NULL PRIMARY KEY,
+            AppId         TEXT NOT NULL,
+            WorkflowRunId TEXT,
+            CreatedAt     TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'
+        );
+        CREATE INDEX IF NOT EXISTS IX_AppRaisedIssues_AppId
+            ON AppRaisedIssues (AppId);
+        """);
+
+    // ── Seed the demo's back-office connectors from environment configuration (012 US5) ───
+    // Runs after the ConnectorConfigs table exists and before the app serves traffic. Never seeds
+    // the LLM connector. On the demo's ephemeral container this re-populates connectors on every
+    // cold start (research Decision 4); locally it is a no-op when no seed env vars are present.
+    var demoSeeder = scope.ServiceProvider.GetRequiredService<DemoConnectorSeeder>();
+    await demoSeeder.SeedAsync();
 }
+
+// ── ADO Telemetry Preflight auto-run on startup (spec-009, T034) ──────────────
+// Fire-and-forget: runs in the background so startup is not blocked. Uses a scoped service
+// lifetime inside CreateScope to avoid capturing the root provider (captive dependency guard).
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    _ = Task.Run(async () =>
+    {
+        await using var scope = app.Services.CreateAsyncScope();
+        var preflight = scope.ServiceProvider.GetRequiredService<DBAIAzure.Core.Interfaces.IAdoTelemetryPreflightService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryPreflightService>>();
+        try
+        {
+            var result = await preflight.RunPreflightAsync(null, CancellationToken.None);
+            if (result.IsSuccess)
+                logger.LogInformation("ADO preflight succeeded on startup: mode={Mode}", result.Manifest?.Mode);
+            else
+                logger.LogWarning("ADO preflight failed on startup: {Error}", result.ErrorMessage);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "ADO preflight threw unexpectedly on startup — pipeline continues.");
+        }
+    });
+});
 
 if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error");

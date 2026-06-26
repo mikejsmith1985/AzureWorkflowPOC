@@ -24,7 +24,7 @@ public sealed class WorkflowRealizationServiceTests
               "tool_bindings": [] }
             """,
         ["propose_notify_config"] = """
-            { "connector": "Teams", "recipient_map": "on-call channel",
+            { "connector": "Messaging", "recipient_map": "on-call channel",
               "message_template": "Ticket is urgent." }
             """,
     };
@@ -34,7 +34,7 @@ public sealed class WorkflowRealizationServiceTests
         fakeLlm = new CannedStructuredCompletionService(CannedResponses);
         // Include Teams so the Notify proposer can proceed to the LLM call in the happy-path tests (T047).
         return new WorkflowRealizationService(
-            fakeLlm, new FakeConnectorConfigRepository(configuredConnectors: ConnectorType.Teams));
+            fakeLlm, new FakeConnectorConfigRepository(configuredConnectors: ConnectorType.Messaging));
     }
 
     [Fact]
