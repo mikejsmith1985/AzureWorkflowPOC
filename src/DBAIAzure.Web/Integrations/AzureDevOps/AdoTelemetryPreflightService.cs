@@ -336,6 +336,11 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
                 return (AdoProcessType.Unsupported, null, $"Could not retrieve project capabilities: {(int)response.StatusCode} {response.ReasonPhrase}");
 
             var body = await response.Content.ReadAsStringAsync(ct);
+            if (!LooksLikeJson(response, body))
+                return (AdoProcessType.Unsupported, null,
+                    "ADO returned an HTML page instead of JSON — the Personal Access Token is likely "
+                    + "invalid or expired, or the organization URL is wrong. Update them in Connector Settings.");
+
             using var doc = JsonDocument.Parse(body);
 
             // capabilities.processTemplate.templateTypeId
@@ -393,6 +398,21 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
         {
             return (PreflightMode.Bootstrap, null, $"ADO admin probe failed: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Detects the HTML sign-in page Azure DevOps serves with HTTP 200 (instead of a 401) when a PAT
+    /// is invalid/expired or the org URL is wrong, so callers surface an actionable error rather than
+    /// the raw "'&lt;' is an invalid start of a value" JSON parse failure.
+    /// </summary>
+    private static bool LooksLikeJson(HttpResponseMessage response, string body)
+    {
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (mediaType is not null && mediaType.Contains("html", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var trimmed = body.TrimStart();
+        return trimmed.StartsWith('{') || trimmed.StartsWith('[');
     }
 
     private static string? ExtractProcessId(string processList, string templateTypeId)
