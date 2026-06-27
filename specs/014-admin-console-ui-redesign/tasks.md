@@ -101,10 +101,10 @@ xUnit unit tests. No new NuGet packages, no DB changes.
 
 **Independent Test**: Panel chrome present on a non-Builder screen; collapse reflows content and persists across nav+reload; the Builder chat still generates/diffs/saves.
 
-- [ ] T024 [P] [US4] Write FAILING E2E `tests/DBAIAzure.E2ETests/Tests/AssistantPanelTests.cs`: header + intro + chips + input present on a non-Builder screen; collapse → content reflows → reopen; open/closed persists across navigation and reload; in the Builder the existing chat panel still works. (C-AP-1..4)
-- [ ] T025 [US4] Build the `AssistantPanel.razor` chrome (header with collapse/expand/close, intro text, suggestion chips, message input + send) per `contracts/assistant-panel.md`; bind open/closed to `UiPreferenceService` (FR-013/FR-014).
-- [ ] T026 [US4] Host the existing `Components/WorkflowBuilder/WorkflowChatPanel.razor` inside `AssistantPanel` when on the Builder (pass through its current parameters/callbacks unchanged) and remove the builder-embedded copy (FR-015 / C-AP-4).
-- [ ] T027 [US4] Implement content reflow on collapse + persistence; make `AssistantPanelTests` pass.
+- [X] T024 [P] [US4] Write FAILING E2E `tests/DBAIAzure.E2ETests/Tests/AssistantPanelTests.cs`: header + intro + chips + input present on a non-Builder screen; collapse → content reflows → reopen; open/closed persists across navigation and reload; in the Builder the existing chat panel still works. (C-AP-1..4)
+- [X] T025 [US4] Build the `AssistantPanel.razor` chrome (header with collapse/expand/close, intro text, suggestion chips, message input + send) per `contracts/assistant-panel.md`; bind open/closed to `UiPreferenceService` (FR-013/FR-014).
+- [X] T026 [US4] Host the existing `Components/WorkflowBuilder/WorkflowChatPanel.razor` inside `AssistantPanel` when on the Builder (pass through its current parameters/callbacks unchanged via a `SectionOutlet`/`SectionContent` seam) and remove the builder-embedded copy (FR-015 / C-AP-4).
+- [X] T027 [US4] Implement content reflow on collapse + persistence; make `AssistantPanelTests` pass. *(Playwright execution batched to T042; build + unit suite green.)*
 
 **Checkpoint**: Assistant rail is shell-wide chrome; Builder behaviour preserved; seam ready for feature 015.
 

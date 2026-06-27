@@ -7,6 +7,7 @@
 @implements IDisposable
 @inject IOnboardingStateService Onboarding
 @inject ITooltipService Tooltip
+@inject IUiPreferenceService UiPreference
 @using DBAIAzure.Web.Services
 @using DBAIAzure.Web.Shared
 @using DBAIAzure.Web.Shared.Shell
@@ -35,9 +36,8 @@
         </main>
     </div>
 
-    <aside class="hidden xl:block w-80 shrink-0 border-l border-line bg-raised" data-testid="assistant-rail">
-        <AssistantPanel />
-    </aside>
+    @* Assistant rail owns its own width + collapse chrome (US4). *@
+    <AssistantPanel />
 </div>
 
 @* Field-tooltip portal: rendered at layout root with position:fixed so no parent overflow clips it. *@
@@ -67,6 +67,8 @@
         if (!firstRender) return;
         // localStorage + the LLM health check are only available after the first interactive render.
         await Onboarding.InitialiseAsync();
+        // Restore the visitor's saved text size + Assistant panel open/closed choice.
+        await UiPreference.InitialiseAsync();
         StateHasChanged();
     }
 

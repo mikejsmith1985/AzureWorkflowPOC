@@ -16,11 +16,14 @@
 @inject IWorkflowRealizationService RealizationService
 @inject IWorkflowReadinessService ReadinessService
 @inject IWorkflowPreRunValidator PreRunValidator
+@inject IUiPreferenceService UiPreference
 @using DBAIAzure.Core.Exceptions
 @using DBAIAzure.Core.Interfaces
 @using DBAIAzure.Core.Models
 @using DBAIAzure.Core.Models.NodeConfig
 @using System.Text.Json.Nodes
+@using Microsoft.AspNetCore.Components.Sections
+@using DBAIAzure.Web.Shared.Shell
 
 <PageTitle>@(string.IsNullOrWhiteSpace(_workflow?.Name) ? "Workflow Builder" : _workflow!.Name) — DBAIAzure</PageTitle>
 
@@ -33,7 +36,7 @@
                      IsSnapping="@(_canvas?.IsSnappingToGrid ?? true)"
                      CanRun="@CanRun"
                      IsTriggerMissing="@_isTriggerMissing"
-                     IsChatOpen="@_isChatOpen"
+                     IsChatOpen="@UiPreference.IsAssistantOpen"
                      LastSavedAt="@_lastSavedAt"
                      ExecutionTimeoutMinutes="@(_workflow?.Settings?.ExecutionTimeoutMinutes ?? 5)"
                      HasCanvasChangedSinceCodeGen="@_hasCanvasChangedSinceCodeGen"
@@ -123,19 +126,24 @@
                                   OnEditAccept="@OnEditAcceptRealization"
                                   OnCloseRequested="@(() => { _isRealizationPanelOpen = false; })" />
 
-        @* Chat panel — opens as a right sidebar when IsChatOpen is true *@
-        <WorkflowChatPanel @ref="_chatPanel"
-                           IsOpen="@_isChatOpen"
-                           Workflow="@_workflow"
-                           CodeGenerator="@CodeGenerator"
-                           AvailabilityMonitor="@AvailabilityMonitor"
-                           DesignSkillService="@DesignSkillService"
-                           DiffService="@CodeDiffService"
-                           OnCodeSaved="@OnCodeSaved"
-                           OnGenerationResultReady="@OnGenerationResultReadyAsync"
-                           OnCloseRequested="@(() => _isChatOpen = false)" />
     </div>
 </div>
+
+@* The code-assistant chat now lives in the shell-level Assistant rail (US4 / C-AP-4). It is fed there
+   through a Blazor section seam so this page keeps ownership of the panel's @ref + callbacks while the
+   rail merely hosts it. Open/closed is the shared rail state (UiPreferenceService). *@
+<SectionContent SectionName="@AssistantSections.BuilderChat">
+    <WorkflowChatPanel @ref="_chatPanel"
+                       IsOpen="@UiPreference.IsAssistantOpen"
+                       Workflow="@_workflow"
+                       CodeGenerator="@CodeGenerator"
+                       AvailabilityMonitor="@AvailabilityMonitor"
+                       DesignSkillService="@DesignSkillService"
+                       DiffService="@CodeDiffService"
+                       OnCodeSaved="@OnCodeSaved"
+                       OnGenerationResultReady="@OnGenerationResultReadyAsync"
+                       OnCloseRequested="@(() => UiPreference.SetAssistantOpenAsync(false))" />
+</SectionContent>
 
 @* Run input modal *@
 <WorkflowRunInputModal IsOpen="@_isRunModalOpen"
@@ -164,8 +172,9 @@
     private WorkflowNodeType? _draggedNodeType;
     private WorkflowNode? _configNode;
     private DateTimeOffset? _lastSavedAt;
-    private bool _isChatOpen;
     private bool _isSettingsOpen;
+    // A chat prompt waiting to be applied once the rail-hosted chat panel finishes mounting.
+    private string? _pendingChatSuggestion;
     private IDisposable? _locationChangingRegistration;
     private bool _isRunModalOpen;
     private string? _activeRunId;
@@ -236,6 +245,10 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Re-render the toolbar's chat indicator when the shared rail open/closed state changes
+        // (for example when the rail is collapsed from its own control).
+        UiPreference.OnChange += OnUiPreferenceChanged;
+
         // Load the owner's saved workflows once so we can both decide the landing behaviour and
         // de-duplicate the default name of any new workflow against what already exists.
         var existingWorkflows = await BuilderService.ListByOwnerAsync(DemoOwnerId);
@@ -320,6 +333,13 @@
     {
         if (isFirstRender && _isWorkflowPersisted && !_isRouteBound)
             await BindRouteToWorkflowAsync();
+
+        // Apply any chat prompt that was queued before the rail-hosted panel had mounted.
+        if (_pendingChatSuggestion is not null && _chatPanel is not null)
+        {
+            _chatPanel.PrePopulateInput(_pendingChatSuggestion);
+            _pendingChatSuggestion = null;
+        }
     }
 
     /// <summary>
@@ -556,14 +576,16 @@
         StateHasChanged();
     }
 
-    private void OnChatToggleClicked()
+    private async Task OnChatToggleClicked()
     {
-        _isChatOpen = !_isChatOpen;
+        // The chat now lives in the shared shell rail, so the toolbar toggle drives the same
+        // open/closed state the rail persists (UiPreferenceService).
+        var willOpen = !UiPreference.IsAssistantOpen;
+        await UiPreference.SetAssistantOpenAsync(willOpen);
         // FR-07.4: clear the orange dot as soon as the panel opens, regardless of
         // whether the user proceeds to regenerate code.
-        if (_isChatOpen)
+        if (willOpen)
             _hasCanvasChangedSinceCodeGen = false;
-        StateHasChanged();
     }
 
     private Task OnCodeSaved(string code)
@@ -851,17 +873,23 @@
             ExecutionOrchestrator.RequestStop(_activeRunId);
     }
 
-    private void OnNodeFeedbackRequested(NodeExecutionState nodeState)
+    private async Task OnNodeFeedbackRequested(NodeExecutionState nodeState)
     {
-        _isChatOpen = true;
-        // Pre-populate the chat with a context message about the failed/completed step (T056).
+        // Open the shared rail so the chat is visible, then seed it with a step-specific prompt (T056).
+        await UiPreference.SetAssistantOpenAsync(true);
         var stepLabel  = _workflow?.Nodes.FirstOrDefault(n => n.Id == nodeState.NodeId)?.Label ?? "this step";
         var statusWord = nodeState.Status == NodeStatus.Failed ? "failed" : "completed";
         var suggestion = $"The '{stepLabel}' step {statusWord}. "
             + (string.IsNullOrWhiteSpace(nodeState.OutputSummary)
                 ? "Can you suggest what to check or improve?"
                 : $"Output: {nodeState.OutputSummary}. Does this look correct?");
-        _chatPanel?.PrePopulateInput(suggestion);
+
+        // The panel may have only just been mounted into the rail; if its reference isn't ready,
+        // stash the prompt and apply it on the next render (OnAfterRenderAsync).
+        if (_chatPanel is not null)
+            _chatPanel.PrePopulateInput(suggestion);
+        else
+            _pendingChatSuggestion = suggestion;
         StateHasChanged();
     }
 
@@ -964,11 +992,14 @@
         StateHasChanged();
     }
 
+    private void OnUiPreferenceChanged() => InvokeAsync(StateHasChanged);
+
     public void Dispose()
     {
         BuilderService.WorkflowSaved -= OnAutoSaved;
         BuilderService.StopAutoSave();
         ExecutionOrchestrator.RunUpdated -= OnRunUpdated;
+        UiPreference.OnChange -= OnUiPreferenceChanged;
         _locationChangingRegistration?.Dispose();
     }
 }

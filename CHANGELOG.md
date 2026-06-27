@@ -34,6 +34,15 @@ feature (spec-015). Landing incrementally:
   the route; single-view sections show none. Active section/sub-view resolution is most-specific-prefix
   (with an alternate prefix so the intake run detail also maps to Monitor); 19 NavModel unit tests cover
   it. Every pre-redesign route resolves under a section (no orphans).
+- **Persistent, collapsible Assistant rail (US4)**: the right-hand `AssistantPanel` is now shell-wide
+  chrome on every screen — a header, intro, suggestion chips, and an input — that collapses to a compact
+  re-open strip (reclaiming the content width) and remembers its open/closed state across navigation and
+  reload via `UiPreferenceService` (now initialised on first render in both shell layouts). On the
+  Workflow Builder the rail hosts the existing `WorkflowChatPanel` through a Blazor `SectionOutlet`/
+  `SectionContent` seam, so the Builder keeps ownership of the panel's reference and callbacks while the
+  toolbar Chat toggle, the panel's close control, and the rail collapse all drive the one shared open
+  state. Generate/diff/save behaviour is unchanged; the seam is left open for the intelligent Assistant
+  (spec-015).
 
 ### Added — Admin Console UX: first-run onboarding + field tooltips (spec-009)
 
