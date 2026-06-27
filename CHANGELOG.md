@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Slack MCP token helper
+
+- `scripts/mint-slack-mcp-token.ps1` mints a Slack **user** OAuth token (`xoxp-`) for the Messaging
+  connector's MCP path. Slack's hosted MCP server (`mcp.slack.com`) requires a user token and does not
+  support automatic (DCR) OAuth, so the script runs the manual authorization-code flow once — opens the
+  consent screen, captures the redirect `code` on a loopback listener, exchanges it via
+  `oauth.v2.access`, and prints the token to paste into the connector's MCP Auth Token field. The client
+  secret is read from `$env:SLACK_CLIENT_SECRET` and never logged.
+
 ### Fixed — ADO telemetry preflight no longer emits a cryptic JSON error on bad credentials (spec-009)
 
 The startup ADO telemetry preflight surfaced `ADO process detection failed: '<' is an invalid start of a
