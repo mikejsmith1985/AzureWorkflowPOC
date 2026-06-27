@@ -91,7 +91,7 @@ cp src/DBAIAzure.Web/appsettings.json src/DBAIAzure.Web/appsettings.Development.
 ```
 
 Then open the new file and set your Anthropic credentials. All other sections can stay as
-placeholder values — they are configured later through the in-app connector dialog:
+placeholder values — they are configured later through the in-app Connectors UI:
 
 ```json
 {
@@ -135,8 +135,8 @@ The SQLite database (`pipeline.db`) is created automatically on first startup vi
 
 ### 6. Configure connectors (first-time only)
 
-Click the **⚙ gear icon** in the top-right of the **Threads** page (the home page at `/`).
-The connector dialog lists every integration. For each connector you want active:
+Open the **Connectors** page from the main navigation (Configuration → Connectors). The
+connector list shows every integration. For each connector you want active:
 
 1. Click the connector card to open its configuration panel.
 2. Enter credentials (API keys and secrets are encrypted at rest — they never appear in logs or
@@ -154,13 +154,15 @@ HITL notifications, and real ticket reads respectively.
 
 ### 7. Run the default intake pipeline
 
-Navigate to **Threads** (the home page at `/`) and submit a ticket via **+ New Thread**. The
-two built-in demo tickets are:
+**From the web UI**
+
+Navigate to **Threads** (the home page at `/`, under Monitor) and submit a ticket via
+**+ New Thread**. The two built-in demo tickets are:
 
 | Ticket | Description | Expected path |
 |--------|-------------|---------------|
 | INC0001001 | Well-formed ticket with clear scope | Happy path → DoR check → Fibonacci estimate → mock Jira URL |
-| INC0001002 | Vague: "Fix the thing with login" | Gap analysis → HITL pause → web input → re-validation |
+| INC0001002 | Vague: "Fix the thing with login" | Gap analysis → HITL pause → console/web input → re-validation |
 
 **From the console runner (no browser required)**
 
