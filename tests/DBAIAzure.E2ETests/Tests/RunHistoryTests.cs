@@ -47,15 +47,12 @@ public sealed class RunHistoryTests : E2ETestBase
         // not an unhandled exception page.
         await NavigateAsync("/runs/unknown-run-id-that-does-not-exist");
 
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        // The detail page always renders the "← Run History" back-link; wait for it so we assert on the
+        // hydrated page rather than racing the interactive render (the prior networkidle snapshot flaked).
+        await Assertions.Expect(Page.Locator("text=← Run History")).ToBeVisibleAsync();
+
         var bodyText = await Page.InnerTextAsync("body");
-
         Assert.DoesNotContain("An unhandled error has occurred", bodyText, StringComparison.OrdinalIgnoreCase);
-
-        // The page shows a "not found" indicator (either the explicit message or the back-link).
-        var hasNotFound  = bodyText.Contains("not found", StringComparison.OrdinalIgnoreCase);
-        var hasBackLink  = await Page.Locator("text=← Run History").CountAsync() > 0;
-        Assert.True(hasNotFound || hasBackLink, "Expected a not-found indicator on the detail page.");
     }
 
     [Fact]

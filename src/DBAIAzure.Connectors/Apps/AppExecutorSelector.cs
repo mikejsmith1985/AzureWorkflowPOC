@@ -29,8 +29,19 @@ public static class AppExecutorSelector
         try
         {
             var candidate = new DockerClientConfiguration().CreateClient();
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-            candidate.System.PingAsync(cts.Token).GetAwaiter().GetResult();
+
+            // Docker.DotNet's ping can block at the OS connect layer (for example a missing Windows
+            // named pipe when no engine is installed) WITHOUT honoring a CancellationToken, which
+            // previously stalled the first /apps render for ~20s. Run the ping on a worker task and
+            // enforce a hard wall-clock cap with Wait: if it has not completed successfully in time we
+            // abandon it (it is GC-reclaimed when its native call returns) and treat Docker as
+            // unavailable, falling back to the simulated executor.
+            var ping = Task.Run(() => candidate.System.PingAsync());
+            if (!ping.Wait(ProbeTimeout) || !ping.IsCompletedSuccessfully)
+            {
+                return false;
+            }
+
             client = candidate;
             return true;
         }
@@ -39,4 +50,7 @@ public static class AppExecutorSelector
             return false;
         }
     }
+
+    /// <summary>Hard upper bound on the Docker reachability probe so it never blocks page rendering.</summary>
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
 }

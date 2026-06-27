@@ -16,11 +16,11 @@
     @* Header *@
     <div class="flex items-center justify-between mb-6">
         <div>
-            <h1 class="text-xl font-bold text-gray-100">My Workflows</h1>
-            <p class="text-sm text-gray-500 mt-0.5">Your saved workflow definitions</p>
+            <h1 class="text-xl font-bold text-fg">My Workflows</h1>
+            <p class="text-sm text-muted mt-0.5">Your saved workflow definitions</p>
         </div>
         <a href="/workflow-builder/new"
-           class="bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+           class="bg-accent hover:opacity-90 text-onaccent px-4 py-2 rounded-lg text-sm font-medium transition-colors"
            aria-label="Create a new workflow">
             New Workflow
         </a>
@@ -34,17 +34,17 @@
                    value="@_searchText"
                    @oninput="OnSearchInput"
                    placeholder="Search workflows by name or step type…"
-                   class="w-full max-w-sm bg-gray-800 border border-gray-700 rounded-lg px-3 py-2
-                          text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+                   class="w-full max-w-sm bg-raised border border-line rounded-lg px-3 py-2
+                          text-sm text-fg placeholder-muted focus:outline-none focus:border-accent"
                    aria-label="Filter workflows by name or step type" />
             @if (!string.IsNullOrWhiteSpace(_searchText) && FilteredWorkflows.Count == 0)
             {
-                <p class="text-xs text-gray-500 mt-2 flex items-center gap-2">
-                    <span>No workflows match "<span class="text-gray-300">@_searchText</span>".</span>
+                <p class="text-xs text-muted mt-2 flex items-center gap-2">
+                    <span>No workflows match "<span class="text-fg">@_searchText</span>".</span>
                     @* FR-09.3: explicit Clear search button so the action is keyboard-accessible
                        and visible regardless of browser support for the native type="search" clear control. *@
                     <button @onclick="@(() => _searchText = string.Empty)"
-                            class="text-cyan-500 hover:text-cyan-300 underline text-xs transition-colors"
+                            class="text-accent hover:text-accent underline text-xs transition-colors"
                             aria-label="Clear search and show all workflows">
                         Clear search
                     </button>
@@ -56,19 +56,19 @@
     @* Loading state *@
     @if (_isLoading)
     {
-        <div class="text-center py-16 text-gray-500 text-sm">Loading workflows…</div>
+        <div class="text-center py-16 text-muted text-sm">Loading workflows…</div>
     }
     else if (_workflows.Count == 0)
     {
         @* Empty state *@
         <div class="text-center py-20 flex flex-col items-center gap-4">
             <span class="text-5xl" role="img" aria-label="empty">🗂️</span>
-            <div class="text-gray-400 text-base font-medium">No workflows yet</div>
-            <p class="text-gray-500 text-sm max-w-xs">
+            <div class="text-muted text-base font-medium">No workflows yet</div>
+            <p class="text-muted text-sm max-w-xs">
                 Build your first workflow by dragging steps onto the canvas.
             </p>
             <a href="/workflow-builder"
-               class="bg-cyan-700 hover:bg-cyan-600 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors mt-2"
+               class="bg-accent hover:opacity-90 text-onaccent px-5 py-2 rounded-lg text-sm font-medium transition-colors mt-2"
                aria-label="Open the workflow builder">
                 Start Building
             </a>
@@ -91,7 +91,7 @@
     @* Error banner *@
     @if (_errorMessage is not null)
     {
-        <div class="mt-4 bg-red-900/40 border border-red-700/50 rounded-lg px-4 py-3 text-sm text-red-300"
+        <div class="mt-4 bg-err-subtle border border-err rounded-lg px-4 py-3 text-sm text-err"
              role="alert">
             @_errorMessage
         </div>

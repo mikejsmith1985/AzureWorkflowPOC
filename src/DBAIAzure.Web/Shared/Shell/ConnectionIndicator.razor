@@ -1,0 +1,55 @@
+@* Top-bar connection/status indicator (spec-014, US5): shows whether the Blazor SignalR circuit is
+   connected and names the host it is connected to (FR-019). It mirrors the circuit's own reconnect
+   overlay — a JS monitor reports show/hide of that overlay back to this component — so the badge is
+   accurate without polling. *@
+@implements IDisposable
+@inject NavigationManager Nav
+@inject IJSRuntime JsRuntime
+
+<div class="flex items-center gap-1.5 text-xs"
+     data-testid="connection-indicator"
+     data-connected="@(_isConnected ? "true" : "false")"
+     title="@(_isConnected ? $"Connected to {_host}" : $"Reconnecting to {_host}…")">
+    <span class="inline-block h-2 w-2 rounded-full @(_isConnected ? "bg-ok" : "bg-err")" aria-hidden="true"></span>
+    <span class="@(_isConnected ? "text-muted" : "text-err")">
+        @(_isConnected ? "Connected" : "Reconnecting…")
+    </span>
+    <span class="text-muted hidden sm:inline">· @_host</span>
+</div>
+
+@code {
+    private bool _isConnected = true;
+    private string _host = string.Empty;
+    private DotNetObjectReference<ConnectionIndicator>? _selfRef;
+
+    protected override void OnInitialized()
+    {
+        // The host the user is actually connected to (host:port), taken from the base URI.
+        _host = new Uri(Nav.BaseUri).Authority;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        // Start the JS monitor once interactive; it calls back whenever the reconnect overlay toggles.
+        _selfRef = DotNetObjectReference.Create(this);
+        await JsRuntime.InvokeVoidAsync("connectionMonitor.start", _selfRef);
+    }
+
+    /// <summary>Invoked from JS when the circuit's reconnect overlay is shown (down) or hidden (up).</summary>
+    [JSInvokable]
+    public Task OnConnectionStateChanged(bool isConnected)
+    {
+        if (isConnected == _isConnected) return Task.CompletedTask;
+        _isConnected = isConnected;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        // Best-effort: stop the observer and release the .NET reference. The JS call may no-op if the
+        // circuit is already tearing down, which is fine — the page is going away.
+        _ = JsRuntime.InvokeVoidAsync("connectionMonitor.stop");
+        _selfRef?.Dispose();
+    }
+}

@@ -1,0 +1,44 @@
+@* Minimal 16px line icon for a sidebar section, selected by NavSection.Icon. A generic glyph backs
+   any unmapped key so the sidebar never renders a blank row. *@
+<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+     stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    @switch (Key)
+    {
+        case "activity":
+            <polyline points="2,9 6,9 8,3 12,16 14,9 18,9" />
+            break;
+        case "inbox":
+            <path d="M2 12h4l2 3h4l2-3h4" />
+            <path d="M2 12 5 4h10l3 8" />
+            break;
+        case "workflow":
+            <rect x="2" y="3" width="6" height="5" rx="1" />
+            <rect x="12" y="12" width="6" height="5" rx="1" />
+            <path d="M5 8v3h7" />
+            break;
+        case "sliders":
+            <line x1="3" y1="6" x2="17" y2="6" />
+            <line x1="3" y1="14" x2="17" y2="14" />
+            <circle cx="8" cy="6" r="2" />
+            <circle cx="13" cy="14" r="2" />
+            break;
+        case "grid":
+            <rect x="3" y="3" width="6" height="6" rx="1" />
+            <rect x="11" y="3" width="6" height="6" rx="1" />
+            <rect x="3" y="11" width="6" height="6" rx="1" />
+            <rect x="11" y="11" width="6" height="6" rx="1" />
+            break;
+        case "book":
+            <path d="M4 4h9a2 2 0 0 1 2 2v10H6a2 2 0 0 0-2 2z" />
+            <path d="M4 4v14" />
+            break;
+        default:
+            <circle cx="10" cy="10" r="6" />
+            break;
+    }
+</svg>
+
+@code {
+    /// <summary>The NavSection.Icon key selecting which glyph to render.</summary>
+    [Parameter] public string Key { get; set; } = "";
+}

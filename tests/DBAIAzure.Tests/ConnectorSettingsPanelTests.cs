@@ -41,8 +41,9 @@ public sealed class ConnectorSettingsPanelTests : TestContext
         var cut = RenderComponent<ConnectorSettings>();
         await cut.InvokeAsync(() => Task.CompletedTask);
 
-        // Three Edit buttons — one per connector card.
-        var editButtons = cut.FindAll("button[class*='gray-7']");
+        // Three Edit buttons — one per connector card. Select by text rather than the colour class,
+        // which is now a semantic token after the spec-014 restyle.
+        var editButtons = cut.FindAll("button").Where(b => b.TextContent.Trim() == "Edit").ToList();
         Assert.Equal(3, editButtons.Count);
     }
 

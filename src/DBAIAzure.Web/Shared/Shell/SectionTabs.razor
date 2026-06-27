@@ -1,0 +1,42 @@
+@* Per-section sub-tab strip. When the active section (derived from the current route via NavModel)
+   exposes more than one view, those views render here as sub-tabs with the active one highlighted.
+   Sections that map to a single screen render nothing. Both the AppShell and the Builder layout host
+   this so navigation is consistent everywhere. *@
+@using DBAIAzure.Web.Navigation
+@using Microsoft.AspNetCore.Components.Routing
+@implements IDisposable
+@inject NavigationManager Nav
+
+@{
+    var active = NavModel.ActiveSection(CurrentPath);
+}
+@if (active is { HasSubTabs: true })
+{
+    <nav class="flex items-center gap-1 border-b border-line px-2" aria-label="@(active.Label) views" data-testid="section-tabs">
+        @foreach (var sub in active.SubViews)
+        {
+            <a href="@sub.Route"
+               data-testid="subtab-@Slug(sub.Route)"
+               aria-current="@(IsActive(sub) ? "page" : null)"
+               class="px-3 py-2 text-sm border-b-2 -mb-px transition-colors @(IsActive(sub) ? "border-accent text-accent font-medium" : "border-transparent text-muted hover:text-fg")">
+                @sub.Label
+            </a>
+        }
+    </nav>
+}
+
+@code {
+    private string CurrentPath => new Uri(Nav.Uri).AbsolutePath;
+
+    protected override void OnInitialized() => Nav.LocationChanged += OnLocationChanged;
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+
+    private bool IsActive(NavSubView sub) => NavModel.ActiveSubView(CurrentPath)?.Route == sub.Route;
+
+    /// <summary>A stable test/dom slug for a route ("/" → "home", "/workflow-builder" → "workflow-builder").</summary>
+    private static string Slug(string route) =>
+        route == "/" ? "home" : route.Trim('/').Replace('/', '-');
+}

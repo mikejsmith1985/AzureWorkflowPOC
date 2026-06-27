@@ -1,0 +1,86 @@
+@* Admin Console app shell — the persistent frame around every screen: a left sidebar (collapsing to
+   an icon rail below lg), a global top bar, the routed content region, and a right-hand Assistant
+   rail. Built on semantic design tokens. This is the default layout for all pages except the Workflow
+   Builder, which uses a full-bleed variant of the same chrome. Absorbs the first-run onboarding banner
+   and the field-tooltip portal that previously lived in MainLayout. *@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject IOnboardingStateService Onboarding
+@inject ITooltipService Tooltip
+@inject IUiPreferenceService UiPreference
+@using DBAIAzure.Web.Services
+@using DBAIAzure.Web.Shared
+@using DBAIAzure.Web.Shared.Shell
+@using DBAIAzure.Web.Components.Settings
+
+<div class="flex min-h-screen bg-app text-fg">
+    <aside class="w-14 lg:w-60 shrink-0 border-r border-line bg-raised" data-testid="app-sidebar">
+        <SidebarNav />
+    </aside>
+
+    <div class="flex-1 flex flex-col min-w-0">
+        <header class="h-14 shrink-0 border-b border-line bg-raised flex items-center px-4" data-testid="app-topbar">
+            <TopBar />
+        </header>
+
+        @* First-run onboarding banner — renders itself only when the LLM connector isn't healthy yet. *@
+        <OnboardingBanner />
+
+        @* Per-section sub-tabs (renders only when the active section has more than one view). *@
+        <SectionTabs />
+
+        <main class="flex-1 overflow-auto p-6">
+            <div class="max-w-6xl mx-auto w-full">
+                @Body
+            </div>
+        </main>
+    </div>
+
+    @* Assistant rail owns its own width + collapse chrome (US4). *@
+    <AssistantPanel />
+</div>
+
+@* Field-tooltip portal: rendered at layout root with position:fixed so no parent overflow clips it. *@
+@if (Tooltip.Active is { } tip)
+{
+    <div class="fixed z-[9999] max-w-xs pointer-events-none"
+         data-testid="field-tooltip"
+         style="left:@Px(tip.Anchor.Left); @VerticalStyle(tip)">
+        <div class="rounded-lg border border-line bg-raised shadow-xl px-3 py-2">
+            <p class="text-xs text-fg">@tip.Content</p>
+            @if (!string.IsNullOrWhiteSpace(tip.Example))
+            {
+                <p class="text-[11px] text-muted mt-1"><span class="text-muted">e.g.</span> @tip.Example</p>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    // Gap in pixels between the anchor icon and the tooltip panel.
+    private const double TooltipGapPx = 8;
+
+    protected override void OnInitialized() => Tooltip.OnChange += OnTooltipChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        // localStorage + the LLM health check are only available after the first interactive render.
+        await Onboarding.InitialiseAsync();
+        // Restore the visitor's saved text size + Assistant panel open/closed choice.
+        await UiPreference.InitialiseAsync();
+        StateHasChanged();
+    }
+
+    private void OnTooltipChanged() => InvokeAsync(StateHasChanged);
+
+    private static string Px(double value) => $"{value.ToString(System.Globalization.CultureInfo.InvariantCulture)}px";
+
+    /// <summary>Positions the panel below the icon when it flips below, otherwise above it.</summary>
+    private static string VerticalStyle(TooltipContext tip) =>
+        tip.ShowBelow
+            ? $"top:{Px(tip.Anchor.Bottom + TooltipGapPx)}"
+            : $"bottom:{Px(tip.Anchor.ViewportHeight - tip.Anchor.Top + TooltipGapPx)}";
+
+    public void Dispose() => Tooltip.OnChange -= OnTooltipChanged;
+}

@@ -1,13 +1,14 @@
 // Validates that every navigation tab in the app loads without a Blazor error.
 // These are the tests that would have caught "none of the tabs will open."
+using System.Text.RegularExpressions;
 using DBAIAzure.E2ETests.Infrastructure;
 using Microsoft.Playwright;
 
 namespace DBAIAzure.E2ETests.Tests;
 
 /// <summary>
-/// End-to-end tests that verify every navigation link in MainLayout loads its target page
-/// and that Blazor's SignalR connection is established (no reconnect overlay).
+/// End-to-end tests that verify every primary destination in the Admin Console shell loads its
+/// target page and that Blazor's SignalR connection is established (no reconnect overlay).
 /// </summary>
 public sealed class NavigationTests : E2ETestBase
 {
@@ -38,15 +39,15 @@ public sealed class NavigationTests : E2ETestBase
     }
 
     [Fact]
-    public async Task GraphTab_Loads_NoBlazorError()
+    public async Task GraphRoute_Redirects_ToWorkflowBuilder_NoBlazorError()
     {
-        await NavigateAsync("/graph");
+        // The standalone Graph page is retired (spec-014 US2); /graph now redirects to the Builder,
+        // which renders the loaded workflow's own graph. The old route must never 404 or error.
+        await Page.GotoAsync("/graph");
 
-        // The graph page renders a Mermaid diagram or an empty-state message.
-        // Either way the body must contain visible content, not a Blazor error.
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        // Client-side redirect — poll the URL instead of waiting on a "load" event that never fires.
+        await Assertions.Expect(Page).ToHaveURLAsync(new Regex("/workflow-builder"));
         var bodyText = await Page.InnerTextAsync("body");
-
         Assert.DoesNotContain("An unhandled error has occurred", bodyText, StringComparison.OrdinalIgnoreCase);
         Assert.True(await IsBlazorConnectedAsync());
     }
@@ -98,27 +99,29 @@ public sealed class NavigationTests : E2ETestBase
     }
 
     [Fact]
-    public async Task NavLinks_AllPresent_InHeader()
+    public async Task SidebarSections_AllPresent_AndNoGraphEntry()
     {
         await NavigateAsync("/");
 
-        // Verify all four nav items exist so a future rename doesn't silently break routing.
-        var nav = Page.Locator("nav");
-        await Assertions.Expect(nav.GetByText("Threads")).ToBeVisibleAsync();
-        await Assertions.Expect(nav.GetByText("Graph")).ToBeVisibleAsync();
-        await Assertions.Expect(nav.GetByText("New Ticket")).ToBeVisibleAsync();
-        await Assertions.Expect(nav.GetByText("Workflow Builder")).ToBeVisibleAsync();
+        // The flat top-nav is replaced by the grouped sidebar (spec-014 US1/US3). Verify the five
+        // canonical sections + the separated User Guide are present, and the retired Graph entry is not.
+        foreach (var sectionKey in new[] { "monitor", "review", "automation", "configuration", "repos", "guide" })
+        {
+            await Assertions.Expect(Page.Locator($"[data-testid='nav-{sectionKey}']")).ToBeVisibleAsync();
+        }
+
+        Assert.Equal(0, await Page.Locator("[data-testid='nav-graph']").CountAsync());
     }
 
     [Fact]
-    public async Task NavLink_WorkflowBuilder_ClickNavigatesToBuilder()
+    public async Task SidebarAutomation_ClickNavigatesToBuilder()
     {
         await NavigateAsync("/");
 
-        await Page.Locator("nav a:has-text('Workflow Builder')").ClickAsync();
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        // The Automation section's primary route is the Workflow Builder (client-side navigation).
+        await Page.Locator("[data-testid='nav-automation']").ClickAsync();
 
-        Assert.Contains("/workflow-builder", Page.Url, StringComparison.OrdinalIgnoreCase);
+        await Assertions.Expect(Page).ToHaveURLAsync(new Regex("/workflow-builder"));
         Assert.True(await IsBlazorConnectedAsync());
     }
 }

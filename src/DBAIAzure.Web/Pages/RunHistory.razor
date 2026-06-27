@@ -5,8 +5,8 @@
 @using DBAIAzure.Core.Models
 
 <div class="flex items-center justify-between mb-6">
-    <h1 class="text-xl font-semibold text-gray-100">Run History</h1>
-    <span class="text-sm text-gray-400">@_runs.Count total</span>
+    <h1 class="text-xl font-semibold text-fg">Run History</h1>
+    <span class="text-sm text-muted">@_runs.Count total</span>
 </div>
 
 <!-- ── Search + filter ─────────────────────────────────────────────────── -->
@@ -14,12 +14,12 @@
     <input type="search"
            placeholder="Search workflow name or run ID…"
            @bind="_search" @bind:event="oninput" @bind:after="ApplyFilter"
-           class="flex-1 min-w-48 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm
-                  text-gray-100 placeholder-gray-600 focus:outline-none focus:border-cyan-500" />
+           class="flex-1 min-w-48 bg-surface border border-line rounded px-3 py-2 text-sm
+                  text-fg placeholder-muted focus:outline-none focus:border-accent" />
 
     <select @bind="_statusFilter" @bind:after="ApplyFilter"
-            class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300
-                   focus:outline-none focus:border-cyan-500">
+            class="bg-surface border border-line rounded px-3 py-2 text-sm text-fg
+                   focus:outline-none focus:border-accent">
         <option value="">All Statuses</option>
         @foreach (WorkflowRunStatus s in Enum.GetValues<WorkflowRunStatus>())
         {
@@ -31,18 +31,18 @@
 <!-- ── Run list table ─────────────────────────────────────────────────── -->
 @if (_loading)
 {
-    <div class="text-gray-500 text-sm">Loading…</div>
+    <div class="text-muted text-sm">Loading…</div>
 }
 else if (_filtered.Count == 0)
 {
-    <div class="text-gray-500 text-sm">No runs match the current filter.</div>
+    <div class="text-muted text-sm">No runs match the current filter.</div>
 }
 else
 {
     <div class="overflow-x-auto">
         <table class="w-full text-sm">
             <thead>
-                <tr class="text-left text-xs text-gray-500 border-b border-gray-800">
+                <tr class="text-left text-xs text-muted border-b border-line">
                     <th class="pb-2 pr-4 font-medium">Workflow</th>
                     <th class="pb-2 pr-4 font-medium">Run ID</th>
                     <th class="pb-2 pr-4 font-medium">Status</th>
@@ -54,21 +54,21 @@ else
             <tbody>
                 @foreach (var run in _filtered)
                 {
-                    <tr class="border-b border-gray-800 hover:bg-gray-900 transition-colors">
-                        <td class="py-3 pr-4 text-gray-100 font-medium truncate max-w-48">@run.WorkflowName</td>
-                        <td class="py-3 pr-4 font-mono text-gray-400 text-xs">@run.RunId</td>
+                    <tr class="border-b border-line hover:bg-surface transition-colors">
+                        <td class="py-3 pr-4 text-fg font-medium truncate max-w-48">@run.WorkflowName</td>
+                        <td class="py-3 pr-4 font-mono text-muted text-xs">@run.RunId</td>
                         <td class="py-3 pr-4">
                             <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium @StatusClass(run.Status)">
                                 @run.Status
                             </span>
                         </td>
-                        <td class="py-3 pr-4 text-gray-400 text-xs whitespace-nowrap">
+                        <td class="py-3 pr-4 text-muted text-xs whitespace-nowrap">
                             @run.StartedAt.ToLocalTime().ToString("MMM d HH:mm")
                         </td>
-                        <td class="py-3 pr-4 text-gray-400 text-xs">@FormatDuration(run)</td>
+                        <td class="py-3 pr-4 text-muted text-xs">@FormatDuration(run)</td>
                         <td class="py-3">
                             <a href="/runs/@run.RunId"
-                               class="text-xs text-cyan-400 hover:text-cyan-300 transition-colors">
+                               class="text-xs text-accent hover:text-accent transition-colors">
                                 Details →
                             </a>
                         </td>
@@ -108,13 +108,13 @@ else
 
     private static string StatusClass(WorkflowRunStatus status) => status switch
     {
-        WorkflowRunStatus.Running    => "bg-blue-900 text-blue-300",
-        WorkflowRunStatus.Paused     => "bg-yellow-900 text-yellow-300",
-        WorkflowRunStatus.Completed  => "bg-green-900 text-green-300",
-        WorkflowRunStatus.Failed     => "bg-red-900 text-red-300",
-        WorkflowRunStatus.TimedOut   => "bg-orange-900 text-orange-300",
-        WorkflowRunStatus.Cancelled  => "bg-gray-800 text-gray-400",
-        _                            => "bg-gray-800 text-gray-400",
+        WorkflowRunStatus.Running    => "bg-accent-subtle text-accent",
+        WorkflowRunStatus.Paused     => "bg-warn-subtle text-warn",
+        WorkflowRunStatus.Completed  => "bg-ok-subtle text-ok",
+        WorkflowRunStatus.Failed     => "bg-err-subtle text-err",
+        WorkflowRunStatus.TimedOut   => "bg-warn-subtle text-warn",
+        WorkflowRunStatus.Cancelled  => "bg-raised text-muted",
+        _                            => "bg-raised text-muted",
     };
 
     private static string FormatDuration(WorkflowRunRecord run)
