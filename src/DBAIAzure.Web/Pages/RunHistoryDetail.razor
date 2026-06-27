@@ -137,11 +137,14 @@ else
         _run = await RunRepository.GetAsync(RunId);
 
         await using var db = await DbFactory.CreateDbContextAsync();
-        _events = await db.WorkflowExecutionEvents
-            .AsNoTracking()
-            .Where(e => e.RunId == RunId)
+        // Order on the client: SQLite cannot translate an ORDER BY over a DateTimeOffset column, so we
+        // materialise the run's events first and then sort them in memory (same chronological order).
+        _events = (await db.WorkflowExecutionEvents
+                .AsNoTracking()
+                .Where(e => e.RunId == RunId)
+                .ToListAsync())
             .OrderBy(e => e.OccurredAt)
-            .ToListAsync();
+            .ToList();
 
         _totalInputTokens  = _events.Sum(e => e.LlmInputTokens  ?? 0);
         _totalOutputTokens = _events.Sum(e => e.LlmOutputTokens ?? 0);

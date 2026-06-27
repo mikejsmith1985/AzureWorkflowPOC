@@ -1,5 +1,6 @@
 // E2E coverage for grouped sub-tabs (feature 014, US3): a multi-view section renders its sub-tabs
 // with the active one highlighted, and switching tabs navigates. Run via scripts/run-e2e.ps1.
+using System.Text.RegularExpressions;
 using DBAIAzure.E2ETests.Infrastructure;
 using Microsoft.Playwright;
 
@@ -25,14 +26,16 @@ public sealed class SectionTabsTests : E2ETestBase
     }
 
     [Fact]
-    public async Task SubTab_Navigates_ToGallery()
+    public async Task SubTab_Navigates_BetweenAutomationViews()
     {
-        await NavigateAsync("/workflow-builder");
+        // Start on the Gallery (no unsaved-changes nav guard, unlike the Builder) and switch to the
+        // Builder sub-tab. Sub-tab navigation is client-side (no "load" event), so poll the URL.
+        await NavigateAsync("/workflow-gallery");
 
-        await Page.Locator("[data-testid='subtab-workflow-gallery']").ClickAsync();
-        await Page.WaitForURLAsync("**/workflow-gallery");
+        await Page.Locator("[data-testid='subtab-workflow-builder']").ClickAsync();
 
-        await Assertions.Expect(Page.Locator("[data-testid='subtab-workflow-gallery'][aria-current='page']")).ToBeVisibleAsync();
+        await Assertions.Expect(Page).ToHaveURLAsync(new Regex("/workflow-builder"));
+        await Assertions.Expect(Page.Locator("[data-testid='subtab-workflow-builder'][aria-current='page']")).ToBeVisibleAsync();
     }
 
     [Fact]

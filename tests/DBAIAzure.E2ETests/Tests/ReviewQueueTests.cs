@@ -45,11 +45,10 @@ public sealed class ReviewQueueTests : E2ETestBase
     [Fact]
     public async Task ReviewQueue_NavigationFromMainNav_ReachesPage()
     {
-        // Verify the nav link in MainLayout reaches the review queue page.
+        // Verify the sidebar entry reaches the review queue page (grouped IA, spec-014).
         await NavigateAsync("/");
 
-        var navLink = Page.Locator("nav a", new() { HasTextString = "Review Queue" });
-        await navLink.ClickAsync();
+        await Page.Locator("[data-testid='nav-review']").ClickAsync();
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
         var heading = Page.Locator("h1", new() { HasTextString = "Review Queue" });

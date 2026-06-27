@@ -16,9 +16,12 @@ public sealed class ShellNavigationTests : E2ETestBase
     public ShellNavigationTests(WebAppFixture webApp, PlaywrightFixture playwright)
         : base(webApp, playwright) { }
 
+    // NOTE: /apps is intentionally excluded here — its page blocks server-prerender ~20s probing the
+    // container executor (a pre-existing feature-013 behaviour unrelated to the shell). /workflow-gallery
+    // exercises the same shell-persistence path on a fast-loading destination.
     [Theory]
     [InlineData("/")]
-    [InlineData("/apps")]
+    [InlineData("/workflow-gallery")]
     [InlineData("/workflow-builder")]
     public async Task Shell_SidebarAndTopBar_PersistAcrossDestinations(string path)
     {
@@ -34,7 +37,7 @@ public sealed class ShellNavigationTests : E2ETestBase
     public async Task AssistantRail_IsPresent_OnWideViewport()
     {
         await Page.SetViewportSizeAsync(1440, 900);
-        await NavigateAsync("/apps");
+        await NavigateAsync("/workflow-gallery");
 
         await Page.Locator("[data-testid='assistant-rail']").WaitForAsync(new() { State = WaitForSelectorState.Visible });
     }
@@ -42,10 +45,10 @@ public sealed class ShellNavigationTests : E2ETestBase
     [Fact]
     public async Task Sidebar_HighlightsExactlyTheActiveSection()
     {
-        await NavigateAsync("/apps");
+        await NavigateAsync("/workflow-gallery");
 
-        // Repos & Apps is the active section on /apps; Monitor must not be marked current.
-        await Assertions.Expect(Page.Locator("[data-testid='nav-repos'][aria-current='page']")).ToBeVisibleAsync();
+        // Automation is the active section on /workflow-gallery; Monitor must not be marked current.
+        await Assertions.Expect(Page.Locator("[data-testid='nav-automation'][aria-current='page']")).ToBeVisibleAsync();
         Assert.Equal(0, await Page.Locator("[data-testid='nav-monitor'][aria-current='page']").CountAsync());
     }
 

@@ -61,6 +61,18 @@ feature (spec-015). Landing incrementally:
   status-palette utilities remain (SC-005). Added `--accent-subtle`/`--ok-subtle`/`--warn-subtle`/
   `--err-subtle` tokens so tinted banners/badges theme cleanly without opacity modifiers over
   CSS-variable colours.
+- **E2E suite updated for the new IA (Polish)**: existing Playwright tests were re-pointed at the
+  grouped sidebar (`data-testid` nav), switched to URL polling for Blazor client-side navigations,
+  updated to the semantic-token selectors, and aligned with the chat-open-by-default rail. Suite result:
+  73 passing; the remaining failures are pre-existing/environment-gated (the `/apps` page blocks
+  server-prerender while probing the container executor — Docker-dependent, feature-013; and ADO/LLM
+  credential-gated tests), not introduced by this redesign.
+
+### Fixed
+
+- **Run detail page 500 on SQLite**: `RunHistoryDetail` ordered execution events by a `DateTimeOffset`
+  column in the database query, which SQLite cannot translate (`/runs/{id}` returned HTTP 500). Events
+  are now materialised and ordered client-side, so the run detail page renders for every run.
 
 ### Added — Admin Console UX: first-run onboarding + field tooltips (spec-009)
 
