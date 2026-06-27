@@ -1,0 +1,117 @@
+@* Right-hand Assistant rail — shell-wide chrome present on every screen. US4 makes it collapsible
+   and persistent (open/closed remembered in localStorage via UiPreferenceService) and, on the
+   Workflow Builder, hosts the existing code-assistant chat through a Blazor section seam so the
+   Builder keeps ownership of that panel's references and callbacks. Outside the Builder it shows
+   static chrome — intro, suggestion chips, an inert input — leaving the seam open for feature 015
+   to make it intelligent. *@
+@implements IDisposable
+@inject IUiPreferenceService UiPreference
+@inject NavigationManager Nav
+@using Microsoft.AspNetCore.Components.Sections
+@using DBAIAzure.Web.Services
+@using DBAIAzure.Web.Shared.Shell
+
+@if (UiPreference.IsAssistantOpen)
+{
+    @if (_isBuilderRoute)
+    {
+        @* On the Builder the rail IS the existing code-assistant chat (C-AP-4). That panel renders its
+           own header + close control (wired to collapse the rail), so no extra chrome is layered on. *@
+        <div class="hidden xl:block shrink-0" aria-label="Assistant" data-testid="assistant-rail">
+            <div class="h-full" data-testid="assistant-panel">
+                <SectionOutlet SectionName="@AssistantSections.BuilderChat" />
+            </div>
+        </div>
+    }
+    else
+    {
+        <aside class="hidden xl:flex flex-col w-80 shrink-0 border-l border-line bg-raised"
+               aria-label="Assistant" data-testid="assistant-rail">
+            <div class="flex flex-col h-full min-h-0" data-testid="assistant-panel">
+                @* Header: identity + collapse control. *@
+                <div class="flex items-center gap-2 px-4 py-3 border-b border-line shrink-0">
+                    <span class="inline-flex h-6 w-6 items-center justify-center rounded bg-accent text-onaccent text-[11px] font-bold">AI</span>
+                    <span class="text-sm font-semibold text-fg flex-1">Assistant</span>
+                    <button type="button" @onclick="CollapseAsync"
+                            data-testid="assistant-collapse"
+                            class="text-muted hover:text-fg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--focus-ring)] rounded"
+                            aria-label="Collapse assistant panel" title="Collapse">»</button>
+                </div>
+
+                @* Static chrome everywhere outside the Builder (C-AP-1 / C-AP-5). *@
+                <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3 text-sm">
+                    <p class="text-muted" data-testid="assistant-intro">
+                        Describe what you want to build — an agent or a workflow — or ask how anything in the console works.
+                    </p>
+                    <div class="space-y-2">
+                        <div class="rounded-md border border-line bg-surface px-3 py-2 text-fg cursor-default" data-testid="assistant-suggestion">Show me the workflow templates</div>
+                        <div class="rounded-md border border-line bg-surface px-3 py-2 text-fg cursor-default" data-testid="assistant-suggestion">How does the review queue work?</div>
+                    </div>
+                </div>
+
+                <div class="px-3 py-3 border-t border-line shrink-0">
+                    <div class="flex items-center gap-2">
+                        <div class="flex-1 rounded-md border border-line bg-surface px-3 py-2 text-sm text-muted" data-testid="assistant-input">Ask anything, or describe what to build…</div>
+                        <button type="button" disabled class="rounded-md bg-accent text-onaccent text-sm px-3 py-2 opacity-60">Send</button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    }
+}
+else
+{
+    @* Collapsed rail — a compact strip that reclaims the width for the content and offers re-open. *@
+    <aside class="hidden xl:flex flex-col items-center w-10 shrink-0 border-l border-line bg-raised py-3"
+           aria-label="Assistant (collapsed)">
+        <button type="button" @onclick="ExpandAsync"
+                data-testid="assistant-expand"
+                class="flex flex-col items-center gap-2 text-muted hover:text-fg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--focus-ring)] rounded"
+                aria-label="Open assistant panel" title="Open assistant">
+            <span aria-hidden="true">«</span>
+            <span class="inline-flex h-6 w-6 items-center justify-center rounded bg-accent text-onaccent text-[11px] font-bold">AI</span>
+        </button>
+    </aside>
+}
+
+@code {
+    // The Workflow Builder routes whose rail should host the code-assistant chat instead of chrome.
+    private const string BuilderRoutePrefix = "workflow-builder";
+
+    private bool _isBuilderRoute;
+
+    protected override void OnInitialized()
+    {
+        UiPreference.OnChange += OnPreferenceChanged;
+        Nav.LocationChanged += OnLocationChanged;
+        _isBuilderRoute = IsBuilderRoute(Nav.Uri);
+    }
+
+    /// <summary>Hides the panel body and remembers the choice (persists across navigation + reload).</summary>
+    private Task CollapseAsync() => UiPreference.SetAssistantOpenAsync(false);
+
+    /// <summary>Re-opens the panel and remembers the choice.</summary>
+    private Task ExpandAsync() => UiPreference.SetAssistantOpenAsync(true);
+
+    private void OnPreferenceChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
+    {
+        _isBuilderRoute = IsBuilderRoute(args.Location);
+        InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>True when the given absolute URL is the Workflow Builder (so the rail hosts its chat).</summary>
+    private bool IsBuilderRoute(string absoluteUri)
+    {
+        var relativePath = Nav.ToBaseRelativePath(absoluteUri);
+        return relativePath.Equals(BuilderRoutePrefix, StringComparison.OrdinalIgnoreCase)
+            || relativePath.StartsWith(BuilderRoutePrefix + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void Dispose()
+    {
+        UiPreference.OnChange -= OnPreferenceChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

@@ -1,0 +1,11 @@
+@* The standalone Graph page (a fixed intake-pipeline topology diagram) was retired in the redesign:
+   a topology that need not match any real workflow had little value. The Workflow Builder now shows
+   the loaded workflow's own graph. This keeps the old /graph route alive by redirecting to the
+   Builder so existing bookmarks/links never hit a 404 (FR-009). *@
+@page "/graph"
+@inject NavigationManager Nav
+
+@code {
+    /// <summary>Redirect to the Workflow Builder as soon as the component initialises.</summary>
+    protected override void OnInitialized() => Nav.NavigateTo("/workflow-builder", replace: true);
+}

@@ -1,0 +1,138 @@
+@* In-app User Guide (feature 014, US6): human-readable documentation of what the Admin Console is,
+   each primary section/screen, and how to perform its key tasks. Section coverage is driven from the
+   shared NavModel so the guide is verifiably in sync with the navigation inventory (SC-009); spec 015
+   later adopts this same authored content as the Assistant's knowledge base. *@
+@page "/user-guide"
+@using DBAIAzure.Web.Navigation
+
+<PageTitle>User Guide — Admin Console</PageTitle>
+
+<div class="space-y-8" data-testid="guide-page">
+
+    @* ── What the application is ──────────────────────────────────────────────── *@
+    <section data-testid="guide-intro">
+        <h1 class="text-2xl font-semibold text-fg">User Guide</h1>
+        <p class="mt-2 text-muted max-w-3xl">
+            The <span class="text-fg font-medium">Admin Console</span> is the control plane for designing,
+            running, and supervising automated workflows. You describe work as a visual workflow, the
+            console turns it into runnable Semantic Kernel code, and you monitor each run — pausing for a
+            human decision whenever a step needs approval. This guide explains every section of the
+            console and how to accomplish its key tasks.
+        </p>
+    </section>
+
+    @* ── One documented block per primary section, sourced from the navigation model ── *@
+    @foreach (var navSection in _primarySections)
+    {
+        var entry = LookupContent(navSection.Key);
+        <section data-testid="guide-section-@navSection.Key" class="rounded-lg border border-line bg-surface p-5">
+            <div class="flex items-baseline justify-between gap-3">
+                <h2 class="text-lg font-semibold text-fg">@navSection.Label</h2>
+                <span class="text-xs text-muted">@string.Join(" · ", navSection.SubViews.Select(view => view.Label))</span>
+            </div>
+
+            <p class="mt-2 text-sm text-muted max-w-3xl">@entry.Description</p>
+
+            @* The screens this section contains, taken straight from the navigation model. *@
+            <div class="mt-4">
+                <h3 class="text-xs font-semibold uppercase tracking-wide text-muted">Screens</h3>
+                <ul class="mt-1 space-y-1 text-sm">
+                    @foreach (var view in navSection.SubViews)
+                    {
+                        <li class="text-fg">
+                            <span class="font-medium">@view.Label</span>
+                            <span class="text-muted"> — <code class="text-xs">@view.Route</code></span>
+                        </li>
+                    }
+                </ul>
+            </div>
+
+            @* How to perform the section's key tasks. *@
+            <div class="mt-4" data-testid="guide-tasks-@navSection.Key">
+                <h3 class="text-xs font-semibold uppercase tracking-wide text-muted">Key tasks</h3>
+                <ul class="mt-1 space-y-1 text-sm list-disc list-inside text-fg">
+                    @foreach (var task in entry.KeyTasks)
+                    {
+                        <li>@task</li>
+                    }
+                </ul>
+            </div>
+        </section>
+    }
+
+    @* ── The Assistant rail ───────────────────────────────────────────────────── *@
+    <section data-testid="guide-section-assistant" class="rounded-lg border border-line bg-surface p-5">
+        <h2 class="text-lg font-semibold text-fg">Assistant</h2>
+        <p class="mt-2 text-sm text-muted max-w-3xl">
+            The Assistant rail sits on the right of every screen. On the Workflow Builder it is the code
+            assistant — it generates and refines Semantic Kernel code from a plain-language description.
+            Use the header control (or the Builder toolbar's Chat button) to collapse or reopen it; the
+            console remembers your choice.
+        </p>
+    </section>
+</div>
+
+@code {
+    // The authored guidance for a section: what it is and how to perform its key tasks.
+    private sealed record GuideEntry(string Description, IReadOnlyList<string> KeyTasks);
+
+    // Primary sections come from the single navigation model, so this guide cannot fall out of sync
+    // with what the sidebar actually exposes (SC-009 — verified against the navigation inventory).
+    private readonly IReadOnlyList<NavSection> _primarySections =
+        NavModel.Sections.Where(section => !section.IsSecondary).ToList();
+
+    // Authored, human-readable content keyed by the navigation section's stable key.
+    private static readonly IReadOnlyDictionary<string, GuideEntry> Content = new Dictionary<string, GuideEntry>
+    {
+        ["monitor"] = new(
+            "Watch what the platform is doing right now and review what it has done. Threads is the live "
+            + "list of intake items the pipeline is processing; Run History is the record of every workflow "
+            + "run with a step-by-step detail view.",
+            new[]
+            {
+                "Open Threads to scan active intake items, filter by status or source, and start a new thread.",
+                "Open Run History to find a past run, then open it to inspect each step's status and output.",
+            }),
+        ["review"] = new(
+            "The approval inbox. When a workflow reaches a human-in-the-loop gate it pauses and appears here "
+            + "until someone decides how it should proceed.",
+            new[]
+            {
+                "Open a paused run to see why it is waiting.",
+                "Approve or reject the run with one click to resume or stop it.",
+            }),
+        ["automation"] = new(
+            "Where you design and manage workflows. The Workflow Builder is a visual canvas — drag in steps, "
+            + "let the code assistant generate Semantic Kernel code, make steps real, and run them with live "
+            + "execution feedback. The Workflow Gallery lists your saved workflows.",
+            new[]
+            {
+                "In the Builder, drag steps from the palette onto the canvas and connect them.",
+                "Describe the workflow in the Assistant to generate or refine its code, then save it.",
+                "Use \"Make it real\" to turn a designed step into a configured, runnable one.",
+                "Run the workflow and watch each node's state; open the Gallery to reopen a saved workflow.",
+            }),
+        ["configuration"] = new(
+            "Connect the console to the outside systems it works with — source/work-tracking, the AI model, "
+            + "and notification channels — from the Connectors screen.",
+            new[]
+            {
+                "Open Connectors and enter the credentials for a system (for example Azure DevOps).",
+                "Use Test Connection to confirm the settings work before saving.",
+            }),
+        ["repos"] = new(
+            "The registry of applications the console monitors. Register a local repository as an app and "
+            + "drive its build/run lifecycle, then drill into an app for its details and history.",
+            new[]
+            {
+                "Register a repository as a monitored app.",
+                "Build, run, link, or remove an app, and open an app to view its detail and run history.",
+            }),
+    };
+
+    // Falls back to a clearly-visible placeholder so an undocumented section can never pass silently.
+    private static GuideEntry LookupContent(string sectionKey) =>
+        Content.TryGetValue(sectionKey, out var entry)
+            ? entry
+            : new GuideEntry("Documentation for this section is not yet written.", Array.Empty<string>());
+}

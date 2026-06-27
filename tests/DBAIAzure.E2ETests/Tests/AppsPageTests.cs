@@ -30,7 +30,8 @@ public sealed class AppsPageTests : E2ETestBase
     {
         await NavigateAsync("/");
 
-        await Page.Locator("nav a:has-text('Apps')").ClickAsync();
+        // Apps lives under the "Repos & Apps" sidebar section (grouped IA, spec-014).
+        await Page.Locator("[data-testid='nav-repos']").ClickAsync();
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
         Assert.Contains("/apps", Page.Url, StringComparison.OrdinalIgnoreCase);

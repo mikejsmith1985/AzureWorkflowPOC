@@ -30,8 +30,9 @@ public sealed class ReviewQueueComponentTests : TestContext
         var cut = RenderComponent<ReviewQueue>();
         await cut.InvokeAsync(() => Task.CompletedTask); // let OnInitializedAsync complete
 
-        // Two rows should be visible — one per paused run.
-        var rows = cut.FindAll("button[class*='cyan']");
+        // Two rows should be visible — one per paused run (one Approve button each). Select by the
+        // button's text rather than its colour class, which is now a semantic token (spec-014 restyle).
+        var rows = cut.FindAll("button").Where(b => b.TextContent.Trim() == "Approve").ToList();
         Assert.Equal(2, rows.Count);
     }
 
@@ -63,8 +64,8 @@ public sealed class ReviewQueueComponentTests : TestContext
         var cut = RenderComponent<ReviewQueue>();
         await cut.InvokeAsync(() => Task.CompletedTask);
 
-        // Find the first cyan (Approve) button and click it.
-        var approveButton = cut.Find("button[class*='cyan-6']");
+        // Find the Approve button by its text (colour is now a semantic token) and click it.
+        var approveButton = cut.FindAll("button").First(b => b.TextContent.Trim() == "Approve");
         approveButton.Click();
 
         Assert.Equal(1, orchestrator.SubmitApprovalCallCount);
@@ -84,8 +85,8 @@ public sealed class ReviewQueueComponentTests : TestContext
         var cut = RenderComponent<ReviewQueue>();
         await cut.InvokeAsync(() => Task.CompletedTask);
 
-        // The Reject button has a red class.
-        var rejectButton = cut.Find("button[class*='red-6']");
+        // Find the Reject button by its text (colour is now a semantic token) and click it.
+        var rejectButton = cut.FindAll("button").First(b => b.TextContent.Trim() == "Reject");
         rejectButton.Click();
 
         Assert.Equal(1, orchestrator.SubmitApprovalCallCount);

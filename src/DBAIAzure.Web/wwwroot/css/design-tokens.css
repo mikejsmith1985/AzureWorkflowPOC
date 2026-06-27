@@ -1,0 +1,50 @@
+/* Design tokens for the Admin Console shell — semantic colours, text scaling, focus, and motion.
+   The DARK theme values live here on :root. A future light theme overrides the SAME variable names
+   under a single scope (e.g. :root[data-theme="light"]) with NO per-screen edits (FR-017 / SC-005).
+   Screens use the semantic Tailwind aliases mapped to these vars in _Host.cshtml — never raw palette
+   utilities like gray-950 / cyan-400. */
+
+:root {
+    --bg: #05060a;              /* app background (near-black navy) */
+    --surface: #0d1117;         /* card / panel background */
+    --raised: #161b22;          /* elevated surface: sidebar, top bar, popovers */
+    --line: #232a33;            /* hairline borders */
+    --fg: #e6edf3;              /* primary text */
+    --muted: #8b949e;           /* secondary / label text */
+    --accent: #22d3ee;          /* single accent (active nav, links, primary buttons) */
+    --accent-contrast: #04121a; /* text on an accent-filled surface */
+    --ok: #3fb950;              /* status: healthy / success */
+    --warn: #d29922;            /* status: warning */
+    --err: #f85149;             /* status: error / destructive */
+    /* Subtle status fills for banners / badges / alert boxes. Solid (not alpha) so they theme
+       cleanly without relying on Tailwind opacity modifiers over CSS-variable colours. */
+    --accent-subtle: #0c2a30;   /* informational tint (accent-tinted surface) */
+    --ok-subtle: #10261a;       /* success tint */
+    --warn-subtle: #2b2310;     /* warning tint */
+    --err-subtle: #2b1517;      /* error / destructive tint */
+    --focus-ring: #22d3ee;      /* keyboard focus outline */
+    --text-scale: 1;            /* root text-size multiplier, driven by the top-bar control */
+}
+
+/* Root text scaling: the text-size control sets --text-scale (e.g. 0.9 / 1 / 1.15). Content uses
+   rem-based sizing so it reflows without breaking layout (FR-018). */
+html {
+    font-size: calc(100% * var(--text-scale));
+}
+
+/* Visible keyboard focus for shell controls (FR-024). */
+:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+/* Respect reduced-motion: suppress shell transitions/animations (FR-025). */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+    }
+}

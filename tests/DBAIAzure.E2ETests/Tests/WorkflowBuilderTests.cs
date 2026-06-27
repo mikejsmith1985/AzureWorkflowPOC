@@ -129,15 +129,22 @@ public sealed class WorkflowBuilderTests : E2ETestBase
     }
 
     [Fact]
-    public async Task ChatToggleButton_Click_OpensChatPanel()
+    public async Task ChatToggleButton_Toggles_ChatPanel()
     {
-        // Simulates: click the chat toggle button and confirm the chat panel slides open.
+        // The code assistant now lives in the shared shell rail, which is open by default (spec-014 US4),
+        // so the chat panel is visible on load. The toolbar toggle must close it and reopen it.
         await NavigateAsync(BuilderUrl);
         await WaitForToolbarAsync();
 
-        await Page.ClickAsync("button[aria-label='Open chat panel']");
-
         var chatPanel = Page.Locator("aside.workflow-chat-panel");
+        await chatPanel.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+
+        // Close: the toggle reads "Close chat panel" while open.
+        await Page.ClickAsync("button[aria-label='Close chat panel']");
+        await chatPanel.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 5_000 });
+
+        // Reopen: the toggle now reads "Open chat panel".
+        await Page.ClickAsync("button[aria-label='Open chat panel']");
         await chatPanel.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
     }
 
