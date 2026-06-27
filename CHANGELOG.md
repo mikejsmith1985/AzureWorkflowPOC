@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — ADO telemetry preflight no longer emits a cryptic JSON error on bad credentials (spec-009)
+
+The startup ADO telemetry preflight surfaced `ADO process detection failed: '<' is an invalid start of a
+value` whenever Azure DevOps returned its **HTTP 200 HTML sign-in page** — which it does (instead of a
+401) when the Personal Access Token is invalid/expired or the organization URL is wrong. The
+`IsSuccessStatusCode` guard passed and `JsonDocument.Parse` then choked on the leading `<`.
+
+- `AdoTelemetryPreflightService.DetectProcessTypeAsync` now checks the response is actually JSON (via a
+  new `LooksLikeJson` content-type / leading-character guard) before parsing, and returns an actionable
+  message — *"the Personal Access Token is likely invalid or expired, or the organization URL is
+  wrong. Update them in Connector Settings."* — instead of the raw parser exception.
+- The preflight remains fire-and-forget and non-fatal; the web app still starts normally.
+
 ### Fixed — ACA deploy script now runs against the real subscription (spec-012)
 
 `deploy/aca/deploy.ps1` had never been executed end-to-end and failed on three real blockers; all are

@@ -100,6 +100,33 @@ public sealed class AdoTelemetryPreflightServiceTests
         Assert.Equal(0, handler.CallCount);
     }
 
+    // ── Invalid PAT / wrong org → ADO serves an HTTP 200 HTML sign-in page ────────
+
+    [Fact]
+    public async Task RunPreflightAsync_WhenProjectsEndpointReturnsHtml_ReturnsActionableError_NotJsonParseError()
+    {
+        // Azure DevOps responds with HTTP 200 and an HTML sign-in page (not a 401) when the PAT is
+        // invalid/expired or the org URL is wrong. The body starts with '<', which previously surfaced
+        // the cryptic "'<' is an invalid start of a value" JSON parse error.
+        var handler = new FakeHttpHandler();
+        handler.AddResponse(
+            url => url.Contains("/_apis/projects/") && url.Contains("includeCapabilities=true"),
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "\n<!DOCTYPE html>\n<html><head><title>Azure DevOps Services | Sign In</title></head></html>",
+                    Encoding.UTF8, "text/html"),
+            });
+
+        var service = BuildService(handler);
+        var result = await service.RunPreflightAsync(MinimalFieldConfig());
+
+        Assert.False(result.IsSuccess);
+        Assert.NotNull(result.ErrorMessage);
+        Assert.DoesNotContain("invalid start of a value", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Personal Access Token", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ── T014: Process type detection ──────────────────────────────────────────────
 
     [Fact]
