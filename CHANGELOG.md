@@ -43,6 +43,12 @@ feature (spec-015). Landing incrementally:
   toolbar Chat toggle, the panel's close control, and the rail collapse all drive the one shared open
   state. Generate/diff/save behaviour is unchanged; the seam is left open for the intelligent Assistant
   (spec-015).
+- **In-app User Guide (US6)**: a new `/user-guide` destination (the separated sidebar entry) documents
+  what the Admin Console is and, for every primary section, what it does, which screens it contains, and
+  how to perform its key tasks. Section coverage is driven from the shared `NavModel`, so the guide stays
+  verifiably in sync with the navigation inventory (SC-009) and an undocumented section cannot pass
+  silently. Styled with the shell's semantic tokens; spec-015 later adopts this same content as the
+  Assistant's knowledge base.
 
 ### Added — Admin Console UX: first-run onboarding + field tooltips (spec-009)
 

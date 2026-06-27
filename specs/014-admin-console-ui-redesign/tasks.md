@@ -116,9 +116,9 @@ xUnit unit tests. No new NuGet packages, no DB changes.
 
 **Independent Test**: User Guide reachable from the sidebar and documents each primary section and key task.
 
-- [ ] T028 [P] [US6] Write FAILING E2E `tests/DBAIAzure.E2ETests/Tests/UserGuideTests.cs`: User Guide reachable from the sidebar; page documents each primary section + key task headings. (SC-009)
-- [ ] T029 [US6] Create `src/DBAIAzure.Web/Pages/UserGuide.razor` at `/user-guide` with human-readable documentation covering what the app is and each section/key task; ensure the `NavModel` User Guide entry points to it (FR-016).
-- [ ] T030 [US6] Style the guide with the shell/token visual language; make `UserGuideTests` pass.
+- [X] T028 [P] [US6] Write FAILING E2E `tests/DBAIAzure.E2ETests/Tests/UserGuideTests.cs`: User Guide reachable from the sidebar; page documents each primary section + key task headings. (SC-009)
+- [X] T029 [US6] Create `src/DBAIAzure.Web/Pages/UserGuide.razor` at `/user-guide` with human-readable documentation covering what the app is and each section/key task; ensure the `NavModel` User Guide entry points to it (FR-016). *(Section coverage iterates `NavModel` primary sections.)*
+- [X] T030 [US6] Style the guide with the shell/token visual language; make `UserGuideTests` pass. *(Token-styled; Playwright execution batched to T042; build green.)*
 
 **Checkpoint**: User Guide live (and ready for feature 015 to ground the AI on).
 
