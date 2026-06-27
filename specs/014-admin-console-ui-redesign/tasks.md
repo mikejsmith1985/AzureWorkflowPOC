@@ -141,9 +141,9 @@ xUnit unit tests. No new NuGet packages, no DB changes.
 
 ## Phase 9: Polish & Cross-Cutting Concerns
 
-- [ ] T035 [P] Restyle remaining pages to semantic token classes (remove raw `gray-950`/`cyan-400` etc.): `Index`, `RunHistory`, `RunHistoryDetail`, `RunDetail`, `ReviewQueue`, `NewTicket`, `WorkflowGallery`, `Apps`, `AppDetail`, `ConnectorSettings` (FR-021).
+- [X] T035 [P] Restyle remaining pages to semantic token classes (remove raw `gray-950`/`cyan-400` etc.): `Index`, `RunHistory`, `RunHistoryDetail`, `RunDetail`, `ReviewQueue`, `NewTicket`, `WorkflowGallery`, `Apps`, `AppDetail`, `ConnectorSettings` (FR-021). *(Added `*-subtle` status tokens for tinted banners; fanned out to 6 parallel agents; all 10 pages grep-clean.)*
 - [ ] T036 [P] Apply the consistent "nothing here yet" empty-state treatment across lists/panels (FR-022).
-- [ ] T037 Verify SC-005: grep the redesigned `.razor` files for raw palette utilities (`gray-`, `cyan-`, etc.) and confirm none remain outside the token layer.
+- [X] T037 Verify SC-005: grep the redesigned `.razor` files for raw palette utilities (`gray-`, `cyan-`, etc.) and confirm none remain outside the token layer. *(All 10 pages report 0; build clean.)*
 - [ ] T038 [P] Update existing per-page E2E tests for the new routes/IA/selectors (e.g., `NavigationTests`, `WorkflowBuilderTests`, `ReviewQueueTests`, `RunHistoryTests`, `AppsPageTests`), **and ensure each re-homed screen's existing functional flow is still asserted — not just navigation/selectors — so FR-023 (preserve behaviour & data) is actively verified, not merely accommodated by loosening assertions.**
 - [ ] T039 Reduced-motion + keyboard-focus pass across all shell controls (FR-024/FR-025).
 - [ ] T040 [P] Code-quality pass (Article IV): ensure every new public component/service (`AppShell`, `SidebarNav`, `TopBar`, `SectionTabs`, `ConnectionIndicator`, `AssistantPanel`, `UiPreferenceService`, `NavModel`) carries an XML doc comment explaining the "why", booleans read as predicates, and methods stay focused (<40 lines, guard clauses).

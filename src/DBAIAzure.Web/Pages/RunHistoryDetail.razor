@@ -12,24 +12,24 @@
 @using Microsoft.EntityFrameworkCore
 
 <div class="mb-6">
-    <a href="/runs" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">← Run History</a>
+    <a href="/runs" class="text-xs text-muted hover:text-fg transition-colors">← Run History</a>
 </div>
 
 @if (_loading)
 {
-    <div class="text-gray-500 text-sm">Loading…</div>
+    <div class="text-muted text-sm">Loading…</div>
 }
 else if (_run is null)
 {
-    <div class="text-gray-500 text-sm">Run <span class="font-mono">@RunId</span> not found.</div>
+    <div class="text-muted text-sm">Run <span class="font-mono">@RunId</span> not found.</div>
 }
 else
 {
     <!-- ── Run header ──────────────────────────────────────────────────────── -->
     <div class="flex items-start justify-between mb-6 gap-4">
         <div>
-            <h1 class="text-xl font-semibold text-gray-100">@_run.WorkflowName</h1>
-            <p class="text-xs text-gray-400 mt-1">
+            <h1 class="text-xl font-semibold text-fg">@_run.WorkflowName</h1>
+            <p class="text-xs text-muted mt-1">
                 Run <span class="font-mono">@_run.RunId</span>
                 · Started @_run.StartedAt.ToLocalTime().ToString("MMM d yyyy HH:mm:ss")
                 · @FormatDuration(_run)
@@ -42,7 +42,7 @@ else
 
     @if (!string.IsNullOrWhiteSpace(_run.FailureReason))
     {
-        <div class="mb-4 rounded bg-red-900/30 border border-red-700 p-3 text-sm text-red-300">
+        <div class="mb-4 rounded bg-err-subtle border border-err p-3 text-sm text-err">
             <span class="font-medium">Failure: </span>@_run.FailureReason
         </div>
     }
@@ -50,45 +50,45 @@ else
     <!-- ── Token cost summary ──────────────────────────────────────────── -->
     @if (_totalInputTokens > 0 || _totalOutputTokens > 0)
     {
-        <div class="mb-5 rounded bg-gray-900 border border-gray-700 p-4 flex gap-6 text-sm">
+        <div class="mb-5 rounded bg-surface border border-line p-4 flex gap-6 text-sm">
             <div>
-                <p class="text-xs text-gray-500 mb-0.5">Input tokens</p>
-                <p class="text-gray-100 font-medium">@_totalInputTokens.ToString("N0")</p>
+                <p class="text-xs text-muted mb-0.5">Input tokens</p>
+                <p class="text-fg font-medium">@_totalInputTokens.ToString("N0")</p>
             </div>
             <div>
-                <p class="text-xs text-gray-500 mb-0.5">Output tokens</p>
-                <p class="text-gray-100 font-medium">@_totalOutputTokens.ToString("N0")</p>
+                <p class="text-xs text-muted mb-0.5">Output tokens</p>
+                <p class="text-fg font-medium">@_totalOutputTokens.ToString("N0")</p>
             </div>
             <div>
-                <p class="text-xs text-gray-500 mb-0.5">LLM calls</p>
-                <p class="text-gray-100 font-medium">@_llmCallCount</p>
+                <p class="text-xs text-muted mb-0.5">LLM calls</p>
+                <p class="text-fg font-medium">@_llmCallCount</p>
             </div>
         </div>
     }
 
     <!-- ── Step timeline ──────────────────────────────────────────────── -->
-    <h2 class="text-sm font-medium text-gray-300 mb-3">Execution Timeline</h2>
+    <h2 class="text-sm font-medium text-fg mb-3">Execution Timeline</h2>
 
     @if (_events.Count == 0)
     {
-        <p class="text-xs text-gray-500">No step events recorded for this run.</p>
+        <p class="text-xs text-muted">No step events recorded for this run.</p>
     }
     else
     {
         <div class="space-y-2">
             @foreach (var evt in _events)
             {
-                <div class="rounded bg-gray-900 border border-gray-800 px-4 py-3 flex items-start gap-3">
+                <div class="rounded bg-surface border border-line px-4 py-3 flex items-start gap-3">
                     <span class="text-base mt-0.5 shrink-0 select-none">@EventIcon(evt.EventType)</span>
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 flex-wrap">
-                            <span class="text-sm text-gray-100 font-medium">@(evt.NodeLabel ?? ((WorkflowEventType)evt.EventType).ToString())</span>
+                            <span class="text-sm text-fg font-medium">@(evt.NodeLabel ?? ((WorkflowEventType)evt.EventType).ToString())</span>
                             @if (!string.IsNullOrWhiteSpace(evt.Outcome))
                             {
-                                <span class="text-xs text-gray-400">— @evt.Outcome</span>
+                                <span class="text-xs text-muted">— @evt.Outcome</span>
                             }
                         </div>
-                        <div class="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
+                        <div class="flex items-center gap-3 mt-0.5 text-xs text-muted">
                             <span>@evt.OccurredAt.ToLocalTime().ToString("HH:mm:ss.fff")</span>
                             @if (evt.DurationMs.HasValue)
                             {
@@ -162,13 +162,13 @@ else
 
     private static string StatusClass(WorkflowRunStatus status) => status switch
     {
-        WorkflowRunStatus.Running   => "bg-blue-900 text-blue-300",
-        WorkflowRunStatus.Paused    => "bg-yellow-900 text-yellow-300",
-        WorkflowRunStatus.Completed => "bg-green-900 text-green-300",
-        WorkflowRunStatus.Failed    => "bg-red-900 text-red-300",
-        WorkflowRunStatus.TimedOut  => "bg-orange-900 text-orange-300",
-        WorkflowRunStatus.Cancelled => "bg-gray-800 text-gray-400",
-        _                           => "bg-gray-800 text-gray-400",
+        WorkflowRunStatus.Running   => "bg-accent-subtle text-accent",
+        WorkflowRunStatus.Paused    => "bg-warn-subtle text-warn",
+        WorkflowRunStatus.Completed => "bg-ok-subtle text-ok",
+        WorkflowRunStatus.Failed    => "bg-err-subtle text-err",
+        WorkflowRunStatus.TimedOut  => "bg-warn-subtle text-warn",
+        WorkflowRunStatus.Cancelled => "bg-raised text-muted",
+        _                           => "bg-raised text-muted",
     };
 
     private static string EventIcon(int eventType) => (WorkflowEventType)eventType switch

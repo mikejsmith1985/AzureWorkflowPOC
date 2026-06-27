@@ -16,6 +16,12 @@
     --ok: #3fb950;              /* status: healthy / success */
     --warn: #d29922;            /* status: warning */
     --err: #f85149;             /* status: error / destructive */
+    /* Subtle status fills for banners / badges / alert boxes. Solid (not alpha) so they theme
+       cleanly without relying on Tailwind opacity modifiers over CSS-variable colours. */
+    --accent-subtle: #0c2a30;   /* informational tint (accent-tinted surface) */
+    --ok-subtle: #10261a;       /* success tint */
+    --warn-subtle: #2b2310;     /* warning tint */
+    --err-subtle: #2b1517;      /* error / destructive tint */
     --focus-ring: #22d3ee;      /* keyboard focus outline */
     --text-scale: 1;            /* root text-size multiplier, driven by the top-bar control */
 }

@@ -6,14 +6,14 @@
 
 
 <div class="flex items-center justify-between mb-6">
-    <h1 class="text-xl font-semibold text-gray-100">Threads</h1>
+    <h1 class="text-xl font-semibold text-fg">Threads</h1>
     <div class="flex items-center gap-2">
         <button @onclick="OpenConfigModal" title="Connector configuration"
-                class="p-2 text-gray-400 hover:text-gray-200 hover:bg-gray-800 rounded transition-colors">
+                class="p-2 text-muted hover:text-fg hover:bg-surface rounded transition-colors">
             ⚙
         </button>
         <a href="/new-ticket"
-           class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-sm rounded transition-colors">
+           class="px-4 py-2 bg-accent hover:opacity-90 text-onaccent text-sm rounded transition-colors">
             + New Thread
         </a>
     </div>
@@ -25,12 +25,12 @@
            placeholder="Search ticket ID or title…"
            value="@_searchQuery"
            @oninput="OnSearchChangedAsync"
-           class="flex-1 min-w-48 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm
-                  text-gray-100 placeholder-gray-600 focus:outline-none focus:border-cyan-500" />
+           class="flex-1 min-w-48 bg-surface border border-line rounded px-3 py-2 text-sm
+                  text-fg placeholder-muted focus:outline-none focus:border-accent" />
 
     <select @bind="_statusFilter" @bind:after="OnFilterChangedAsync"
-            class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300
-                   focus:outline-none focus:border-cyan-500">
+            class="bg-surface border border-line rounded px-3 py-2 text-sm text-fg
+                   focus:outline-none focus:border-accent">
         <option value="">All Statuses</option>
         <option value="Running">Running</option>
         <option value="AwaitingHuman">Awaiting PO</option>
@@ -40,8 +40,8 @@
     </select>
 
     <select @bind="_sourceFilter" @bind:after="OnFilterChangedAsync"
-            class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300
-                   focus:outline-none focus:border-cyan-500">
+            class="bg-surface border border-line rounded px-3 py-2 text-sm text-fg
+                   focus:outline-none focus:border-accent">
         <option value="">All Sources</option>
         <option value="manual">Manual</option>
         <option value="servicenow">ServiceNow</option>
@@ -50,11 +50,11 @@
 
     <div class="flex items-center gap-2">
         <button @onclick="PrevPageAsync" disabled="@(_currentPage == 0)"
-                class="px-3 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 text-gray-300
+                class="px-3 py-2 bg-raised hover:bg-surface disabled:opacity-30 text-fg
                        text-sm rounded transition-colors">
             ‹
         </button>
-        <span class="text-gray-500 text-sm min-w-16 text-center">
+        <span class="text-muted text-sm min-w-16 text-center">
             @if (_isLoading)
             {
                 <span>Loading…</span>
@@ -65,7 +65,7 @@
             }
         </span>
         <button @onclick="NextPageAsync" disabled="@(_runs.Count < PageSize)"
-                class="px-3 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 text-gray-300
+                class="px-3 py-2 bg-raised hover:bg-surface disabled:opacity-30 text-fg
                        text-sm rounded transition-colors">
             ›
         </button>
@@ -75,21 +75,21 @@
 <!-- ── Thread table ─────────────────────────────────────────────────────── -->
 @if (_isLoading)
 {
-    <div class="bg-gray-900 border border-gray-800 rounded-lg p-8 text-center text-gray-600">
+    <div class="bg-surface border border-line rounded-lg p-8 text-center text-muted">
         Loading runs…
     </div>
 }
 else if (!_runs.Any())
 {
-    <div class="bg-gray-900 border border-gray-800 rounded-lg p-8 text-center text-gray-500">
+    <div class="bg-surface border border-line rounded-lg p-8 text-center text-muted">
         No threads found. Submit a ticket or push one from ServiceNow to get started.
     </div>
 }
 else
 {
-    <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+    <div class="bg-surface border border-line rounded-lg overflow-hidden">
         <table class="w-full text-sm">
-            <thead class="bg-gray-800 text-gray-400 text-left">
+            <thead class="bg-raised text-muted text-left">
                 <tr>
                     <th class="px-4 py-3">Run ID</th>
                     <th class="px-4 py-3">Ticket</th>
@@ -99,22 +99,22 @@ else
                     <th class="px-4 py-3">Started</th>
                 </tr>
             </thead>
-            <tbody class="divide-y divide-gray-800">
+            <tbody class="divide-y divide-line">
                 @foreach (var run in _runs)
                 {
-                    <tr class="hover:bg-gray-800 cursor-pointer transition-colors"
+                    <tr class="hover:bg-surface cursor-pointer transition-colors"
                         @onclick="() => GoToRun(run.RunId)">
-                        <td class="px-4 py-3 font-mono text-cyan-400 text-xs">@run.RunId</td>
+                        <td class="px-4 py-3 font-mono text-accent text-xs">@run.RunId</td>
                         <td class="px-4 py-3">
-                            <div class="font-medium text-gray-200 text-xs truncate max-w-xs">
+                            <div class="font-medium text-fg text-xs truncate max-w-xs">
                                 @run.TicketId
                             </div>
-                            <div class="text-gray-500 text-xs truncate max-w-xs mt-0.5">
+                            <div class="text-muted text-xs truncate max-w-xs mt-0.5">
                                 @run.Title
                             </div>
                             @if (!string.IsNullOrEmpty(run.SnowNumber))
                             {
-                                <div class="text-xs text-sky-400 mt-0.5">@run.SnowNumber</div>
+                                <div class="text-xs text-accent mt-0.5">@run.SnowNumber</div>
                             }
                         </td>
                         <td class="px-4 py-3">
@@ -123,10 +123,10 @@ else
                         <td class="px-4 py-3">
                             <StatusBadge Status="@run.Status" />
                         </td>
-                        <td class="px-4 py-3 text-gray-300">
+                        <td class="px-4 py-3 text-fg">
                             @(run.StoryPoints?.ToString() ?? "—")
                         </td>
-                        <td class="px-4 py-3 text-gray-500 text-xs">
+                        <td class="px-4 py-3 text-muted text-xs">
                             @run.StartedAt.ToLocalTime().ToString("MM/dd HH:mm")
                         </td>
                     </tr>

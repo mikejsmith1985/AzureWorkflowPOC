@@ -55,6 +55,12 @@ feature (spec-015). Landing incrementally:
   persists across reloads (FR-018/FR-020). A `ConnectionIndicator` names the connected host (base-URI
   authority) and flips between a connected/disconnected treatment by mirroring the Blazor circuit's
   reconnect overlay via a `connectionMonitor` JS watcher (FR-019).
+- **Pages restyled to semantic tokens (Polish)**: the ten console screens (`Index`, `RunHistory`,
+  `RunHistoryDetail`, `RunDetail`, `ReviewQueue`, `NewTicket`, `WorkflowGallery`, `Apps`, `AppDetail`,
+  `ConnectorSettings`) now draw every colour from the semantic token aliases — no raw `gray-`/`cyan-`/
+  status-palette utilities remain (SC-005). Added `--accent-subtle`/`--ok-subtle`/`--warn-subtle`/
+  `--err-subtle` tokens so tinted banners/badges theme cleanly without opacity modifiers over
+  CSS-variable colours.
 
 ### Added — Admin Console UX: first-run onboarding + field tooltips (spec-009)
 
