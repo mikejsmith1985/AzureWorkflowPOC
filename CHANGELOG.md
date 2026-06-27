@@ -73,6 +73,12 @@ feature (spec-015). Landing incrementally:
 - **Run detail page 500 on SQLite**: `RunHistoryDetail` ordered execution events by a `DateTimeOffset`
   column in the database query, which SQLite cannot translate (`/runs/{id}` returned HTTP 500). Events
   are now materialised and ordered client-side, so the run detail page renders for every run.
+- **`/apps` page hung ~20s on first load**: resolving `IAppExecutor` probed the Docker engine, and
+  Docker.DotNet's ping can block at the OS connect layer (e.g. a missing Windows named pipe) without
+  honoring its `CancellationToken`. The probe now runs on a worker task with a hard 3s wall-clock cap
+  (`AppExecutorSelector.TryConnectDocker`), so the page renders immediately and falls back to the
+  simulated executor when Docker is unreachable. Also corrected the repo-path placeholder, which
+  displayed doubled backslashes (`C:\\ProjectsWin\\DBAI`).
 
 ### Added — Admin Console UX: first-run onboarding + field tooltips (spec-009)
 
