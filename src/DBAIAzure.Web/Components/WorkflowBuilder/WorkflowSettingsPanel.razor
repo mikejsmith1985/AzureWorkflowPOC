@@ -1,0 +1,92 @@
+@* Workflow settings sidebar panel.
+   Currently exposes a single timeout control; additional settings can be added here in future. *@
+@using DBAIAzure.Core.Models
+
+@if (IsOpen)
+{
+    <div class="w-72 flex-shrink-0 bg-gray-900 border-l border-gray-800 flex flex-col overflow-y-auto"
+         role="region"
+         aria-label="Workflow Settings">
+
+        @* Panel header *@
+        <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+            <h2 class="text-sm font-semibold text-gray-100">Workflow Settings</h2>
+            <button @onclick="OnCloseRequested"
+                    class="text-gray-500 hover:text-gray-300 transition-colors text-xl leading-none"
+                    aria-label="Close settings panel">
+                ×
+            </button>
+        </div>
+
+        @* Settings body *@
+        <div class="flex flex-col gap-5 px-4 py-4">
+
+            @* Execution timeout *@
+            <div class="flex flex-col gap-2">
+                <label class="text-sm text-gray-300 font-medium" for="timeout-input">
+                    Stop automatically after:
+                </label>
+                <div class="flex items-center gap-2">
+                    <input id="timeout-input"
+                           type="number"
+                           min="1"
+                           max="60"
+                           value="@_timeoutMinutes"
+                           @onchange="OnTimeoutChanged"
+                           class="w-20 bg-gray-950 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-100
+                                  focus:outline-none focus:border-cyan-600 transition-colors"
+                           aria-label="Execution timeout in minutes"
+                           aria-describedby="timeout-hint" />
+                    <span class="text-sm text-gray-400">minutes</span>
+                </div>
+                <p id="timeout-hint" class="text-xs text-gray-500">
+                    The workflow stops all steps automatically after this many minutes.
+                    Use 1–60 minutes.
+                </p>
+            </div>
+        </div>
+
+        @* Save button *@
+        <div class="px-4 py-3 border-t border-gray-800 mt-auto">
+            <button @onclick="OnSaveClicked"
+                    class="w-full bg-cyan-700 hover:bg-cyan-600 text-white text-sm font-medium
+                           rounded-lg py-2 transition-colors"
+                    aria-label="Save workflow settings">
+                Save Settings
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Whether the settings panel is visible.</summary>
+    [Parameter] public bool IsOpen { get; set; }
+
+    /// <summary>The current timeout value from <see cref="WorkflowSettings.ExecutionTimeoutMinutes"/>.</summary>
+    [Parameter] public int ExecutionTimeoutMinutes { get; set; } = 5;
+
+    /// <summary>Raised when the user saves, carrying the updated timeout value.</summary>
+    [Parameter] public EventCallback<int> OnTimeoutSaved { get; set; }
+
+    /// <summary>Raised when the user clicks the close (×) button.</summary>
+    [Parameter] public EventCallback OnCloseRequested { get; set; }
+
+    private int _timeoutMinutes;
+
+    protected override void OnParametersSet()
+    {
+        _timeoutMinutes = ExecutionTimeoutMinutes;
+    }
+
+    private void OnTimeoutChanged(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), out var value))
+            _timeoutMinutes = Math.Clamp(value, 1, 60);
+    }
+
+    private async Task OnSaveClicked()
+    {
+        await OnTimeoutSaved.InvokeAsync(_timeoutMinutes);
+        await OnCloseRequested.InvokeAsync();
+    }
+}

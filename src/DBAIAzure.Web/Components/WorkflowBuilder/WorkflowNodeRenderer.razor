@@ -1,0 +1,290 @@
+@* Visual tile for a single workflow node on the canvas.
+   Z.Blazor.Diagrams passes the WorkflowNodeModel as a CascadingParameter.
+   Warm amber = AgenticReason; cool blue/teal = function nodes; purple = HumanApproval. *@
+
+<div class="workflow-node @GetBorderClass() @GetBackgroundClass() @GetExecutionRingClass() rounded-lg border-2 shadow-lg min-w-[140px] select-none relative transition-shadow"
+     @ondblclick="OnDoubleClick"
+     @oncontextmenu:preventDefault
+     @oncontextmenu="OnContextMenu"
+     @onkeydown="OnNodeKeyDown"
+     tabindex="0"
+     title="@(_isEditingLabel ? string.Empty : "Double-click label to rename; double-click body to configure")"
+     aria-label="@Node.WorkflowNode.Label — double-click label to rename, double-click body to configure">
+
+    @* Amber badge + "Set up →" label when the node has not been configured yet *@
+    @if (!Node.WorkflowNode.IsConfigured)
+    {
+        <div class="absolute -top-2 -right-2 w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center"
+             title="This node needs configuration"
+             data-testid="node-unconfigured-badge"
+             aria-label="Node requires configuration">
+            <span class="text-white text-xs font-bold leading-none">!</span>
+        </div>
+        @* Plain-text affordance so the user knows to double-click and configure (T022). *@
+        <div class="absolute -bottom-5 right-0 text-xs text-amber-400 font-medium whitespace-nowrap pointer-events-none select-none"
+             aria-label="Double-click to set up this step">
+            Set up →
+        </div>
+    }
+
+    @* Green "realized" check — shown once a node has accepted production-ready config (spec 007).
+       Trigger nodes are entry markers and are not surfaced as realized here. *@
+    @if (Node.WorkflowNode.IsConfigured && Node.WorkflowNode.NodeType != WorkflowNodeType.Trigger)
+    {
+        <div class="absolute -top-2 -right-2 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center"
+             title="This step has been made production-ready"
+             aria-label="Step is realized and production-ready">
+            <span class="text-white text-xs font-bold leading-none">✓</span>
+        </div>
+    }
+
+    @* Island badge — shown after a neighbouring node is deleted and this node becomes unconnected *@
+    @if (Node.IsIsolated)
+    {
+        <div class="absolute -top-2 -left-2 w-5 h-5 bg-amber-600 rounded-full flex items-center justify-center"
+             title="This node is not connected to anything"
+             aria-label="Node is disconnected — connect it to the workflow">
+            <span class="text-white text-xs font-bold leading-none">!</span>
+        </div>
+    }
+
+    @* Node type icon + label header (label span double-click enters inline edit; stopPropagation prevents config panel open) *@
+    <div class="@GetHeaderClass() rounded-t-md px-3 py-2 flex items-center gap-2">
+        <span class="text-lg" role="img" aria-label="@Node.WorkflowNode.NodeType.ToString()">@GetIcon()</span>
+        <div class="flex flex-col min-w-0" @ondblclick:stopPropagation="true">
+            @if (_isEditingLabel)
+            {
+                <input class="node-label-input text-white text-sm font-semibold bg-transparent border-b border-white/60 outline-none max-w-[110px] min-w-0"
+                       value="@_labelBuffer"
+                       @oninput="OnLabelInput"
+                       @onkeydown="OnLabelKeyDown"
+                       @onblur="CommitLabel"
+                       @ref="_labelInputRef"
+                       aria-label="Edit node label"
+                       maxlength="50" />
+            }
+            else
+            {
+                <span class="node-label-text text-white text-sm font-semibold truncate max-w-[110px]"
+                      data-testid="node-label"
+                      @ondblclick="StartLabelEdit"
+                      tabindex="0"
+                      aria-label="@DisplayLabel() — double-click to rename">@DisplayLabel()</span>
+            }
+            @if (Node.WorkflowNode.NodeType == WorkflowNodeType.Trigger)
+            {
+                <span class="text-xs text-emerald-200 mt-0.5">Start here</span>
+            }
+        </div>
+    </div>
+
+    @* Port chips and goal preview *@
+    <div class="px-3 py-2 flex flex-col gap-1">
+        @* Trigger nodes have no input port — hide the input label row for them *@
+        @if (Node.WorkflowNode.NodeType != WorkflowNodeType.Trigger
+             && !string.IsNullOrWhiteSpace(Node.WorkflowNode.InputLabel))
+        {
+            <span class="text-xs text-gray-400 truncate">← @Node.WorkflowNode.InputLabel</span>
+        }
+        @if (!string.IsNullOrWhiteSpace(Node.WorkflowNode.GoalPrompt))
+        {
+            <span class="text-xs text-gray-300 line-clamp-2 italic opacity-75">@TruncateGoal()</span>
+        }
+        @if (!string.IsNullOrWhiteSpace(Node.WorkflowNode.OutputLabel))
+        {
+            <span class="text-xs text-gray-400 truncate">→ @Node.WorkflowNode.OutputLabel</span>
+        }
+    </div>
+
+    @* Execution state badge — only shown during a run *@
+    @if (ExecutionState is not null)
+    {
+        <div class="px-3 pb-2 flex items-center gap-1">
+            <span class="@GetStatusBadgeClass() text-xs px-2 py-0.5 rounded-full font-medium">
+                @GetStatusLabel()
+            </span>
+            @if (!string.IsNullOrWhiteSpace(ExecutionState.OutputSummary))
+            {
+                <span class="text-xs text-gray-300 truncate">@ExecutionState.OutputSummary</span>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>The diagram node model; passed by Z.Blazor.Diagrams as a regular Parameter.</summary>
+    [Parameter]
+    public WorkflowNodeModel Node { get; set; } = null!;
+
+    /// <summary>
+    /// Optional live execution state injected by <see cref="WorkflowCanvas"/> during a run.
+    /// When null the execution badge row is hidden.
+    /// </summary>
+    [Parameter]
+    public NodeExecutionState? ExecutionState { get; set; }
+
+    // ── Inline label editing state ───────────────────────────────────────────────
+
+    private bool            _isEditingLabel;
+    private string          _labelBuffer             = string.Empty;
+    private string          _previousLabelAtEditStart = string.Empty;
+    private ElementReference _labelInputRef;
+
+    // ── Event handlers ───────────────────────────────────────────────────────────
+
+    private void OnDoubleClick(MouseEventArgs _) => Node.RaiseDoubleClicked();
+    private void OnContextMenu(MouseEventArgs e) => Node.RaiseContextMenuRequested(e.ClientX, e.ClientY);
+
+    /// <summary>Keyboard-only entry point: Enter on a focused node activates inline label editing.</summary>
+    private void OnNodeKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_isEditingLabel)
+            StartLabelEdit();
+    }
+
+    // ── Label editing methods ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Enters inline label edit mode. Captures _previousLabelAtEditStart so CommitLabel()
+    /// can raise the correct before/after pair even if the node record changes externally.
+    /// Focus is deferred to the next Blazor render cycle so the input element exists in the DOM.
+    /// </summary>
+    private void StartLabelEdit()
+    {
+        _previousLabelAtEditStart = Node.WorkflowNode.Label;
+        _labelBuffer              = _previousLabelAtEditStart;
+        _isEditingLabel           = true;
+        Node.IsLabelEditing       = true;
+        InvokeAsync(async () =>
+        {
+            await Task.Yield();  // let Blazor render the input element
+            try { await _labelInputRef.FocusAsync(); }
+            catch { /* JS not ready — silently skip auto-focus */ }
+        });
+    }
+
+    /// <summary>Updates _labelBuffer as the user types; never touches Node.WorkflowNode.Label.</summary>
+    private void OnLabelInput(ChangeEventArgs e) =>
+        _labelBuffer = e.Value?.ToString() ?? string.Empty;
+
+    /// <summary>Handles Enter (commit) and Escape (cancel) in the label input.</summary>
+    private void OnLabelKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")  CommitLabel();
+        else if (e.Key == "Escape") CancelLabel();
+    }
+
+    /// <summary>
+    /// Commits the edited label. The double-fire guard (Enter-keydown + immediate blur)
+    /// ensures only the first invocation fires RaiseLabelCommitted.
+    /// </summary>
+    private void CommitLabel()
+    {
+        if (!_isEditingLabel) return;  // double-fire guard
+        _isEditingLabel     = false;
+        Node.IsLabelEditing = false;
+        Node.RaiseLabelCommitted(_previousLabelAtEditStart, _labelBuffer);
+    }
+
+    /// <summary>Cancels the edit and restores the display span without firing a commit event.</summary>
+    private void CancelLabel()
+    {
+        _isEditingLabel     = false;
+        Node.IsLabelEditing = false;
+    }
+
+    /// <summary>
+    /// Returns the node's current label, or a type-appropriate fallback when the label is empty.
+    /// The fallback is display-only — an empty string is stored in WorkflowNode.Label so that
+    /// re-opening edit mode shows an empty input (the placeholder is never pre-filled).
+    /// </summary>
+    private string DisplayLabel() =>
+        string.IsNullOrEmpty(Node.WorkflowNode.Label) ? GetFallbackLabel() : Node.WorkflowNode.Label;
+
+    private string GetFallbackLabel() => Node.WorkflowNode.NodeType switch
+    {
+        WorkflowNodeType.Trigger           => "Start / Trigger",
+        WorkflowNodeType.AgenticReason     => "AI Agent",
+        WorkflowNodeType.HumanApproval     => "Ask a Person",
+        WorkflowNodeType.FunctionRoute     => "Smart Branch",
+        WorkflowNodeType.FunctionTransform => "Transform",
+        WorkflowNodeType.FunctionNotify    => "Notify",
+        WorkflowNodeType.FunctionData      => "Save / Load",
+        _                                  => "Untitled node",
+    };
+
+    private string GetBorderClass() => Node.WorkflowNode.NodeType switch
+    {
+        WorkflowNodeType.Trigger        => "border-emerald-500",
+        WorkflowNodeType.AgenticReason  => "border-amber-500",
+        WorkflowNodeType.HumanApproval  => "border-purple-500",
+        _                               => "border-cyan-600",
+    };
+
+    private string GetBackgroundClass() => Node.WorkflowNode.NodeType switch
+    {
+        WorkflowNodeType.Trigger        => "bg-emerald-950",
+        _                               => "bg-gray-900",
+    };
+
+    private string GetHeaderClass() => Node.WorkflowNode.NodeType switch
+    {
+        WorkflowNodeType.Trigger           => "bg-emerald-700",
+        WorkflowNodeType.AgenticReason     => "bg-amber-600",
+        WorkflowNodeType.HumanApproval     => "bg-purple-700",
+        WorkflowNodeType.FunctionRoute     => "bg-cyan-700",
+        WorkflowNodeType.FunctionTransform => "bg-teal-700",
+        WorkflowNodeType.FunctionNotify    => "bg-sky-700",
+        WorkflowNodeType.FunctionData      => "bg-indigo-700",
+        _                                  => "bg-cyan-700",
+    };
+
+    private string GetIcon() => Node.WorkflowNode.NodeType switch
+    {
+        WorkflowNodeType.Trigger          => "▶",
+        WorkflowNodeType.AgenticReason    => "🧠",
+        WorkflowNodeType.HumanApproval    => "👤",
+        WorkflowNodeType.FunctionRoute    => "🔀",
+        WorkflowNodeType.FunctionTransform=> "⚙️",
+        WorkflowNodeType.FunctionNotify   => "🔔",
+        WorkflowNodeType.FunctionData     => "💾",
+        _                                 => "📦",
+    };
+
+    private string TruncateGoal()
+    {
+        const int maxLen = 60;
+        var goal = Node.WorkflowNode.GoalPrompt ?? string.Empty;
+        return goal.Length > maxLen ? goal[..maxLen] + "…" : goal;
+    }
+
+    private string GetExecutionRingClass() => ExecutionState?.Status switch
+    {
+        NodeStatus.Active    => "node-active ring-2 ring-cyan-500 ring-offset-1 ring-offset-gray-950",
+        NodeStatus.Completed => "ring-2 ring-green-500 ring-offset-1 ring-offset-gray-950",
+        NodeStatus.Failed    => "ring-2 ring-red-500 ring-offset-1 ring-offset-gray-950",
+        NodeStatus.Skipped   => "ring-1 ring-gray-600 ring-offset-1 ring-offset-gray-950",
+        _                    => string.Empty,
+    };
+
+    private string GetStatusBadgeClass() => ExecutionState?.Status switch
+    {
+        NodeStatus.Active    => "bg-cyan-600 animate-pulse text-white",
+        NodeStatus.Completed => "bg-green-600 text-white",
+        NodeStatus.Failed    => "bg-red-600 text-white",
+        NodeStatus.Skipped   => "bg-gray-600 text-gray-300",
+        NodeStatus.TimedOut  => "bg-orange-600 text-white",
+        _                    => "bg-gray-700 text-gray-400",
+    };
+
+    private string GetStatusLabel() => ExecutionState?.Status switch
+    {
+        NodeStatus.NotStarted => "Waiting",
+        NodeStatus.Active     => "Running…",
+        NodeStatus.Completed  => "Done",
+        NodeStatus.Failed     => "Failed",
+        NodeStatus.Skipped    => "Skipped",
+        NodeStatus.TimedOut   => "Timed out",
+        _                     => string.Empty,
+    };
+}

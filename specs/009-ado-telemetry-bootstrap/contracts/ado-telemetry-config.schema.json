@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ado-telemetry-config",
+  "title": "AdoTelemetryFieldConfig",
+  "description": "Externalized configuration for the ADO telemetry field bootstrap preflight step. Embed the default at DBAIAzure.Core.Resources.default-telemetry-config.json; override via IConfiguration[\"AdoTelemetry:ConfigPath\"].",
+  "type": "object",
+  "required": ["version", "work_item_types", "fallback_strategy", "tags_encoding"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Schema version. Current: \"1.0\".",
+      "example": "1.0"
+    },
+    "work_item_types": {
+      "type": "object",
+      "description": "Keyed by logical WIT name (\"UserStory\" or \"Task\"). Resolved to the actual ADO WIT name at runtime based on detected process type (Agile → \"User Story\"; Scrum → \"Product Backlog Item\").",
+      "additionalProperties": {
+        "$ref": "#/$defs/WorkItemTypeConfig"
+      },
+      "minProperties": 1
+    },
+    "fallback_strategy": {
+      "type": "object",
+      "description": "Maps an AdoFieldType string to a fallback ADO reference name. Null value means log-only.",
+      "properties": {
+        "string":         { "type": ["string", "null"] },
+        "integer":        { "type": ["string", "null"] },
+        "double":         { "type": ["string", "null"] },
+        "picklistString": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "tags_encoding": {
+      "type": "string",
+      "description": "Encoding scheme used when writing multiple values to the Tags fallback field.",
+      "enum": ["pipe_separated_kv"]
+    }
+  },
+  "$defs": {
+    "WorkItemTypeConfig": {
+      "type": "object",
+      "required": ["fields"],
+      "properties": {
+        "fields": {
+          "type": "array",
+          "description": "Ordered list of telemetry fields to create/map for this work item type.",
+          "items": { "$ref": "#/$defs/FieldDefinition" },
+          "minItems": 1
+        }
+      }
+    },
+    "FieldDefinition": {
+      "type": "object",
+      "required": ["name", "reference", "type", "required"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "ADO display name for the field (e.g. \"AI Session ID\")."
+        },
+        "reference": {
+          "type": "string",
+          "description": "ADO reference name (e.g. \"Custom.AISessionID\"). Must start with \"Custom.\" for custom fields.",
+          "pattern": "^Custom\\..+"
+        },
+        "type": {
+          "type": "string",
+          "description": "ADO field type.",
+          "enum": ["string", "integer", "double", "picklistString"]
+        },
+        "picklist": {
+          "type": "array",
+          "description": "Required when type is \"picklistString\". Ordered list of allowed values.",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether the field is required on the work item. Always false for telemetry fields."
+        },
+        "fallback_reference": {
+          "type": ["string", "null"],
+          "description": "ADO reference name of the native field to use when Bootstrap Mode is not available. Null means log-only."
+        },
+        "fallback_display_name": {
+          "type": ["string", "null"],
+          "description": "Human-readable name of the fallback field. Used for manifest and log messages."
+        }
+      },
+      "if": { "properties": { "type": { "const": "picklistString" } }, "required": ["type"] },
+      "then": { "required": ["picklist"] }
+    }
+  }
+}

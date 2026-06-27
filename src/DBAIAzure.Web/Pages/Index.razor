@@ -1,0 +1,220 @@
+@* LangGraph-parity thread list: search, status/source filter, source badges, pagination. *@
+@page "/"
+@implements IDisposable
+@inject PipelineOrchestrator Orchestrator
+@inject NavigationManager Nav
+
+
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-semibold text-fg">Threads</h1>
+    <div class="flex items-center gap-2">
+        <button @onclick="OpenConfigModal" title="Connector configuration"
+                class="p-2 text-muted hover:text-fg hover:bg-surface rounded transition-colors">
+            ⚙
+        </button>
+        <a href="/new-ticket"
+           class="px-4 py-2 bg-accent hover:opacity-90 text-onaccent text-sm rounded transition-colors">
+            + New Thread
+        </a>
+    </div>
+</div>
+
+<!-- ── Search + filter bar ──────────────────────────────────────────────── -->
+<div class="flex flex-wrap gap-3 mb-4">
+    <input type="search"
+           placeholder="Search ticket ID or title…"
+           value="@_searchQuery"
+           @oninput="OnSearchChangedAsync"
+           class="flex-1 min-w-48 bg-surface border border-line rounded px-3 py-2 text-sm
+                  text-fg placeholder-muted focus:outline-none focus:border-accent" />
+
+    <select @bind="_statusFilter" @bind:after="OnFilterChangedAsync"
+            class="bg-surface border border-line rounded px-3 py-2 text-sm text-fg
+                   focus:outline-none focus:border-accent">
+        <option value="">All Statuses</option>
+        <option value="Running">Running</option>
+        <option value="AwaitingHuman">Awaiting PO</option>
+        <option value="Complete">Complete</option>
+        <option value="Blocked">Blocked</option>
+        <option value="Failed">Failed</option>
+    </select>
+
+    <select @bind="_sourceFilter" @bind:after="OnFilterChangedAsync"
+            class="bg-surface border border-line rounded px-3 py-2 text-sm text-fg
+                   focus:outline-none focus:border-accent">
+        <option value="">All Sources</option>
+        <option value="manual">Manual</option>
+        <option value="servicenow">ServiceNow</option>
+        <option value="replay">Replay</option>
+    </select>
+
+    <div class="flex items-center gap-2">
+        <button @onclick="PrevPageAsync" disabled="@(_currentPage == 0)"
+                class="px-3 py-2 bg-raised hover:bg-surface disabled:opacity-30 text-fg
+                       text-sm rounded transition-colors">
+            ‹
+        </button>
+        <span class="text-muted text-sm min-w-16 text-center">
+            @if (_isLoading)
+            {
+                <span>Loading…</span>
+            }
+            else
+            {
+                <span>Page @(_currentPage + 1)</span>
+            }
+        </span>
+        <button @onclick="NextPageAsync" disabled="@(_runs.Count < PageSize)"
+                class="px-3 py-2 bg-raised hover:bg-surface disabled:opacity-30 text-fg
+                       text-sm rounded transition-colors">
+            ›
+        </button>
+    </div>
+</div>
+
+<!-- ── Thread table ─────────────────────────────────────────────────────── -->
+@if (_isLoading)
+{
+    <div class="bg-surface border border-line rounded-lg p-8 text-center text-muted">
+        Loading runs…
+    </div>
+}
+else if (!_runs.Any())
+{
+    <div class="bg-surface border border-line rounded-lg p-8 text-center text-muted">
+        No threads found. Submit a ticket or push one from ServiceNow to get started.
+    </div>
+}
+else
+{
+    <div class="bg-surface border border-line rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead class="bg-raised text-muted text-left">
+                <tr>
+                    <th class="px-4 py-3">Run ID</th>
+                    <th class="px-4 py-3">Ticket</th>
+                    <th class="px-4 py-3">Source</th>
+                    <th class="px-4 py-3">Status</th>
+                    <th class="px-4 py-3">Points</th>
+                    <th class="px-4 py-3">Started</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-line">
+                @foreach (var run in _runs)
+                {
+                    <tr class="hover:bg-surface cursor-pointer transition-colors"
+                        @onclick="() => GoToRun(run.RunId)">
+                        <td class="px-4 py-3 font-mono text-accent text-xs">@run.RunId</td>
+                        <td class="px-4 py-3">
+                            <div class="font-medium text-fg text-xs truncate max-w-xs">
+                                @run.TicketId
+                            </div>
+                            <div class="text-muted text-xs truncate max-w-xs mt-0.5">
+                                @run.Title
+                            </div>
+                            @if (!string.IsNullOrEmpty(run.SnowNumber))
+                            {
+                                <div class="text-xs text-accent mt-0.5">@run.SnowNumber</div>
+                            }
+                        </td>
+                        <td class="px-4 py-3">
+                            <SourceBadge Source="@run.Source" />
+                        </td>
+                        <td class="px-4 py-3">
+                            <StatusBadge Status="@run.Status" />
+                        </td>
+                        <td class="px-4 py-3 text-fg">
+                            @(run.StoryPoints?.ToString() ?? "—")
+                        </td>
+                        <td class="px-4 py-3 text-muted text-xs">
+                            @run.StartedAt.ToLocalTime().ToString("MM/dd HH:mm")
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private const int PageSize = 20;
+
+    // The connector configuration UI lives on the dedicated Settings page; the gear button navigates there.
+    private void OpenConfigModal() => Nav.NavigateTo("/settings/connectors");
+
+    private string _searchQuery = string.Empty;
+    private string _statusFilter = string.Empty;
+    private string _sourceFilter = string.Empty;
+    private int _currentPage;
+    private IReadOnlyList<PersistedRunSummary> _runs = [];
+    private bool _isLoading;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Orchestrator.RunUpdated += OnRunUpdated;
+        await LoadRunsAsync();
+    }
+
+    private async Task LoadRunsAsync()
+    {
+        _isLoading = true;
+
+        var parsedStatus = Enum.TryParse<PipelineRunStatus>(_statusFilter, out var s)
+            ? (PipelineRunStatus?)s
+            : null;
+
+        var search = string.IsNullOrWhiteSpace(_searchQuery) ? null : _searchQuery.Trim();
+
+        var allRuns = await Orchestrator.ListRunsAsync(search, parsedStatus, _currentPage * PageSize, PageSize);
+
+        // Source filter applied in-memory (not yet wired to repository query)
+        _runs = string.IsNullOrEmpty(_sourceFilter)
+            ? allRuns
+            : allRuns.Where(r => r.Source == _sourceFilter).ToList();
+
+        _isLoading = false;
+    }
+
+    private async Task OnSearchChangedAsync(ChangeEventArgs args)
+    {
+        _searchQuery = args.Value?.ToString() ?? string.Empty;
+        _currentPage = 0;
+        await LoadRunsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnFilterChangedAsync()
+    {
+        _currentPage = 0;
+        await LoadRunsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task PrevPageAsync()
+    {
+        if (_currentPage > 0)
+        {
+            _currentPage--;
+            await LoadRunsAsync();
+        }
+    }
+
+    private async Task NextPageAsync()
+    {
+        if (_runs.Count >= PageSize)
+        {
+            _currentPage++;
+            await LoadRunsAsync();
+        }
+    }
+
+    private void GoToRun(string runId) => Nav.NavigateTo("/run/" + runId);
+
+    private void OnRunUpdated(string _) => InvokeAsync(async () =>
+    {
+        await LoadRunsAsync();
+        StateHasChanged();
+    });
+
+    public void Dispose() => Orchestrator.RunUpdated -= OnRunUpdated;
+}

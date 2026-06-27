@@ -1,0 +1,99 @@
+@* Review Queue: list of workflow runs suspended at a human-approval gate (FR-20, US3). *@
+@page "/review-queue"
+@implements IDisposable
+@inject IWorkflowRunRepository RunRepository
+@inject IWorkflowExecutionOrchestrator Orchestrator
+@using DBAIAzure.Core.Interfaces
+@using DBAIAzure.Core.Models
+
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-semibold text-fg">Review Queue</h1>
+    <span class="text-sm text-muted">Runs awaiting human approval</span>
+</div>
+
+@if (_loading)
+{
+    <div class="text-muted text-sm">Loading…</div>
+}
+else if (_pendingRuns.Count == 0)
+{
+    <div class="rounded bg-surface border border-line p-8 text-center">
+        <p class="text-muted text-sm">No runs are currently awaiting approval.</p>
+    </div>
+}
+else
+{
+    <div class="space-y-3">
+        @foreach (var run in _pendingRuns)
+        {
+            <div class="rounded bg-surface border border-line p-4 flex items-start justify-between gap-4">
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-fg truncate">@run.WorkflowName</p>
+                    <p class="text-xs text-muted mt-0.5">
+                        Run <span class="font-mono">@run.RunId</span>
+                        · Paused @FormatAge(run.SuspendedAt ?? run.StartedAt)
+                    </p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button @onclick="() => SubmitDecision(run.RunId, true)"
+                            class="px-3 py-1.5 text-xs rounded bg-accent hover:opacity-90 text-onaccent transition-colors">
+                        Approve
+                    </button>
+                    <button @onclick="() => SubmitDecision(run.RunId, false)"
+                            class="px-3 py-1.5 text-xs rounded bg-err hover:opacity-90 text-onaccent transition-colors">
+                        Reject
+                    </button>
+                    <a href="/runs/@run.RunId"
+                       class="px-3 py-1.5 text-xs rounded bg-raised hover:bg-surface text-fg transition-colors">
+                        Details
+                    </a>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private List<WorkflowRunRecord> _pendingRuns = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        Orchestrator.RunUpdated += OnRunUpdated;
+        await LoadRunsAsync();
+    }
+
+    private async Task LoadRunsAsync()
+    {
+        _pendingRuns = (await RunRepository.ListByStatusAsync(WorkflowRunStatus.Paused)).ToList();
+        _loading = false;
+    }
+
+    private void OnRunUpdated(string runId)
+    {
+        // Re-load the queue whenever any run changes status; Paused runs may have been
+        // approved/rejected and moved to a terminal state.
+        var task = InvokeAsync(async () =>
+        {
+            await LoadRunsAsync();
+            StateHasChanged();
+        });
+    }
+
+    private void SubmitDecision(string runId, bool approved)
+    {
+        Orchestrator.SubmitApproval(runId, approved);
+        // Queue will refresh via the RunUpdated event once the orchestrator transitions the run.
+    }
+
+    private static string FormatAge(DateTimeOffset at)
+    {
+        var age = DateTimeOffset.UtcNow - at;
+        if (age.TotalMinutes < 1) return "just now";
+        if (age.TotalHours   < 1) return $"{(int)age.TotalMinutes}m ago";
+        if (age.TotalDays    < 1) return $"{(int)age.TotalHours}h ago";
+        return $"{(int)age.TotalDays}d ago";
+    }
+
+    public void Dispose() => Orchestrator.RunUpdated -= OnRunUpdated;
+}

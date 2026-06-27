@@ -1,0 +1,119 @@
+@page "/{**catchall}"
+@namespace DBAIAzure.Web.Pages
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DBAIAzure — Pipeline Dashboard</title>
+    <base href="~/" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Map semantic colour names to the design tokens (see css/design-tokens.css). Screens use these
+         semantic aliases (bg-surface, text-accent, …) so a future light theme only flips the CSS vars. -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        app: 'var(--bg)',
+                        surface: 'var(--surface)',
+                        raised: 'var(--raised)',
+                        line: 'var(--line)',
+                        fg: 'var(--fg)',
+                        muted: 'var(--muted)',
+                        accent: 'var(--accent)',
+                        onaccent: 'var(--accent-contrast)',
+                        ok: 'var(--ok)',
+                        warn: 'var(--warn)',
+                        err: 'var(--err)',
+                        'accent-subtle': 'var(--accent-subtle)',
+                        'ok-subtle': 'var(--ok-subtle)',
+                        'warn-subtle': 'var(--warn-subtle)',
+                        'err-subtle': 'var(--err-subtle)'
+                    }
+                }
+            }
+        };
+    </script>
+    <!-- Admin Console design tokens (semantic colours + text scaling + focus/motion). -->
+    <link href="css/design-tokens.css" rel="stylesheet" />
+    <!-- Z.Blazor.Diagrams — canvas library for the Visual Workflow Builder -->
+    <link href="_content/Z.Blazor.Diagrams/style.min.css" rel="stylesheet" />
+    <!-- Workflow canvas animations — execution-flow dot and directional edge accent (spec 004) -->
+    <link href="css/workflow-canvas-animations.css" rel="stylesheet" />
+    <script src="_content/Z.Blazor.Diagrams/script.min.js"></script>
+    <!-- Mermaid.js — pipeline graph topology visualizer -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+        // Called from Blazor via IJSRuntime to render a Mermaid diagram into a container element.
+        window.mermaidRender = async function (containerId, definition) {
+            try {
+                const uniqueId = 'mermaid-svg-' + containerId;
+                const { svg } = await mermaid.render(uniqueId, definition);
+                const el = document.getElementById(containerId);
+                if (el) el.innerHTML = svg;
+            } catch (e) {
+                console.error('mermaidRender error for container ' + containerId + ':', e);
+            }
+        };
+        // Scrolls an element to its bottom — used to keep the streaming panel pinned to latest output.
+        window.scrollToBottom = function (elementId) {
+            const el = document.getElementById(elementId);
+            if (el) el.scrollTop = el.scrollHeight;
+        };
+        // Returns the bounding rect of a Blazor ElementReference — used by WorkflowCanvas to
+        // convert right-click client coordinates to canvas-relative coordinates.
+        window.getBoundingClientRect = function (element) {
+            const rect = element.getBoundingClientRect();
+            return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+        };
+        // Safe localStorage access for the onboarding banner dismissal (spec-009). Both swallow
+        // errors so private-mode / storage-disabled browsers degrade gracefully (banner just reappears).
+        window.localStorageGet = function (key) {
+            try { return window.localStorage.getItem(key); } catch (e) { return null; }
+        };
+        window.localStorageSet = function (key, value) {
+            try { window.localStorage.setItem(key, value); } catch (e) { /* storage unavailable — ignore */ }
+        };
+        // Applies the chosen text-size multiplier to the document root so every rem-based size scales
+        // from one variable (spec-014, US5). Driven by the top-bar text-size control + UiPreferenceService.
+        window.setRootTextScale = function (scale) {
+            document.documentElement.style.setProperty('--text-scale', scale);
+        };
+        // Watches the Blazor circuit's default reconnect overlay and reports connected/disconnected to
+        // .NET so the top-bar connection indicator can reflect it (spec-014, US5). The overlay is shown
+        // by blazor.server.js when the SignalR circuit drops and hidden when it recovers.
+        window.connectionMonitor = {
+            _observer: null,
+            start: function (dotNetRef) {
+                const report = function () {
+                    const modal = document.getElementById('components-reconnect-modal');
+                    const isDown = !!modal
+                        && modal.style.display !== 'none'
+                        && getComputedStyle(modal).display !== 'none';
+                    dotNetRef.invokeMethodAsync('OnConnectionStateChanged', !isDown);
+                };
+                this._observer = new MutationObserver(report);
+                this._observer.observe(document.body, { attributes: true, childList: true, subtree: true });
+                report();
+            },
+            stop: function () {
+                if (this._observer) { this._observer.disconnect(); this._observer = null; }
+            }
+        };
+        // Returns the bounding rect of a DOM element by id — used to anchor the field tooltip portal (spec-009).
+        window.getRectById = function (id) {
+            const el = document.getElementById(id);
+            if (!el) return null;
+            const r = el.getBoundingClientRect();
+            return { left: r.left, top: r.top, width: r.width, height: r.height, bottom: r.bottom, viewportHeight: window.innerHeight };
+        };
+    </script>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen antialiased">
+    <component type="typeof(App)" render-mode="ServerPrerendered" />
+    <script src="_framework/blazor.server.js"></script>
+</body>
+</html>

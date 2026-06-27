@@ -3,7 +3,6 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- SK Process Framework is experimental; suppress SKEXP0080 globally for this project -->
     <NoWarn>SKEXP0080</NoWarn>
   </PropertyGroup>
 

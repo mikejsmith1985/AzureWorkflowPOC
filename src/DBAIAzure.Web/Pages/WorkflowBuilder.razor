@@ -1,0 +1,1005 @@
+@* Visual Workflow Builder page.
+   Layout: palette (left) | canvas (center, flex-1) | optional chat (right).
+   Toolbar runs across the top. Pre-loads a 3-node example when no {id} is supplied. *@
+@page "/workflow-builder"
+@page "/workflow-builder/{Id}"
+@layout WorkflowBuilderLayout
+@implements IDisposable
+@inject NavigationManager Nav
+@inject IWorkflowCodeGenerator CodeGenerator
+@inject ILlmAvailabilityMonitor AvailabilityMonitor
+@inject WorkflowDesignSkillService DesignSkillService
+@inject WorkflowBuilderService BuilderService
+@inject IJSRuntime JSRuntime
+@inject IWorkflowExecutionOrchestrator ExecutionOrchestrator
+@inject IWorkflowCodeDiffService CodeDiffService
+@inject IWorkflowRealizationService RealizationService
+@inject IWorkflowReadinessService ReadinessService
+@inject IWorkflowPreRunValidator PreRunValidator
+@inject IUiPreferenceService UiPreference
+@using DBAIAzure.Core.Exceptions
+@using DBAIAzure.Core.Interfaces
+@using DBAIAzure.Core.Models
+@using DBAIAzure.Core.Models.NodeConfig
+@using System.Text.Json.Nodes
+@using Microsoft.AspNetCore.Components.Sections
+@using DBAIAzure.Web.Shared.Shell
+
+<PageTitle>@(string.IsNullOrWhiteSpace(_workflow?.Name) ? "Workflow Builder" : _workflow!.Name) — DBAIAzure</PageTitle>
+
+<div class="workflow-builder-shell flex flex-col h-screen overflow-hidden">
+
+    @* ── Toolbar ──────────────────────────────────────────────────────────────── *@
+    <WorkflowToolbar WorkflowName="@_workflow?.Name"
+                     CanUndo="@(_canvas?.CanUndo ?? false)"
+                     CanRedo="@(_canvas?.CanRedo ?? false)"
+                     IsSnapping="@(_canvas?.IsSnappingToGrid ?? true)"
+                     CanRun="@CanRun"
+                     IsTriggerMissing="@_isTriggerMissing"
+                     IsChatOpen="@UiPreference.IsAssistantOpen"
+                     LastSavedAt="@_lastSavedAt"
+                     ExecutionTimeoutMinutes="@(_workflow?.Settings?.ExecutionTimeoutMinutes ?? 5)"
+                     HasCanvasChangedSinceCodeGen="@_hasCanvasChangedSinceCodeGen"
+                     IsShortcutsPanelOpen="@_isShortcutsPanelOpen"
+                     OnUndoClicked="@(() => _canvas?.Undo())"
+                     OnRedoClicked="@(() => _canvas?.Redo())"
+                     OnSnapToggleClicked="@(() => _canvas?.ToggleSnap())"
+                     OnSaveClicked="@OnSaveAsync"
+                     OnChatToggleClicked="@OnChatToggleClicked"
+                     OnSettingsClicked="@OnSettingsClicked"
+                     OnMakeItRealClicked="@OnMakeItRealClicked"
+                     OnRunClicked="@OnRunClicked"
+                     OnStopClicked="@OnStopClicked"
+                     OnNameChanged="@OnWorkflowNameChanged"
+                     OnShortcutsToggleClicked="@OnShortcutsToggleClicked"
+                     IsRealizing="@_isRealizing"
+                     CanRealize="@CanRealize"
+                     IsProductionReady="@(_readinessReport?.IsProductionReady)"
+                     ReadinessBlockingSummary="@ReadinessBlockingSummary"
+                     IsRunning="@(_activeRunId is not null)" />
+
+    @* ── Body row ──────────────────────────────────────────────────────────────── *@
+    <div class="flex flex-1 overflow-hidden">
+
+        @* Palette *@
+        <WorkflowNodePalette OnPlaceNode="@OnPlaceNodeAsync"
+                             OnDragStarted="@((nodeType) => _draggedNodeType = nodeType)"
+                             IsCanvasEmpty="@(_canvas?.IsCanvasEmpty ?? true)" />
+
+        @* Canvas — flex-1 fills remaining width *@
+        <WorkflowCanvas @ref="_canvas"
+                        Workflow="@_workflow"
+                        WorkflowChanged="@OnWorkflowChanged"
+                        DraggedNodeType="@_draggedNodeType"
+                        NodeStates="@_nodeStates"
+                        NodeDoubleClicked="@OnNodeDoubleClicked"
+                        OnTriggerPresenceChanged="@OnTriggerPresenceChanged"
+                        OnRealizeNodeRequested="@OnRealizeNodeRequestedAsync" />
+
+        @* Node config panel — opens when user double-clicks a canvas node *@
+        <WorkflowNodeConfigPanel Node="@_configNode"
+                                 IsOpen="@(_configNode is not null)"
+                                 NodeUpdated="@OnNodeUpdated"
+                                 OnCloseRequested="@(() => _configNode = null)"
+                                 OnGoalPreview="@OnGoalPreview"
+                                 OnConfigCommitted="@OnConfigCommitted" />
+
+        @* DoR pre-run validation failures — shown above the run output panel *@
+        @if (_dorFailures.Count > 0)
+        {
+            <div class="mx-4 mt-2 bg-red-950/60 border border-red-700/50 rounded-lg px-3 py-2 text-sm text-red-300"
+                 role="alert" aria-label="Workflow is not ready to run">
+                <div class="font-semibold mb-1">Workflow not ready to run</div>
+                <ul class="list-disc list-inside space-y-0.5 text-xs">
+                    @foreach (var failure in _dorFailures)
+                    {
+                        <li>@failure.FailureReason</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        @* Execution output panel — shown when trigger is missing, during a run, or after completion *@
+        @if (_isTriggerMissing || _activeRunId is not null || _nodeStates.Count > 0)
+        {
+            <WorkflowRunOutputPanel NodeStates="@_nodeStates"
+                                    IsTriggerMissing="@_isTriggerMissing"
+                                    TimeoutMinutes="@(_workflow?.Settings?.ExecutionTimeoutMinutes ?? 5)"
+                                    OnFeedbackRequested="@OnNodeFeedbackRequested"
+                                    OnSettingsClicked="EventCallback.Empty" />
+        }
+
+        @* Settings panel — opens when toolbar Settings button is clicked *@
+        <WorkflowSettingsPanel IsOpen="@_isSettingsOpen"
+                               ExecutionTimeoutMinutes="@(_workflow?.Settings?.ExecutionTimeoutMinutes ?? 5)"
+                               OnTimeoutSaved="@OnTimeoutSaved"
+                               OnCloseRequested="@(() => _isSettingsOpen = false)" />
+
+        @* Realization review panel — opens when the user clicks "Make it real" (spec 007) *@
+        <WorkflowRealizationPanel IsOpen="@_isRealizationPanelOpen"
+                                  IsBusy="@_isRealizing"
+                                  Proposals="@_realizationProposals"
+                                  OnAcceptAll="@OnAcceptAllRealization"
+                                  OnAcceptOne="@OnAcceptOneRealization"
+                                  OnRejectOne="@OnRejectOneRealization"
+                                  OnRegenerateOne="@OnRegenerateOneRealization"
+                                  OnEditAccept="@OnEditAcceptRealization"
+                                  OnCloseRequested="@(() => { _isRealizationPanelOpen = false; })" />
+
+    </div>
+</div>
+
+@* The code-assistant chat now lives in the shell-level Assistant rail (US4 / C-AP-4). It is fed there
+   through a Blazor section seam so this page keeps ownership of the panel's @ref + callbacks while the
+   rail merely hosts it. Open/closed is the shared rail state (UiPreferenceService). *@
+<SectionContent SectionName="@AssistantSections.BuilderChat">
+    <WorkflowChatPanel @ref="_chatPanel"
+                       IsOpen="@UiPreference.IsAssistantOpen"
+                       Workflow="@_workflow"
+                       CodeGenerator="@CodeGenerator"
+                       AvailabilityMonitor="@AvailabilityMonitor"
+                       DesignSkillService="@DesignSkillService"
+                       DiffService="@CodeDiffService"
+                       OnCodeSaved="@OnCodeSaved"
+                       OnGenerationResultReady="@OnGenerationResultReadyAsync"
+                       OnCloseRequested="@(() => UiPreference.SetAssistantOpenAsync(false))" />
+</SectionContent>
+
+@* Run input modal *@
+<WorkflowRunInputModal IsOpen="@_isRunModalOpen"
+                       Workflow="@_workflow"
+                       OnRunConfirmed="@OnRunConfirmedAsync"
+                       OnCancelled="@(() => _isRunModalOpen = false)" />
+
+@* First-run entry choice modal — shown when user has no saved workflows and no URL id *@
+<WorkflowEntryChoiceModal IsOpen="@_isEntryModalOpen"
+                          OnScratchChosen="@OnEntryScratchChosen"
+                          OnExampleChosen="@OnEntryExampleChosen" />
+
+@* Unsaved-changes guard — shown when navigating away with pending edits (US5) *@
+<WorkflowUnsavedChangesModal IsOpen="@_isUnsavedChangesModalOpen"
+                             OnSave="@OnUnsavedChangesSave"
+                             OnDiscard="@OnUnsavedChangesDiscard"
+                             OnCancel="@OnUnsavedChangesCancel" />
+
+@code {
+    /// <summary>Workflow id from the route; null = new/example workflow.</summary>
+    [Parameter] public string? Id { get; set; }
+
+    private WorkflowCanvas? _canvas;
+    private WorkflowChatPanel? _chatPanel;
+    private WorkflowDefinition? _workflow;
+    private WorkflowNodeType? _draggedNodeType;
+    private WorkflowNode? _configNode;
+    private DateTimeOffset? _lastSavedAt;
+    private bool _isSettingsOpen;
+    // A chat prompt waiting to be applied once the rail-hosted chat panel finishes mounting.
+    private string? _pendingChatSuggestion;
+    private IDisposable? _locationChangingRegistration;
+    private bool _isRunModalOpen;
+    private string? _activeRunId;
+    // True when the canvas has no Trigger node yet — gates the Run button and shows advisory badges.
+    private bool _isTriggerMissing = true;
+    private IReadOnlyDictionary<string, NodeExecutionState> _nodeStates =
+        new Dictionary<string, NodeExecutionState>();
+    // Entry-choice modal: shown to first-time users who have no saved workflows and no URL id.
+    private int _savedWorkflowCount = -1;
+    private bool _isEntryModalOpen;
+    private bool _hasUnsavedChanges;
+    // Orange dot badge on Chat button when the canvas changes after code generation (T048).
+    private bool _hasCanvasChangedSinceCodeGen;
+    // Keyboard shortcuts panel (T064).
+    private bool _isShortcutsPanelOpen;
+    // Unsaved-changes nav guard modal (T039).
+    private bool _isUnsavedChangesModalOpen;
+    private LocationChangingContext? _pendingNavContext;
+    // Persistence/route binding: true once a DB row exists for the current workflow, and once the
+    // browser URL carries that workflow's id. New (example/scratch) workflows start unbound and are
+    // bound to /workflow-builder/{id} on their first successful save so edits survive navigation.
+    private bool _isWorkflowPersisted;
+    private bool _isRouteBound;
+    // One-shot flag: set immediately before our own programmatic URL rebind so the unsaved-changes
+    // nav guard lets that synthetic navigation through instead of popping the confirmation modal.
+    private bool _isProgrammaticNav;
+
+    // ── DoR pre-run validation (spec 008, US7) ────────────────────────────────────
+    private IReadOnlyList<DorRuleResult> _dorFailures = Array.Empty<DorRuleResult>();
+
+    // ── Node realization (spec 007) ───────────────────────────────────────────────
+    // Proposals streamed from the assistant during a "Make it real" pass, the panel's open state,
+    // a busy flag while proposing, and the most recent readiness evaluation (null until first run).
+    private List<RealizationProposal> _realizationProposals = new();
+    private bool _isRealizationPanelOpen;
+    private bool _isRealizing;
+    private WorkflowReadinessReport? _readinessReport;
+    // Signature of realized nodes' intent hashes at the last readiness evaluation; used to skip a
+    // re-evaluation (and its connector-health round-trip) when a canvas edit didn't change any intent.
+    private string? _lastIntentSignature;
+
+    /// <summary>"Make it real" is offered whenever the workflow has at least one node to realize.</summary>
+    private bool CanRealize => _workflow is { Nodes.Count: > 0 };
+
+    /// <summary>
+    /// The Run button is only enabled when every node in the workflow has been configured
+    /// (i.e. none are in the amber "unconfigured" state), at least one node exists, and — when a
+    /// readiness report is available — the workflow is production-ready (no Blocked connectors).
+    /// </summary>
+    private bool CanRun => _workflow is { Nodes.Count: > 0 }
+                        && _workflow.Nodes.All(n => n.IsConfigured)
+                        && _dorFailures.Count == 0
+                        && (_readinessReport is null || _readinessReport.IsProductionReady);
+
+    /// <summary>
+    /// First blocking reason from the readiness report, or null when there are none. Surfaced in
+    /// the toolbar so the user sees specifically which connector is missing (T048).
+    /// </summary>
+    private string? ReadinessBlockingSummary =>
+        _readinessReport is { IsProductionReady: false, BlockingSummary.Count: > 0 }
+            ? _readinessReport.BlockingSummary[0]
+            : null;
+
+    // ── Lifecycle ────────────────────────────────────────────────────────────────
+
+    // Constant owner id used throughout the demo build (single-tenant MVP).
+    private const string DemoOwnerId = "demo";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Re-render the toolbar's chat indicator when the shared rail open/closed state changes
+        // (for example when the rail is collapsed from its own control).
+        UiPreference.OnChange += OnUiPreferenceChanged;
+
+        // Load the owner's saved workflows once so we can both decide the landing behaviour and
+        // de-duplicate the default name of any new workflow against what already exists.
+        var existingWorkflows = await BuilderService.ListByOwnerAsync(DemoOwnerId);
+        _savedWorkflowCount    = existingWorkflows.Count;
+        var existingNames      = existingWorkflows.Select(existing => existing.Name);
+
+        if (string.IsNullOrWhiteSpace(Id))
+        {
+            if (_savedWorkflowCount == 0)
+            {
+                // First run: no saved workflows. Show the entry-choice modal and leave the canvas blank.
+                _isEntryModalOpen = true;
+                _workflow = WorkflowDefinition.CreateNew("Untitled Workflow", DemoOwnerId);
+            }
+            else
+            {
+                // Returning user on the bare builder URL: resume the most-recently-edited workflow
+                // rather than regenerating a throwaway example, so prior edits are never lost.
+                // The URL is rebound to this workflow's id after the first render (see OnAfterRenderAsync).
+                _workflow            = existingWorkflows.OrderByDescending(existing => existing.LastModifiedAt).First();
+                _lastSavedAt         = _workflow.LastModifiedAt;
+                _isWorkflowPersisted = true;
+            }
+        }
+        else if (string.Equals(Id, "new", StringComparison.OrdinalIgnoreCase))
+        {
+            // Explicit "start a new workflow" entry point (Gallery → New Workflow).
+            _workflow = BuildExampleWorkflow() with { Name = MakeNameUnique("Example: Support Request Flow", existingNames) };
+        }
+        else if (Guid.TryParse(Id, out var workflowId))
+        {
+            var loaded = await BuilderService.LoadAsync(workflowId, DemoOwnerId);
+            if (loaded is not null)
+            {
+                _workflow            = loaded;
+                _lastSavedAt         = loaded.LastModifiedAt;
+                _isWorkflowPersisted = true;
+                _isRouteBound        = true;  // URL already carries the workflow id.
+            }
+            else
+            {
+                // Unknown id: fall back to a fresh, uniquely-named example treated as a new workflow.
+                _workflow = BuildExampleWorkflow() with { Name = MakeNameUnique("Example: Support Request Flow", existingNames) };
+            }
+        }
+        else
+        {
+            _workflow = BuildExampleWorkflow() with { Name = MakeNameUnique("Example: Support Request Flow", existingNames) };
+        }
+
+        // Subscribe to auto-save events so the toolbar shows the timestamp.
+        BuilderService.WorkflowSaved += OnAutoSaved;
+        BuilderService.StartAutoSave(() => Task.FromResult<WorkflowDefinition?>(_workflow), _workflow);
+
+        // Subscribe to execution orchestrator state changes.
+        ExecutionOrchestrator.RunUpdated += OnRunUpdated;
+
+        // Warn before navigation when there are unsaved changes.
+        _locationChangingRegistration = Nav.RegisterLocationChangingHandler(OnLocationChanging);
+    }
+
+    private void OnAutoSaved(DateTimeOffset savedAt)
+    {
+        // Auto-save (and manual save) raise this. A successful save means the workflow now exists in
+        // the store, so reflect its id in the URL — otherwise a later navigation would regenerate a
+        // throwaway example and the persisted edits would never be shown again.
+        _lastSavedAt         = savedAt;
+        _isWorkflowPersisted = true;
+        _ = InvokeAsync(async () =>
+        {
+            await BindRouteToWorkflowAsync();
+            StateHasChanged();
+        });
+    }
+
+    /// <summary>
+    /// After the first render, bind the URL to a workflow that is already persisted but reached via the
+    /// bare /workflow-builder URL (the "resume most recent" path). This makes a browser reload reload the
+    /// same workflow instead of falling back to a freshly-generated example.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool isFirstRender)
+    {
+        if (isFirstRender && _isWorkflowPersisted && !_isRouteBound)
+            await BindRouteToWorkflowAsync();
+
+        // Apply any chat prompt that was queued before the rail-hosted panel had mounted.
+        if (_pendingChatSuggestion is not null && _chatPanel is not null)
+        {
+            _chatPanel.PrePopulateInput(_pendingChatSuggestion);
+            _pendingChatSuggestion = null;
+        }
+    }
+
+    /// <summary>
+    /// Rewrites the browser URL to /workflow-builder/{id} (replacing history, no reload) so the current
+    /// workflow is addressable and reloadable. The nav-guard bypass flag prevents this synthetic
+    /// navigation from triggering the unsaved-changes modal.
+    /// </summary>
+    private Task BindRouteToWorkflowAsync()
+    {
+        if (_workflow is null || _isRouteBound)
+            return Task.CompletedTask;
+
+        _isRouteBound      = true;
+        _isProgrammaticNav = true;
+        Nav.NavigateTo($"/workflow-builder/{_workflow.Id}", forceLoad: false, replace: true);
+        return Task.CompletedTask;
+    }
+
+    private ValueTask OnLocationChanging(LocationChangingContext context)
+    {
+        // Let our own URL rebind through without prompting (consume the one-shot bypass).
+        if (_isProgrammaticNav)
+        {
+            _isProgrammaticNav = false;
+            return ValueTask.CompletedTask;
+        }
+
+        if (!_hasUnsavedChanges)
+            return ValueTask.CompletedTask;
+
+        // Pause navigation and show the unsaved-changes confirmation modal (T040).
+        context.PreventNavigation();
+        _pendingNavContext          = context;
+        _isUnsavedChangesModalOpen = true;
+        _ = InvokeAsync(StateHasChanged);
+        return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Returns <paramref name="baseName"/> if no existing workflow already uses it, otherwise appends
+    /// the smallest " (n)" suffix that is free. Prevents the (OwnerId, Name) uniqueness conflict that
+    /// would otherwise make the first save of a second example/scratch workflow fail silently.
+    /// </summary>
+    private static string MakeNameUnique(string baseName, IEnumerable<string> existingNames)
+    {
+        var takenNames = new HashSet<string>(existingNames, StringComparer.OrdinalIgnoreCase);
+        if (!takenNames.Contains(baseName))
+            return baseName;
+
+        for (var suffix = 2; ; suffix++)
+        {
+            var candidate = $"{baseName} ({suffix})";
+            if (!takenNames.Contains(candidate))
+                return candidate;
+        }
+    }
+
+    // ── Example workflow ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Pre-loaded 4-node example (Trigger → Summarise → Approve → Notify) that helps
+    /// first-time users understand the workflow concept. All nodes are fully configured
+    /// so no amber badges appear and the Run button is immediately enabled.
+    /// </summary>
+    private static WorkflowDefinition BuildExampleWorkflow()
+    {
+        // Helper to create a standard single-input / single-output port pair.
+        static (WorkflowPort input, WorkflowPort output) StandardPorts(string inputLabel, string outputLabel) =>
+            (new WorkflowPort(Guid.NewGuid().ToString("N")[..8], inputLabel, PortDirection.Input),
+             new WorkflowPort(Guid.NewGuid().ToString("N")[..8], outputLabel, PortDirection.Output));
+
+        // Trigger node — entry point; always must be present for Run to be enabled (FR-01.3).
+        var trigOut = new WorkflowPort(Guid.NewGuid().ToString("N")[..8], "Support request text", PortDirection.Output);
+        var triggerNode = WorkflowNode.CreateNew(WorkflowNodeType.Trigger, "Receive Request") with
+        {
+            GoalPrompt    = "Receive an incoming customer support request and pass it to the AI step.",
+            OutputLabel   = trigOut.Label,
+            OutputPorts   = new[] { trigOut }.ToList().AsReadOnly(),
+            IsConfigured  = true,
+            PositionX     = 80,
+            PositionY     = 150,
+        };
+
+        var (sumIn, sumOut) = StandardPorts("Support request text", "3-bullet summary");
+        var summarizeNode = WorkflowNode.CreateNew(WorkflowNodeType.AgenticReason, "Summarise Request") with
+        {
+            GoalPrompt   = "Read the incoming support request and write a 3-bullet summary.",
+            InputLabel   = sumIn.Label,
+            OutputLabel  = sumOut.Label,
+            InputPorts   = new[] { sumIn }.ToList().AsReadOnly(),
+            OutputPorts  = new[] { sumOut }.ToList().AsReadOnly(),
+            IsConfigured = true,
+            PositionX    = 320,
+            PositionY    = 150,
+        };
+
+        var (appIn, appOut) = StandardPorts("Summary from AI", "Approved / Rejected");
+        var approveNode = WorkflowNode.CreateNew(WorkflowNodeType.HumanApproval, "Manager Approves") with
+        {
+            InputLabel   = appIn.Label,
+            OutputLabel  = appOut.Label,
+            InputPorts   = new[] { appIn }.ToList().AsReadOnly(),
+            OutputPorts  = new[] { appOut }.ToList().AsReadOnly(),
+            IsConfigured = true,
+            PositionX    = 560,
+            PositionY    = 150,
+        };
+
+        var (notIn, notOut) = StandardPorts("Approval decision", "Email sent confirmation");
+        var notifyNode = WorkflowNode.CreateNew(WorkflowNodeType.FunctionNotify, "Notify Customer") with
+        {
+            InputLabel   = notIn.Label,
+            OutputLabel  = notOut.Label,
+            InputPorts   = new[] { notIn }.ToList().AsReadOnly(),
+            OutputPorts  = new[] { notOut }.ToList().AsReadOnly(),
+            IsConfigured = true,
+            PositionX    = 800,
+            PositionY    = 150,
+        };
+
+        var edgeTriggerToSummarise = WorkflowEdge.CreateNew(
+            sourceNodeId: triggerNode.Id, sourcePortId: trigOut.Id,
+            targetNodeId: summarizeNode.Id, targetPortId: sumIn.Id,
+            label: "Request received");
+
+        var edge1 = WorkflowEdge.CreateNew(
+            summarizeNode.Id, sumOut.Id,
+            approveNode.Id,   appIn.Id,
+            "Summary ready");
+
+        var edge2 = WorkflowEdge.CreateNew(
+            approveNode.Id, appOut.Id,
+            notifyNode.Id,  notIn.Id,
+            "Approved");
+
+        return new WorkflowDefinition
+        {
+            Id             = Guid.NewGuid(),
+            Name           = "Example: Support Request Flow",
+            OwnerId        = "demo",
+            Nodes          = new[] { triggerNode, summarizeNode, approveNode, notifyNode }.ToList().AsReadOnly(),
+            Edges          = new[] { edgeTriggerToSummarise, edge1, edge2 }.ToList().AsReadOnly(),
+            Settings       = new WorkflowSettings(),
+            ChatHistory    = Array.Empty<WorkflowChatMessage>(),
+            CreatedAt      = DateTimeOffset.UtcNow,
+            LastModifiedAt = DateTimeOffset.UtcNow,
+        };
+    }
+
+    // ── Event handlers ───────────────────────────────────────────────────────────
+
+    private async Task OnPlaceNodeAsync(WorkflowNodeType nodeType)
+    {
+        if (_canvas is not null)
+            await _canvas.PlaceNodeDefaultPositionAsync(nodeType);
+    }
+
+    private async Task OnWorkflowChanged(WorkflowDefinition updatedDefinition)
+    {
+        _workflow = updatedDefinition;
+        _hasUnsavedChanges = true;
+        // Mark orange dot on Chat button whenever canvas changes (T047).
+        _hasCanvasChangedSinceCodeGen = true;
+        _chatPanel?.NotifyWorkflowChanged();
+        StateHasChanged();
+
+        // Once a workflow has been realized, re-check readiness when (and only when) an edit changes a
+        // realized node's plain-language intent, so it surfaces as out-of-date (R6 / T040). Gating on the
+        // intent signature avoids a connector-health round-trip on pure position drags.
+        if (_readinessReport is not null)
+            await ReevaluateReadinessIfIntentChangedAsync();
+    }
+
+    /// <summary>Re-evaluates readiness only if a realized node's intent hash changed since the last evaluation.</summary>
+    private async Task ReevaluateReadinessIfIntentChangedAsync()
+    {
+        if (_workflow is null) return;
+        var signature = ComputeIntentSignature(_workflow);
+        if (signature == _lastIntentSignature) return;
+        await EvaluateReadinessAsync();
+        StateHasChanged();
+    }
+
+    /// <summary>A stable signature of every realized node's intent hash — changes only on a meaningful edit.</summary>
+    private static string ComputeIntentSignature(WorkflowDefinition workflow) =>
+        string.Join("|", workflow.Nodes
+            .Where(node => node.IsConfigured)
+            .Select(node => DBAIAzure.Core.Validation.WorkflowIntentHasher.ComputeIntentHash(node, workflow)));
+
+    private async Task OnSaveAsync() => await TrySaveAsync();
+
+    /// <summary>
+    /// Persists the current workflow and returns true on success. On success the dirty flag is cleared
+    /// and the URL is bound to the workflow id so the work is reloadable. Validation and name-conflict
+    /// failures surface as canvas toasts and return false (so callers can keep the user on the page).
+    /// </summary>
+    private async Task<bool> TrySaveAsync()
+    {
+        if (_workflow is null) return false;
+        try
+        {
+            _workflow            = await BuilderService.SaveAsync(_workflow);
+            _lastSavedAt         = BuilderService.LastSavedAt;
+            _isWorkflowPersisted = true;
+            _hasUnsavedChanges   = false;
+            await BindRouteToWorkflowAsync();
+            return true;
+        }
+        catch (WorkflowValidationException ex)
+        {
+            // Surface validation messages as amber advisory banners in the toolbar area.
+            // WorkflowCanvas already shows individual messages via its toast; here we log all.
+            foreach (var message in ex.Messages)
+                _canvas?.ShowToast(message, isError: true);
+            return false;
+        }
+        catch (WorkflowNameConflictException)
+        {
+            // Another workflow already uses this name for this owner — guide the user to rename it.
+            _canvas?.ShowToast(
+                "A workflow with this name already exists — rename it from the toolbar before saving.",
+                isError: true);
+            return false;
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    private void OnTriggerPresenceChanged(bool isTriggerPresent)
+    {
+        _isTriggerMissing = !isTriggerPresent;
+        StateHasChanged();
+    }
+
+    private async Task OnChatToggleClicked()
+    {
+        // The chat now lives in the shared shell rail, so the toolbar toggle drives the same
+        // open/closed state the rail persists (UiPreferenceService).
+        var willOpen = !UiPreference.IsAssistantOpen;
+        await UiPreference.SetAssistantOpenAsync(willOpen);
+        // FR-07.4: clear the orange dot as soon as the panel opens, regardless of
+        // whether the user proceeds to regenerate code.
+        if (willOpen)
+            _hasCanvasChangedSinceCodeGen = false;
+    }
+
+    private Task OnCodeSaved(string code)
+    {
+        if (_workflow is null)
+            return Task.CompletedTask;
+        _workflow = _workflow with { GeneratedCode = code };
+        // Clear the orange dot badge once code is generated from the current canvas (T049).
+        _hasCanvasChangedSinceCodeGen = false;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task OnGenerationResultReadyAsync(WorkflowGenerationResult result)
+    {
+        if (_workflow is null || result.Nodes.Count == 0)
+            return;
+
+        _workflow = BuilderService.ApplyGenerationResult(_workflow, result);
+        _workflow = await BuilderService.SaveAsync(_workflow);
+        await RunDorValidationAsync();
+        StateHasChanged();
+    }
+
+    private async Task RunDorValidationAsync()
+    {
+        if (_workflow is null || _workflow.Nodes.Count == 0)
+        {
+            _dorFailures = Array.Empty<DorRuleResult>();
+            return;
+        }
+        var results = await PreRunValidator.ValidateAsync(_workflow);
+        _dorFailures = results.Where(r => !r.Passed).ToList().AsReadOnly();
+    }
+
+    private void OnRunUpdated(string runId)
+    {
+        if (runId != _activeRunId) return;
+        var run = ExecutionOrchestrator.GetRun(runId);
+        if (run is null) return;
+        _nodeStates = run.NodeStates.ToDictionary(ns => ns.NodeId);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnSettingsClicked()
+    {
+        _isSettingsOpen = !_isSettingsOpen;
+        StateHasChanged();
+    }
+
+    private void OnTimeoutSaved(int timeoutMinutes)
+    {
+        if (_workflow is null) return;
+        _workflow = _workflow with
+        {
+            Settings = (_workflow.Settings ?? new WorkflowSettings()) with
+            {
+                ExecutionTimeoutMinutes = timeoutMinutes,
+            },
+        };
+        StateHasChanged();
+    }
+
+    // ── Node realization handlers (spec 007) ──────────────────────────────────────
+
+    /// <summary>
+    /// Runs a single-node "Realize this node" pass: proposes production-ready config for exactly the
+    /// requested node and opens the review panel scoped to that one proposal. Other nodes are untouched.
+    /// Triggered from the right-click context menu on the canvas (US3).
+    /// </summary>
+    private async Task OnRealizeNodeRequestedAsync(WorkflowNode node)
+    {
+        if (_workflow is null || _isRealizing) return;
+
+        _isRealizing            = true;
+        _isRealizationPanelOpen = true;
+        _realizationProposals   = new();
+        StateHasChanged();
+
+        try
+        {
+            var proposal = await RealizationService.ProposeNodeAsync(_workflow, node.Id);
+            _realizationProposals = new() { proposal };
+        }
+        catch (Exception ex)
+        {
+            _canvas?.ShowToast($"Couldn't prepare a proposal for this node: {ex.Message}", isError: true);
+        }
+        finally
+        {
+            _isRealizing = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Runs a whole-workflow "Make it real" pass: asks the assistant to propose executable config for
+    /// every node, streaming each proposal into the review panel as it arrives. Proposing never mutates
+    /// the workflow — the user applies the results explicitly from the panel.
+    /// </summary>
+    private async Task OnMakeItRealClicked()
+    {
+        if (_workflow is null || _isRealizing) return;
+
+        _isRealizing            = true;
+        _isRealizationPanelOpen = true;
+        _realizationProposals   = new();
+        StateHasChanged();
+
+        try
+        {
+            var proposals = await RealizationService.ProposeAllAsync(_workflow, proposal =>
+            {
+                _realizationProposals.Add(proposal);
+                _ = InvokeAsync(StateHasChanged);
+            });
+            _realizationProposals = proposals.ToList();
+        }
+        catch (Exception ex)
+        {
+            _canvas?.ShowToast($"Couldn't prepare proposals: {ex.Message}", isError: true);
+        }
+        finally
+        {
+            _isRealizing = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Applies every acceptable proposal to its node, persists the result, and re-evaluates production
+    /// readiness. Each acceptance is deterministic and touches only its own node; an intrinsically
+    /// invalid proposal is skipped and surfaced by the readiness report rather than aborting the batch.
+    /// </summary>
+    private async Task OnAcceptAllRealization()
+    {
+        if (_workflow is null) return;
+
+        var updatedWorkflow = _workflow;
+        foreach (var proposal in _realizationProposals
+            .Where(candidate => candidate.Status == NodeRealizationStatus.Proposed && candidate.ProposedConfig is not null))
+        {
+            try
+            {
+                updatedWorkflow = RealizationService.AcceptProposal(updatedWorkflow, proposal, proposal.ProposedConfig!);
+            }
+            catch (ArgumentException)
+            {
+                // A proposal that fails intrinsic validation on apply is left unrealized; the
+                // readiness report below explains why the node still needs attention.
+            }
+        }
+
+        _workflow          = updatedWorkflow;
+        _hasUnsavedChanges = true;
+        await TrySaveAsync();
+        await EvaluateReadinessAsync();
+
+        _isRealizationPanelOpen = false;
+        StateHasChanged();
+    }
+
+    /// <summary>Accepts a single proposal as-is, applies it, persists, and re-evaluates readiness (US2).</summary>
+    private async Task OnAcceptOneRealization(RealizationProposal proposal)
+    {
+        if (proposal.ProposedConfig is null) return;
+        await ApplyProposalAsync(proposal, proposal.ProposedConfig);
+    }
+
+    /// <summary>Rejects a single proposal: its node keeps its prior state and the card is removed (US2).</summary>
+    private void OnRejectOneRealization(RealizationProposal proposal)
+    {
+        _realizationProposals.RemoveAll(candidate => candidate.NodeId == proposal.NodeId);
+        if (_realizationProposals.Count == 0) _isRealizationPanelOpen = false;
+        StateHasChanged();
+    }
+
+    /// <summary>Asks the assistant for a fresh proposal for one node, replacing the old card (US2).</summary>
+    private async Task OnRegenerateOneRealization(RealizationProposal proposal)
+    {
+        if (_workflow is null || _isRealizing) return;
+        _isRealizing = true;
+        StateHasChanged();
+        try
+        {
+            var fresh = await RealizationService.ProposeNodeAsync(_workflow, proposal.NodeId);
+            var index = _realizationProposals.FindIndex(candidate => candidate.NodeId == proposal.NodeId);
+            if (index >= 0) _realizationProposals[index] = fresh;
+            else _realizationProposals.Add(fresh);
+        }
+        catch (Exception ex)
+        {
+            _canvas?.ShowToast($"Couldn't regenerate that step: {ex.Message}", isError: true);
+        }
+        finally
+        {
+            _isRealizing = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Accepts a single proposal after the user edited its plain-language text (US2).</summary>
+    private async Task OnEditAcceptRealization(WorkflowRealizationPanel.ProposalEdit edit)
+    {
+        if (edit.Proposal.ProposedConfig is null) return;
+        var editedConfig = ApplyPrimaryText(edit.Proposal, edit.EditedText);
+        await ApplyProposalAsync(edit.Proposal, editedConfig);
+    }
+
+    /// <summary>Applies one accepted config to its node, persists, re-evaluates readiness, removes the card.</summary>
+    private async Task ApplyProposalAsync(RealizationProposal proposal, RealizedNodeConfigEnvelope config)
+    {
+        if (_workflow is null) return;
+        try
+        {
+            _workflow          = RealizationService.AcceptProposal(_workflow, proposal, config);
+            _hasUnsavedChanges = true;
+            _realizationProposals.RemoveAll(candidate => candidate.NodeId == proposal.NodeId);
+            await TrySaveAsync();
+            await EvaluateReadinessAsync();
+            if (_realizationProposals.Count == 0) _isRealizationPanelOpen = false;
+        }
+        catch (ArgumentException ex)
+        {
+            // Rejected by intrinsic validation (e.g. an edit emptied a required field) — keep the card.
+            _canvas?.ShowToast($"Couldn't apply that step: {ex.Message}", isError: true);
+        }
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Rebuilds a proposal's config envelope with the user's edited plain-language text written into the
+    /// node type's primary field. Structural node types (route/transform/data) are not text-editable and
+    /// are returned unchanged.
+    /// </summary>
+    private static RealizedNodeConfigEnvelope ApplyPrimaryText(RealizationProposal proposal, string editedText)
+    {
+        var envelope = proposal.ProposedConfig!;
+        var property = proposal.NodeType switch
+        {
+            WorkflowNodeType.AgenticReason  => "instruction",
+            WorkflowNodeType.FunctionNotify => "messageTemplate",
+            WorkflowNodeType.HumanApproval  => "promptShown",
+            WorkflowNodeType.Trigger        => "initialDataDescription",
+            _                               => null,
+        };
+        if (property is null) return envelope;
+
+        try
+        {
+            if (JsonNode.Parse(envelope.ConfigJson) is JsonObject configObject)
+            {
+                configObject[property] = editedText;
+                return envelope with { ConfigJson = configObject.ToJsonString() };
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Unparseable config — fall through and accept the original envelope unchanged.
+        }
+        return envelope;
+    }
+
+    /// <summary>Evaluates and stores the workflow's production readiness so the toolbar can reflect it.</summary>
+    private async Task EvaluateReadinessAsync()
+    {
+        if (_workflow is null) return;
+        _readinessReport     = await ReadinessService.EvaluateAsync(_workflow);
+        // Seed the intent signature so later canvas edits only re-evaluate on a real intent change.
+        _lastIntentSignature = ComputeIntentSignature(_workflow);
+    }
+
+    private void OnRunClicked() => _isRunModalOpen = true;
+
+    private async Task OnRunConfirmedAsync(WorkflowRunInput input)
+    {
+        _isRunModalOpen = false;
+        if (_workflow is null) return;
+        _activeRunId = await ExecutionOrchestrator.StartRunAsync(_workflow, input.ScenarioText);
+    }
+
+    private void OnStopClicked()
+    {
+        if (_activeRunId is not null)
+            ExecutionOrchestrator.RequestStop(_activeRunId);
+    }
+
+    private async Task OnNodeFeedbackRequested(NodeExecutionState nodeState)
+    {
+        // Open the shared rail so the chat is visible, then seed it with a step-specific prompt (T056).
+        await UiPreference.SetAssistantOpenAsync(true);
+        var stepLabel  = _workflow?.Nodes.FirstOrDefault(n => n.Id == nodeState.NodeId)?.Label ?? "this step";
+        var statusWord = nodeState.Status == NodeStatus.Failed ? "failed" : "completed";
+        var suggestion = $"The '{stepLabel}' step {statusWord}. "
+            + (string.IsNullOrWhiteSpace(nodeState.OutputSummary)
+                ? "Can you suggest what to check or improve?"
+                : $"Output: {nodeState.OutputSummary}. Does this look correct?");
+
+        // The panel may have only just been mounted into the rail; if its reference isn't ready,
+        // stash the prompt and apply it on the next render (OnAfterRenderAsync).
+        if (_chatPanel is not null)
+            _chatPanel.PrePopulateInput(suggestion);
+        else
+            _pendingChatSuggestion = suggestion;
+        StateHasChanged();
+    }
+
+    private void OnNodeDoubleClicked(WorkflowNode node)
+    {
+        _configNode = node;
+        StateHasChanged();
+    }
+
+    private void OnNodeUpdated(WorkflowNode updatedNode)
+    {
+        _canvas?.UpdateNodeFromConfig(updatedNode);
+        _configNode = null;
+        _hasUnsavedChanges = true;
+        StateHasChanged();
+    }
+
+    // ── Toolbar name editing (US4) ────────────────────────────────────────────────
+
+    private void OnWorkflowNameChanged(string newName)
+    {
+        if (_workflow is null || string.IsNullOrWhiteSpace(newName)) return;
+        _workflow = _workflow with { Name = newName };
+        _hasUnsavedChanges = true;
+        StateHasChanged();
+    }
+
+    // ── Keyboard shortcuts panel (US9) ────────────────────────────────────────────
+
+    private void OnShortcutsToggleClicked()
+    {
+        _isShortcutsPanelOpen = !_isShortcutsPanelOpen;
+        StateHasChanged();
+    }
+
+    // ── Unsaved changes nav guard (US5) ──────────────────────────────────────────
+
+    private void OnUnsavedChangesDiscard()
+    {
+        _hasUnsavedChanges         = false;
+        _isUnsavedChangesModalOpen = false;
+        StateHasChanged();
+    }
+
+    private async Task OnUnsavedChangesSave()
+    {
+        // Only proceed with the originally-requested navigation if the save actually succeeded;
+        // otherwise keep the modal open so the user can resolve the validation/conflict error.
+        var didSave = await TrySaveAsync();
+        if (!didSave)
+            return;
+
+        _isUnsavedChangesModalOpen = false;
+        var pendingNav     = _pendingNavContext;
+        _pendingNavContext = null;
+        StateHasChanged();
+
+        // Resume the navigation the user originally attempted; the dirty flag is now clear so the
+        // location-changing guard lets it through.
+        if (pendingNav is not null)
+            Nav.NavigateTo(pendingNav.TargetLocation);
+    }
+
+    private void OnUnsavedChangesCancel()
+    {
+        _pendingNavContext         = null;
+        _isUnsavedChangesModalOpen = false;
+        StateHasChanged();
+    }
+
+    // ── Config panel live-preview and commit handlers (US2) ──────────────────────
+
+    private void OnGoalPreview(string goalText)
+    {
+        // Live-update the canvas node label while the user types in the config panel (T026).
+        if (_configNode is null || _workflow is null) return;
+        var previewNode = _configNode with { Label = string.IsNullOrWhiteSpace(goalText) ? _configNode.Label : goalText };
+        _canvas?.UpdateNodeFromConfig(previewNode);
+    }
+
+    private void OnConfigCommitted()
+    {
+        _hasUnsavedChanges = true;
+        StateHasChanged();
+    }
+
+    // ── Entry choice modal handlers (US1) ────────────────────────────────────────
+
+    private void OnEntryScratchChosen()
+    {
+        _isEntryModalOpen = false;
+        _workflow         = WorkflowDefinition.CreateNew("Untitled Workflow", DemoOwnerId);
+        StateHasChanged();
+    }
+
+    private void OnEntryExampleChosen()
+    {
+        _isEntryModalOpen = false;
+        _workflow         = BuildExampleWorkflow();
+        StateHasChanged();
+    }
+
+    private void OnUiPreferenceChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        BuilderService.WorkflowSaved -= OnAutoSaved;
+        BuilderService.StopAutoSave();
+        ExecutionOrchestrator.RunUpdated -= OnRunUpdated;
+        UiPreference.OnChange -= OnUiPreferenceChanged;
+        _locationChangingRegistration?.Dispose();
+    }
+}

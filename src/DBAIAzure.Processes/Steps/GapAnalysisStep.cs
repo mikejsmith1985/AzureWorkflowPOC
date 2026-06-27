@@ -1,6 +1,9 @@
 using DBAIAzure.Core.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.ChatCompletion;
 using Spectre.Console;
+using System.Text;
 using System.Text.Json;
 
 namespace DBAIAzure.Processes.Steps;
@@ -10,12 +13,16 @@ public class GapAnalysisStep : KernelProcessStep
     [KernelFunction]
     public async Task GenerateQuestionsAsync(KernelProcessStepContext ctx, TicketState ticket, Kernel kernel)
     {
+        var reporter    = kernel.Services.GetService<IProgressReporter>();
+        var chatService = kernel.GetRequiredService<IChatCompletionService>();
+        reporter?.ReportStep("GapAnalysis", "Generating clarifying questions...");
+
         var prompt = $"""
             You are a scrum master. A ticket has failed the Definition of Ready check.
             Generate exactly 2-3 short, specific clarifying questions that a Product Owner
             must answer before the ticket can be estimated.
 
-            Focus only on what is missing — do NOT ask about things already covered.
+            Focus only on what is missing - do NOT ask about things already covered.
 
             Return a JSON array of strings (the questions only, no numbering):
             ["question 1", "question 2"]
@@ -24,23 +31,32 @@ public class GapAnalysisStep : KernelProcessStep
             Ticket description: {ticket.Description}
             """;
 
-        var resultText = (await kernel.InvokePromptAsync(prompt)).ToString();
+        var history = new ChatHistory();
+        history.AddUserMessage(prompt);
 
-        var json = resultText.Trim();
-        if (json.StartsWith("```"))
+        var fullText = new StringBuilder();
+        await foreach (var chunk in chatService.GetStreamingChatMessageContentsAsync(history, kernel: kernel))
         {
-            json = string.Join('\n', json.Split('\n').Skip(1).TakeWhile(l => !l.StartsWith("```")));
+            var token = chunk.Content ?? string.Empty;
+            fullText.Append(token);
+            reporter?.ReportToken("GapAnalysis", token);
         }
+        var resultText = fullText.ToString().Trim();
+
+        var json = resultText.StartsWith("```")
+            ? string.Join('\n', resultText.Split('\n').Skip(1).TakeWhile(l => !l.StartsWith("```")))
+            : resultText;
 
         var questions = JsonSerializer.Deserialize<List<string>>(json) ?? [];
+        var updated   = ticket with { ClarifyingQuestions = questions };
 
-        var updated = ticket with { ClarifyingQuestions = questions };
+        reporter?.ReportSnapshot("GapAnalysis", ticket, updated);
+        foreach (var question in questions)
+            reporter?.ReportStep("GapAnalysis", question, ReportLevel.Warning);
 
-        AnsiConsole.MarkupLine("  [yellow]Gap analysis — clarifying questions for the PO:[/]");
-        for (int questionIndex = 0; questionIndex < questions.Count; questionIndex++)
-        {
-            AnsiConsole.MarkupLine($"    [dim]{questionIndex + 1}.[/] {Markup.Escape(questions[questionIndex])}");
-        }
+        AnsiConsole.MarkupLine("  [yellow]Gap analysis - clarifying questions:[/]");
+        for (int i = 0; i < questions.Count; i++)
+            AnsiConsole.MarkupLine($"    [dim]{i + 1}.[/] {Markup.Escape(questions[i])}");
 
         await ctx.EmitEventAsync(new() { Id = Events.QuestionsReady, Data = updated });
     }

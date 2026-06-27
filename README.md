@@ -13,6 +13,7 @@ built as interview prep for Azure AI engineering roles.
 | Fibonacci estimation | `EstimationStep` uses anchor-based reference class forecasting (see below) |
 | Azure Monitor tracing | `AddAzureMonitorTraceExporter` auto-instruments every SK call — visible in AI Foundry |
 | Provider swap | One-line switch from Anthropic to Azure OpenAI via SK's `IChatCompletionService` |
+| Visual Workflow Builder | Drag-and-drop canvas in Blazor Server — design, save, and execute SK pipelines in the browser |
 
 ## Architecture
 
@@ -134,7 +135,8 @@ The SQLite database (`pipeline.db`) is created automatically on first startup vi
 
 ### 6. Configure connectors (first-time only)
 
-Open the **Connectors** page from the main navigation. For each connector you want active:
+Open the **Connectors** page from the main navigation (Configuration → Connectors). The
+connector list shows every integration. For each connector you want active:
 
 1. Click the connector card to open its configuration panel.
 2. Enter credentials (API keys and secrets are encrypted at rest — they never appear in logs or
@@ -154,8 +156,8 @@ HITL notifications, and real ticket reads respectively.
 
 **From the web UI**
 
-Navigate to **Pipeline** in the main navigation and submit a ticket. The two built-in demo
-tickets are:
+Navigate to **Threads** (the home page at `/`, under Monitor) and submit a ticket via
+**+ New Thread**. The two built-in demo tickets are:
 
 | Ticket | Description | Expected path |
 |--------|-------------|---------------|
@@ -188,8 +190,9 @@ dotnet test
 ```
 
 The test suite covers DoR JSON parsing, Fibonacci clamping, record immutability,
-`HitlExternalChannel` event routing, and Visual Workflow Builder node operations.
-All tests pass without hitting a live LLM — no API key is required to run them.
+`HitlExternalChannel` event routing, Visual Workflow Builder node operations, and the
+Workflow UX (diff view, unsaved-changes modal, gallery search). All tests pass without
+hitting a live LLM — no API key is required to run them.
 
 ## Swapping to Azure OpenAI
 
@@ -234,3 +237,4 @@ tests/
 | Foundry tracing | "`AddAzureMonitorTraceExporter` auto-instruments every SK call — token counts, latency, and prompt/completion text visible in Foundry without a single manual span." |
 | Provider swap | "Built against Anthropic for speed; swapping to Azure OpenAI is one line. That proves the SK abstraction is working correctly." |
 | Fibonacci estimation | "Anchor-based reference class forecasting — Claude compares against known tasks instead of guessing in isolation. Every estimate comes with auditable reasoning, not just a number." |
+| Visual Workflow Builder | "Drag-and-drop canvas that generates Semantic Kernel Process code from a natural-language description — demonstrates how SK's typed event model can be surfaced to non-developers." |

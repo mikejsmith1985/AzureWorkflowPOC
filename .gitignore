@@ -23,7 +23,26 @@ appsettings.*.json
 TestResults/
 coverage/
 
+# Local SQLite database — runtime data, never commit
+*.db
+*.db-wal
+*.db-shm
+
+# Machine-specific SDK resolution (hardcoded user-local dotnet path)
+global.json
+
+# Local release output — zip archives and unpacked publish directories
+publish/
+
 # Local tooling — not part of the project
 .forge/
 .github/
 CLAUDE.md
+
+# Generated ADO bootstrap manifest (runtime output, not source)
+src/DBAIAzure.Web/specs/
+
+# Deploy-time secret env files — values come from the Forge Vault, NEVER committed (Article IX)
+deploy/aca/team.env
+**/*.env
+!**/*.env.example

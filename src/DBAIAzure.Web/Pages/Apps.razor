@@ -1,0 +1,225 @@
+@* Apps surface (feature 013): register a local repo as a monitored app, list apps with live status,
+   and trigger build/run/link/remove. Mirrors the reference admin console's app registry.
+   Route: /apps *@
+@page "/apps"
+@inject IAppRegistryRepository AppRegistry
+@inject IAppExecutor Executor
+@inject IAppStatusNotifier StatusNotifier
+@inject NavigationManager Nav
+@implements IDisposable
+@using DBAIAzure.Core.Interfaces
+@using DBAIAzure.Core.Models
+
+<PageTitle>Apps — DBAIAzure</PageTitle>
+
+<div class="max-w-5xl mx-auto py-8 px-4">
+
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-xl font-bold text-fg">Monitored Apps</h1>
+            <p class="text-sm text-muted mt-0.5">
+                Point at a local repo, build &amp; run it in a throwaway container, and link a workflow to monitor it.
+            </p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="text-xs px-2 py-1 rounded bg-raised text-muted" aria-label="Active executor">
+                Executor: <span class="text-fg">@Executor.ExecutorKind</span>
+            </span>
+            <button @onclick="@(() => _showRegister = !_showRegister)"
+                    class="bg-accent hover:opacity-90 text-onaccent px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                @(_showRegister ? "Cancel" : "Register App")
+            </button>
+        </div>
+    </div>
+
+    @* Register form *@
+    @if (_showRegister)
+    {
+        <div class="mb-6 bg-surface border border-line rounded-xl p-5">
+            <h2 class="text-sm font-semibold text-fg mb-3">Register a repo as an app</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label class="block">
+                    <span class="text-xs text-muted">Name *</span>
+                    <input @bind="_form.Name" placeholder="my-app"
+                           class="mt-1 w-full bg-raised border border-line rounded-lg px-3 py-2 text-sm text-fg placeholder-muted focus:outline-none focus:border-accent" />
+                </label>
+                <label class="block">
+                    <span class="text-xs text-muted">Repository local path *</span>
+                    <input @bind="_form.RepoLocalPath" placeholder="C:\ProjectsWin\DBAI"
+                           class="mt-1 w-full bg-raised border border-line rounded-lg px-3 py-2 text-sm text-fg placeholder-muted focus:outline-none focus:border-accent" />
+                </label>
+                <label class="block">
+                    <span class="text-xs text-muted">Branch (optional)</span>
+                    <input @bind="_form.Branch" placeholder="main"
+                           class="mt-1 w-full bg-raised border border-line rounded-lg px-3 py-2 text-sm text-fg placeholder-muted focus:outline-none focus:border-accent" />
+                </label>
+                <label class="block">
+                    <span class="text-xs text-muted">Build command (optional — auto-detected if blank)</span>
+                    <input @bind="_form.BuildCommand" placeholder="npm ci &amp;&amp; npm run build"
+                           class="mt-1 w-full bg-raised border border-line rounded-lg px-3 py-2 text-sm text-fg placeholder-muted focus:outline-none focus:border-accent" />
+                </label>
+                <label class="block md:col-span-2">
+                    <span class="text-xs text-muted">Run command *</span>
+                    <input @bind="_form.RunCommand" placeholder="npm start"
+                           class="mt-1 w-full bg-raised border border-line rounded-lg px-3 py-2 text-sm text-fg placeholder-muted focus:outline-none focus:border-accent" />
+                </label>
+            </div>
+            @if (!string.IsNullOrEmpty(_registerError))
+            {
+                <p class="text-xs text-err mt-3" role="alert">@_registerError</p>
+            }
+            <div class="mt-4 flex gap-2">
+                <button @onclick="RegisterAsync"
+                        class="bg-ok hover:opacity-90 text-onaccent px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                    Register
+                </button>
+            </div>
+        </div>
+    }
+
+    @* App list *@
+    @if (_isLoading)
+    {
+        <div class="text-center py-16 text-muted text-sm">Loading apps…</div>
+    }
+    else if (_apps.Count == 0)
+    {
+        <div class="text-center py-16 text-muted text-sm">
+            No apps yet. Register a repo to build, run, and monitor it.
+        </div>
+    }
+    else
+    {
+        <div class="space-y-3">
+            @foreach (var app in _apps)
+            {
+                <div class="bg-surface border border-line rounded-xl p-4 flex items-center gap-4">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-3">
+                            <a href="/apps/@app.AppId" class="text-fg font-medium hover:text-accent transition-colors truncate">@app.Name</a>
+                            <AppStatusBadge Status="app.Status" />
+                            @if (app.LinkedWorkflowId is not null)
+                            {
+                                <span class="text-xs text-muted">· monitored</span>
+                            }
+                        </div>
+                        <div class="text-xs text-muted mt-1 truncate">@app.RepoLocalPath@(string.IsNullOrEmpty(app.Branch) ? "" : $" · {app.Branch}")</div>
+                        <div class="text-xs text-muted mt-1">
+                            @(app.LastBuiltAt is null ? "never built" : $"built {app.LastBuiltAt:g}")
+                            ·
+                            @(app.LastRunAt is null ? "never run" : $"ran {app.LastRunAt:g}")
+                            @if (app.LastRunResult is not null)
+                            {
+                                <span>· last run: @app.LastRunResult.Outcome</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button @onclick="@(() => BuildAsync(app))" disabled="@IsBusy(app)"
+                                class="text-xs px-3 py-1.5 rounded-lg bg-raised hover:bg-surface text-fg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Build</button>
+                        <button @onclick="@(() => RunAsync(app))" disabled="@(!CanRun(app))"
+                                class="text-xs px-3 py-1.5 rounded-lg bg-raised hover:bg-surface text-fg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Run</button>
+                        <a href="/apps/@app.AppId" class="text-xs px-3 py-1.5 rounded-lg bg-raised hover:bg-surface text-fg transition-colors">Open</a>
+                        <button @onclick="@(() => RemoveAsync(app))"
+                                class="text-xs px-3 py-1.5 rounded-lg bg-err-subtle hover:opacity-90 text-err transition-colors">Remove</button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private const string DemoOwnerId = "demo";
+
+    private readonly RegisterForm _form = new();
+    private List<MonitoredApp> _apps = new();
+    private bool _isLoading = true;
+    private bool _showRegister;
+    private string? _registerError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        StatusNotifier.AppStatusChanged += OnAppStatusChanged;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _isLoading = true;
+        _apps = (await AppRegistry.ListByOwnerAsync(DemoOwnerId)).ToList();
+        _isLoading = false;
+    }
+
+    private async Task RegisterAsync()
+    {
+        _registerError = null;
+        try
+        {
+            await AppRegistry.RegisterAsync(new MonitoredApp
+            {
+                Name = _form.Name?.Trim() ?? string.Empty,
+                OwnerId = DemoOwnerId,
+                RepoLocalPath = _form.RepoLocalPath?.Trim() ?? string.Empty,
+                Branch = string.IsNullOrWhiteSpace(_form.Branch) ? null : _form.Branch!.Trim(),
+                BuildCommand = string.IsNullOrWhiteSpace(_form.BuildCommand) ? null : _form.BuildCommand!.Trim(),
+                RunCommand = _form.RunCommand?.Trim() ?? string.Empty
+            });
+            _form.Reset();
+            _showRegister = false;
+            await ReloadAsync();
+        }
+        catch (AppRegistrationException ex)
+        {
+            _registerError = ex.Message;
+        }
+    }
+
+    private async Task RemoveAsync(MonitoredApp app)
+    {
+        await AppRegistry.RemoveAsync(app.AppId);
+        await ReloadAsync();
+    }
+
+    private static bool IsBusy(MonitoredApp app) => app.Status is AppStatus.Building or AppStatus.Running;
+
+    private static bool CanRun(MonitoredApp app) => app.Status == AppStatus.Ready;
+
+    // Build/Run kick off the executor on a background task; live status arrives via RunUpdated/reload.
+    private async Task BuildAsync(MonitoredApp app)
+    {
+        var command = app.BuildCommand ?? string.Empty;
+        var request = new AppExecutionRequest(app.AppId, app.Name, app.RepoLocalPath, app.Branch, command, ExecutionMode.Build, TimeoutSeconds: 900);
+        _ = Task.Run(() => Executor.BuildAsync(app, request));
+        await ReloadAsync();
+    }
+
+    private async Task RunAsync(MonitoredApp app)
+    {
+        var request = new AppExecutionRequest(app.AppId, app.Name, app.RepoLocalPath, app.Branch, app.RunCommand, ExecutionMode.Run, TimeoutSeconds: 900);
+        _ = Task.Run(() => Executor.RunAsync(app, request));
+        await ReloadAsync();
+    }
+
+    private void OnAppStatusChanged(string appId) => _ = InvokeAsync(async () =>
+    {
+        await ReloadAsync();
+        StateHasChanged();
+    });
+
+    public void Dispose() => StatusNotifier.AppStatusChanged -= OnAppStatusChanged;
+
+    private sealed class RegisterForm
+    {
+        public string? Name { get; set; }
+        public string? RepoLocalPath { get; set; }
+        public string? Branch { get; set; }
+        public string? BuildCommand { get; set; }
+        public string? RunCommand { get; set; }
+
+        public void Reset()
+        {
+            Name = RepoLocalPath = Branch = BuildCommand = RunCommand = null;
+        }
+    }
+}

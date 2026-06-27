@@ -1,0 +1,87 @@
+/* Execution-flow animation and directional accent styles for workflow edges.
+   Applied by WorkflowCanvas.razor when WorkflowEdgeModel.IsAnimating is true. */
+
+/* ── Execution-flow travelling dot ──────────────────────────────────────────── */
+
+/* The .edge-flow-active class is added to the SVG <g> element wrapping an active
+   WorkflowEdgeModel when IsAnimating == true. The <circle> child runs SMIL
+   animateMotion along the parent <path> to produce a travelling-dot effect. */
+.edge-flow-active circle.flow-dot {
+    r: 5;
+    fill: #06b6d4; /* Tailwind cyan-500 */
+    opacity: 0.9;
+}
+
+/* The animateMotion element is declared inline on the SVG circle in the Blazor
+   edge widget; this rule sets baseline transition behaviour. */
+.edge-flow-active {
+    filter: drop-shadow(0 0 3px rgba(6, 182, 212, 0.6));
+}
+
+/* ── Mid-line directional accent ──────────────────────────────────────────────── */
+
+/* Applied to every workflow edge path unconditionally to provide a passive
+   directional cue — a dashed pattern that reads source → target at a glance.
+   The chevron textPath element is declared in the Blazor edge widget markup. */
+.workflow-edge path.edge-path {
+    stroke-dasharray: 8 16;
+    stroke-dashoffset: 0;
+}
+
+.workflow-edge text.edge-accent {
+    font-size: 10px;
+    fill: rgba(148, 163, 184, 0.6); /* Tailwind slate-400, muted */
+    user-select: none;
+    pointer-events: none;
+}
+
+/* ── Diff-view line colours (T054) ──────────────────────────────────────────── */
+
+/* Applied to individual diff lines inside the chat panel's code-diff view. */
+.diff-add {
+    background-color: rgba(6, 78, 59, 0.5);  /* green-950 tint */
+    color: #86efac;                            /* green-300 */
+}
+
+.diff-remove {
+    background-color: rgba(69, 10, 10, 0.5); /* red-950 tint */
+    color: #fca5a5;                            /* red-300 */
+    text-decoration: line-through;
+}
+
+.diff-context {
+    color: #d1d5db; /* gray-300 */
+}
+
+/* ── Run button ready-state transition (T031) ────────────────────────────────── */
+
+.run-btn-ready {
+    transition: background-color 300ms ease-in-out, color 300ms ease-in-out;
+}
+
+/* ── Input-port hint ──────────────────────────────────────────────────────────── */
+
+/* Shown for 3 seconds when the user attempts to drag from an input (left) port.
+   Positioned as a fixed overlay banner at the bottom of the canvas via Blazor. */
+.input-port-hint {
+    background-color: rgba(120, 53, 15, 0.85); /* Tailwind amber-900 */
+    border: 1px solid rgb(180, 83, 9);         /* Tailwind amber-700 */
+    color: rgb(253, 230, 138);                  /* Tailwind amber-200 */
+    border-radius: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    pointer-events: none;
+}
+
+/* ── Settings UX polish (spec-009): section fade-in + save success flash ─────── */
+@keyframes fade-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.section-enter { animation: fade-in 150ms ease-out both; }
+
+@keyframes success-flash {
+    0%   { background-color: rgb(21 128 61); }  /* Tailwind green-700 */
+    100% { background-color: inherit; }
+}
+.btn-success-flash { animation: success-flash 1500ms ease-out; }

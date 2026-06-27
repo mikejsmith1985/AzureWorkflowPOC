@@ -1,0 +1,181 @@
+@* App detail (feature 013): status, build/run summaries + full redacted logs, workflow link,
+   and monitoring health. Route: /apps/{AppId} *@
+@page "/apps/{AppId}"
+@inject IAppRegistryRepository AppRegistry
+@inject IAppExecutor Executor
+@inject IAppStatusNotifier StatusNotifier
+@inject IWorkflowRepository WorkflowRepository
+@inject IAppHeartbeatStore Heartbeats
+@inject NavigationManager Nav
+@implements IDisposable
+@using DBAIAzure.Core.Interfaces
+@using DBAIAzure.Core.Models
+
+<PageTitle>App — DBAIAzure</PageTitle>
+
+<div class="max-w-4xl mx-auto py-8 px-4">
+    <a href="/apps" class="text-xs text-muted hover:text-accent transition-colors">&larr; All apps</a>
+
+    @if (_loading)
+    {
+        <div class="text-center py-16 text-muted text-sm">Loading…</div>
+    }
+    else if (_app is null)
+    {
+        <div class="text-center py-16 text-muted text-sm">
+            This app was not found. It may have been removed.
+        </div>
+    }
+    else
+    {
+        <div class="mt-3 flex items-center gap-3">
+            <h1 class="text-xl font-bold text-fg">@_app.Name</h1>
+            <AppStatusBadge Status="_app.Status" />
+        </div>
+        <div class="text-xs text-muted mt-1">@_app.RepoLocalPath@(string.IsNullOrEmpty(_app.Branch) ? "" : $" · {_app.Branch}")</div>
+
+        <div class="mt-4 flex gap-2">
+            <button @onclick="BuildAsync" disabled="@Busy"
+                    class="text-sm px-4 py-2 rounded-lg bg-raised hover:bg-surface text-fg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Build</button>
+            <button @onclick="RunAsync" disabled="@(_app.Status != AppStatus.Ready)"
+                    class="text-sm px-4 py-2 rounded-lg bg-raised hover:bg-surface text-fg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Run</button>
+            <button @onclick="RemoveAsync"
+                    class="text-sm px-4 py-2 rounded-lg bg-err-subtle hover:opacity-90 text-err transition-colors">Remove</button>
+        </div>
+
+        @* Workflow monitoring link *@
+        <section class="mt-6 bg-surface border border-line rounded-xl p-4">
+            <h2 class="text-sm font-semibold text-fg mb-2">Monitoring</h2>
+            <div class="flex items-center gap-2">
+                <select @bind="_selectedWorkflowId"
+                        class="bg-raised border border-line rounded-lg px-3 py-2 text-sm text-fg focus:outline-none focus:border-accent">
+                    <option value="">— not monitored —</option>
+                    @foreach (var wf in _workflows)
+                    {
+                        <option value="@wf.Id">@wf.Name</option>
+                    }
+                </select>
+                <button @onclick="SaveLinkAsync"
+                        class="text-sm px-3 py-2 rounded-lg bg-accent hover:opacity-90 text-onaccent transition-colors">Save link</button>
+            </div>
+            @if (_heartbeat is not null)
+            {
+                <div class="text-xs text-muted mt-3">
+                    Last cycle: @_heartbeat.LastCycleAt.ToString("g")
+                    · @(_heartbeat.LastCycleOk ? "ok" : "error")
+                    · @_heartbeat.CycleCount cycles
+                    @if (!string.IsNullOrEmpty(_heartbeat.LastError))
+                    {
+                        <span class="text-err">· @_heartbeat.LastError</span>
+                    }
+                </div>
+            }
+            else if (_app.LinkedWorkflowId is not null)
+            {
+                <div class="text-xs text-muted mt-3">No monitoring cycle has run yet.</div>
+            }
+        </section>
+
+        @* Build result *@
+        <section class="mt-6 bg-surface border border-line rounded-xl p-4">
+            <h2 class="text-sm font-semibold text-fg mb-2">Last build</h2>
+            @if (_app.LastBuildResult is { } build)
+            {
+                <p class="text-sm @(build.Succeeded ? "text-ok" : "text-err")">@build.Summary</p>
+                <pre class="mt-2 max-h-64 overflow-auto bg-app border border-line rounded-lg p-3 text-xs text-fg whitespace-pre-wrap">@build.Logs</pre>
+            }
+            else
+            {
+                <p class="text-xs text-muted">Never built.</p>
+            }
+        </section>
+
+        @* Run result *@
+        <section class="mt-6 bg-surface border border-line rounded-xl p-4">
+            <h2 class="text-sm font-semibold text-fg mb-2">Last run</h2>
+            @if (_app.LastRunResult is { } run)
+            {
+                <p class="text-sm @(run.Outcome == RunOutcome.Succeeded ? "text-ok" : "text-err")">@run.Outcome — @run.Summary</p>
+                <pre class="mt-2 max-h-64 overflow-auto bg-app border border-line rounded-lg p-3 text-xs text-fg whitespace-pre-wrap">@run.Logs</pre>
+            }
+            else
+            {
+                <p class="text-xs text-muted">Never run.</p>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    /// <summary>The app id from the route.</summary>
+    [Parameter] public string AppId { get; set; } = string.Empty;
+
+    private MonitoredApp? _app;
+    private IReadOnlyList<WorkflowDefinition> _workflows = Array.Empty<WorkflowDefinition>();
+    private AppMonitoringHeartbeat? _heartbeat;
+    private string _selectedWorkflowId = string.Empty;
+    private bool _loading = true;
+
+    private const string DemoOwnerId = "demo";
+
+    private bool Busy => _app?.Status is AppStatus.Building or AppStatus.Running;
+
+    protected override async Task OnInitializedAsync()
+    {
+        StatusNotifier.AppStatusChanged += OnAppStatusChanged;
+        _workflows = await WorkflowRepository.ListByOwnerAsync(DemoOwnerId);
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _app = await AppRegistry.GetAsync(AppId);
+        if (_app is not null)
+        {
+            _selectedWorkflowId = _app.LinkedWorkflowId ?? string.Empty;
+            _heartbeat = await Heartbeats.GetAsync(AppId);
+        }
+        _loading = false;
+    }
+
+    private async Task SaveLinkAsync()
+    {
+        await AppRegistry.SetLinkedWorkflowAsync(AppId, string.IsNullOrEmpty(_selectedWorkflowId) ? null : _selectedWorkflowId);
+        await ReloadAsync();
+    }
+
+    private async Task BuildAsync()
+    {
+        if (_app is null) return;
+        var command = _app.BuildCommand ?? string.Empty;
+        var request = new AppExecutionRequest(_app.AppId, _app.Name, _app.RepoLocalPath, _app.Branch, command, ExecutionMode.Build, 900);
+        _ = Task.Run(() => Executor.BuildAsync(_app, request));
+        await ReloadAsync();
+    }
+
+    private async Task RunAsync()
+    {
+        if (_app is null) return;
+        var request = new AppExecutionRequest(_app.AppId, _app.Name, _app.RepoLocalPath, _app.Branch, _app.RunCommand, ExecutionMode.Run, 900);
+        _ = Task.Run(() => Executor.RunAsync(_app, request));
+        await ReloadAsync();
+    }
+
+    private async Task RemoveAsync()
+    {
+        await AppRegistry.RemoveAsync(AppId);
+        Nav.NavigateTo("/apps");
+    }
+
+    private void OnAppStatusChanged(string appId) => _ = InvokeAsync(async () =>
+    {
+        if (appId == AppId)
+        {
+            await ReloadAsync();
+            StateHasChanged();
+        }
+    });
+
+    public void Dispose() => StatusNotifier.AppStatusChanged -= OnAppStatusChanged;
+}
