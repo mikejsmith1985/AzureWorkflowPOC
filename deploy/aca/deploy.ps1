@@ -9,10 +9,14 @@
 
 [CmdletBinding()]
 param(
-    [string] $ResourceGroup = 'dbaiazure-poc-rg',
+    # The shared resource group + environment hosting the reference (DBAI) apps. This subscription
+    # caps Container Apps environments at ONE per region, so the demo MUST reuse the existing
+    # environment rather than create its own (see deploy/aca/README.md).
+    [string] $ResourceGroup = 'dbai-poc-rg',
     [string] $Location      = 'eastus',
     [string] $AcrName       = 'dbaiazurepocacr',          # must be globally unique, lowercase alnum
-    [string] $EnvironmentName = 'dbaiazure-poc-env',
+    [string] $AcrResourceGroup = 'dbaiazure-poc-rg',      # ACR lives in its own RG; the name is globally unique so cross-RG pulls work
+    [string] $EnvironmentName = 'dbai-poc-env',
     [string] $AppName       = 'dbaiazure-poc',
     [string] $ImageRepo     = 'dbai-azure-demo',
     [string] $ImageTag      = 'latest',
@@ -30,6 +34,14 @@ if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
 }
 az account show --output none 2>$null
 if ($LASTEXITCODE -ne 0) { throw "Not logged in. Run 'az login' (try '! az login' in this session)." }
+
+# This subscription disables server-side ACR Tasks builds, so the image is built with the local
+# Docker engine and pushed to ACR. Confirm Docker is installed and its daemon is reachable.
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    throw "Docker not found. A local Docker build is required (ACR Tasks are disabled on this subscription)."
+}
+docker info --format '{{.ServerVersion}}' > $null 2>&1
+if ($LASTEXITCODE -ne 0) { throw "Docker engine is not running. Start Docker Desktop and retry." }
 
 # ── 1. Collect vault-sourced seed values → ACA secrets + secretref env vars ──────
 # Every non-blank ConnectorSeed__* variable becomes a masked ACA secret and a secretref env var, so
@@ -50,28 +62,59 @@ if (Get-ChildItem Env: | Where-Object { $_.Name -eq 'Anthropic__ApiKey' -and -no
     throw "Anthropic__ApiKey is set in this shell — refusing to deploy the LLM key (FR-004). Unset it and retry."
 }
 
-# ── 2. Resource group + ACR (admin-enabled so ACA can pull) ──────────────────────
-Write-Host "Ensuring resource group '$ResourceGroup' in '$Location'..."
+# ── 2. Resource groups + ACR (admin-enabled so ACA can pull) ─────────────────────
+Write-Host "Ensuring resource group '$ResourceGroup' (app/env) in '$Location'..."
 az group create --name $ResourceGroup --location $Location --output none
 
-Write-Host "Ensuring container registry '$AcrName'..."
-az acr create --resource-group $ResourceGroup --name $AcrName --sku Basic --admin-enabled true --output none 2>$null
+Write-Host "Ensuring resource group '$AcrResourceGroup' (registry) in '$Location'..."
+az group create --name $AcrResourceGroup --location $Location --output none
 
-# ── 3. Build the image in ACR (no local Docker required) ─────────────────────────
-$image = "$AcrName.azurecr.io/${ImageRepo}:${ImageTag}"
-Write-Host "Building image '$image' from $repoRoot ..."
-az acr build --registry $AcrName --image "${ImageRepo}:${ImageTag}" --file (Join-Path $repoRoot 'Dockerfile') $repoRoot --output none
+Write-Host "Ensuring container registry '$AcrName'..."
+az acr create --resource-group $AcrResourceGroup --name $AcrName --sku Basic --admin-enabled true --output none 2>$null
+
+# ── 3. Build the image locally and push to ACR ───────────────────────────────────
+# Built with the local Docker engine (ACR Tasks are disabled on this subscription) and tagged with a
+# unique, immutable tag (git short SHA + UTC timestamp). The unique tag is essential: ACA treats a
+# repushed static ':latest' as a no-op and silently keeps serving the stale revision.
+$gitSha = (git -C $repoRoot rev-parse --short HEAD 2>$null)
+if (-not $gitSha) { $gitSha = 'nogit' }
+$uniqueTag = "$gitSha-$([DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))"
+$image = "$AcrName.azurecr.io/${ImageRepo}:${uniqueTag}"
+
+Write-Host "Logging in to ACR '$AcrName'..."
+az acr login --name $AcrName --output none
+if ($LASTEXITCODE -ne 0) { throw "az acr login failed for '$AcrName' (is the registry reachable?)." }
+
+Write-Host "Building image '$image' locally from $repoRoot ..."
+docker build --file (Join-Path $repoRoot 'Dockerfile') --tag $image $repoRoot
+if ($LASTEXITCODE -ne 0) { throw "docker build failed." }
+
+Write-Host "Pushing image to ACR..."
+docker push $image
+if ($LASTEXITCODE -ne 0) { throw "docker push failed." }
 
 $acrServer   = "$AcrName.azurecr.io"
 $acrUser     = az acr credential show --name $AcrName --query username --output tsv
 $acrPassword = az acr credential show --name $AcrName --query 'passwords[0].value' --output tsv
 
-# ── 4. Container Apps environment ────────────────────────────────────────────────
-Write-Host "Ensuring Container Apps environment '$EnvironmentName'..."
-az containerapp env create --name $EnvironmentName --resource-group $ResourceGroup --location $Location --output none 2>$null
+# ── 4. Container Apps environment (reuse if present) ─────────────────────────────
+# The subscription allows only one environment per region, so reuse the shared one when it already
+# exists. Only create when genuinely absent, and surface the real error if that create fails.
+az containerapp env show --name $EnvironmentName --resource-group $ResourceGroup --output none 2>$null
+$envExists = ($LASTEXITCODE -eq 0)
+if ($envExists) {
+    Write-Host "Reusing existing Container Apps environment '$EnvironmentName'."
+} else {
+    Write-Host "Creating Container Apps environment '$EnvironmentName'..."
+    az containerapp env create --name $EnvironmentName --resource-group $ResourceGroup --location $Location --output none
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create environment '$EnvironmentName'. This subscription caps environments at one per region — point -EnvironmentName/-ResourceGroup at the existing shared environment instead."
+    }
+}
 
 # ── 5. Create or update the app (public, scale-to-zero, single replica) ──────────
-$exists = (az containerapp show --name $AppName --resource-group $ResourceGroup --output none 2>$null; $LASTEXITCODE -eq 0)
+az containerapp show --name $AppName --resource-group $ResourceGroup --output none 2>$null
+$exists = ($LASTEXITCODE -eq 0)
 if (-not $exists) {
     Write-Host "Creating container app '$AppName' (public, min=0, max=1)..."
     az containerapp create `
@@ -81,6 +124,7 @@ if (-not $exists) {
         --min-replicas 0 --max-replicas 1 --cpu $Cpu --memory $Memory `
         --secrets $secretArgs --env-vars $envArgs `
         --output none
+    if ($LASTEXITCODE -ne 0) { throw "az containerapp create failed for '$AppName'." }
 } else {
     Write-Host "Updating container app '$AppName' image + seed config..."
     if ($secretArgs.Count -gt 0) {
@@ -94,6 +138,7 @@ az containerapp update --name $AppName --resource-group $ResourceGroup --min-rep
 
 # ── 7. Feed the public FQDN back to the app for correct deep links, then print it ─
 $fqdn = az containerapp show --name $AppName --resource-group $ResourceGroup --query 'properties.configuration.ingress.fqdn' --output tsv
+if ([string]::IsNullOrWhiteSpace($fqdn)) { throw "Could not resolve the app's public FQDN — the deploy did not complete successfully." }
 az containerapp update --name $AppName --resource-group $ResourceGroup --set-env-vars "Portal__BaseUrl=https://$fqdn" --output none
 
 Write-Host ''
