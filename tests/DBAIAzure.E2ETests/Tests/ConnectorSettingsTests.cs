@@ -62,7 +62,8 @@ public sealed class ConnectorSettingsTests : E2ETestBase
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
         // Open the Messaging connector card's edit form.
-        var messagingCard = Page.Locator("div.rounded.bg-gray-900", new() { HasTextString = "Messaging" }).First;
+        // Connector cards use the semantic surface token after the spec-014 restyle (was bg-gray-900).
+        var messagingCard = Page.Locator("div.rounded.bg-surface", new() { HasTextString = "Messaging" }).First;
         await messagingCard.Locator("button:has-text('Edit')").First.ClickAsync();
 
         // The platform dropdown must offer Teams, Slack, and Discord.
@@ -89,8 +90,8 @@ public sealed class ConnectorSettingsTests : E2ETestBase
     {
         await NavigateAsync("/");
 
-        var navLink = Page.Locator("nav a", new() { HasTextString = "Settings" });
-        await navLink.ClickAsync();
+        // Connector settings live under the "Configuration" sidebar section (grouped IA, spec-014).
+        await Page.Locator("[data-testid='nav-configuration']").ClickAsync();
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
         var heading = Page.Locator("h1", new() { HasTextString = "Connector Settings" });

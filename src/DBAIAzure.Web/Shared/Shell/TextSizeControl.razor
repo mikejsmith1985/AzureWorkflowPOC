@@ -1,0 +1,70 @@
+@* Top-bar text-size control (spec-014, US5): three readability steps (Small / Normal / Large) bound to
+   UiPreferenceService. Choosing a size persists it and drives the root --text-scale token via JS, so all
+   rem-based content rescales from one place without breaking layout (FR-018/FR-020). *@
+@implements IDisposable
+@inject IUiPreferenceService UiPreference
+@inject IJSRuntime JsRuntime
+@using DBAIAzure.Web.Services
+
+<div class="flex items-center rounded-md border border-line overflow-hidden"
+     role="group" aria-label="Text size" data-testid="text-size-control">
+    @foreach (var option in _options)
+    {
+        <button type="button"
+                @onclick="() => ApplyAsync(option.Size)"
+                data-testid="@option.TestId"
+                aria-pressed="@(UiPreference.TextSize == option.Size)"
+                title="@option.Title"
+                class="px-2 py-1 leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--focus-ring)] @ButtonStateClass(option.Size)"
+                style="font-size:@option.GlyphRem">
+            A
+        </button>
+    }
+</div>
+
+@code {
+    // The three readability steps, smallest to largest. The glyph size hints at the relative scale.
+    private sealed record SizeOption(TextSize Size, string TestId, string Title, string GlyphRem);
+
+    private readonly IReadOnlyList<SizeOption> _options = new[]
+    {
+        new SizeOption(TextSize.Small,  "text-size-small",  "Smaller text", "0.7rem"),
+        new SizeOption(TextSize.Normal, "text-size-normal", "Normal text",  "0.85rem"),
+        new SizeOption(TextSize.Large,  "text-size-large",  "Larger text",  "1rem"),
+    };
+
+    protected override void OnInitialized() => UiPreference.OnChange += OnPreferenceChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Apply the current (default or just-restored) scale to the document root once interactive.
+        if (firstRender)
+            await ApplyScaleToRootAsync();
+    }
+
+    /// <summary>Selects a size: persists the choice, then pushes the new scale to the document root.</summary>
+    private async Task ApplyAsync(TextSize size)
+    {
+        await UiPreference.SetTextSizeAsync(size);
+        await ApplyScaleToRootAsync();
+    }
+
+    /// <summary>Re-applies the scale when the preference changes elsewhere (for example on restore).</summary>
+    private async void OnPreferenceChanged()
+    {
+        await ApplyScaleToRootAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ApplyScaleToRootAsync()
+    {
+        var invariantScale = UiPreference.TextScale.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        await JsRuntime.InvokeVoidAsync("setRootTextScale", invariantScale);
+    }
+
+    /// <summary>Accent fill for the selected size; muted hover affordance otherwise.</summary>
+    private string ButtonStateClass(TextSize size) =>
+        UiPreference.TextSize == size ? "bg-accent text-onaccent" : "text-muted hover:text-fg hover:bg-surface";
+
+    public void Dispose() => UiPreference.OnChange -= OnPreferenceChanged;
+}

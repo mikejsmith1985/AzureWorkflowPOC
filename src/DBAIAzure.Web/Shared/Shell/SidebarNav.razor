@@ -1,0 +1,75 @@
+@* Left sidebar for the Admin Console shell: the brand block, the grouped primary sections, a
+   separated User Guide, and a version footer. The active section is derived from the current route
+   via NavModel, so exactly one row is highlighted. Below the lg breakpoint the sidebar collapses to
+   an icon-only rail (labels hidden) so every destination stays reachable with no horizontal scroll. *@
+@using DBAIAzure.Web.Navigation
+@using Microsoft.AspNetCore.Components.Routing
+@implements IDisposable
+@inject NavigationManager Nav
+
+<div class="flex flex-col h-full" data-testid="sidebar-nav">
+    @* Brand *@
+    <div class="px-3 py-4 border-b border-line">
+        <div class="flex items-center gap-2">
+            <span class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-onaccent font-bold">W</span>
+            <div class="leading-tight hidden lg:block">
+                <div class="text-fg font-semibold text-sm">Admin Console</div>
+                <div class="text-muted text-xs">Control Plane</div>
+            </div>
+        </div>
+    </div>
+
+    @* Primary sections *@
+    <nav class="flex-1 overflow-y-auto px-2 py-3 space-y-1" aria-label="Primary navigation">
+        @foreach (var entry in _primarySections)
+        {
+            <a href="@entry.PrimaryRoute"
+               data-testid="nav-@entry.Key"
+               aria-current="@(IsActive(entry) ? "page" : null)"
+               title="@entry.Label"
+               class="flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors @RowStateClass(entry)">
+                <span class="shrink-0"><NavIcon Key="@entry.Icon" /></span>
+                <span class="hidden lg:inline">@entry.Label</span>
+            </a>
+        }
+    </nav>
+
+    @* Separated secondary (User Guide) + version footer *@
+    <div class="px-2 py-3 border-t border-line space-y-1">
+        @foreach (var entry in _secondarySections)
+        {
+            <a href="@entry.PrimaryRoute"
+               data-testid="nav-@entry.Key"
+               aria-current="@(IsActive(entry) ? "page" : null)"
+               title="@entry.Label"
+               class="flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors @RowStateClass(entry)">
+                <span class="shrink-0"><NavIcon Key="@entry.Icon" /></span>
+                <span class="hidden lg:inline">@entry.Label</span>
+            </a>
+        }
+    </div>
+    <div class="px-3 py-3 text-[11px] text-muted border-t border-line hidden lg:block">Admin Console · v0.1</div>
+</div>
+
+@code {
+    private readonly IReadOnlyList<NavSection> _primarySections =
+        NavModel.Sections.Where(item => !item.IsSecondary).ToList();
+
+    private readonly IReadOnlyList<NavSection> _secondarySections =
+        NavModel.Sections.Where(item => item.IsSecondary).ToList();
+
+    private string CurrentPath => new Uri(Nav.Uri).AbsolutePath;
+
+    /// <summary>Re-renders the sidebar on navigation so the active highlight tracks the route.</summary>
+    protected override void OnInitialized() => Nav.LocationChanged += OnLocationChanged;
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+
+    private bool IsActive(NavSection entry) => NavModel.ActiveSection(CurrentPath)?.Key == entry.Key;
+
+    /// <summary>Accent treatment for the active row; muted with hover affordance otherwise.</summary>
+    private string RowStateClass(NavSection entry) =>
+        IsActive(entry) ? "bg-surface text-accent font-medium" : "text-muted hover:text-fg hover:bg-surface";
+}

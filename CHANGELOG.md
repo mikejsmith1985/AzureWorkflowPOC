@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — ACA deploy script now runs against the real subscription (spec-012)
+
+`deploy/aca/deploy.ps1` had never been executed end-to-end and failed on three real blockers; all are
+now resolved so `./deploy/aca/deploy.ps1` produces a live public URL:
+
+- **PowerShell parse error**: a native-command redirection (`2>$null`) inside a grouping `(...)`
+  expression is a syntax error — split into a bare command + a separate `$LASTEXITCODE` check.
+- **Server-side ACR build is disabled on this subscription** (`TasksOperationsNotAllowed`): replaced
+  `az acr build` with a local `docker build` + `docker push`, gated by a Docker-running pre-check and
+  tagged with a unique immutable tag (git SHA + UTC timestamp) so ACA never serves a stale `:latest`.
+- **One Container Apps environment per region cap** (`MaxNumberOfRegionalEnvironmentsInSubExceeded`):
+  reuse the shared `dbai-poc-env` environment instead of creating a new one; the registry now lives in
+  its own resource group (`-AcrResourceGroup`) since its name is globally unique. Env-create is now
+  reuse-or-create, and app-create / FQDN resolution halt on failure instead of printing an empty URL.
+
+### Added — Admin Console look-and-feel redesign (spec-014, in progress)
+
+Reworking the console to the reference "Admin Console / Control Plane" look-and-feel (gh #31): a
+persistent left-sidebar shell, grouped sections with sub-tabs, a dark-first themeable token system, and
+the standalone Graph folded into the Workflow Builder. The intelligent/agentic Assistant is a separate
+feature (spec-015). Landing incrementally:
+
+- **Shell foundations**: `design-tokens.css` semantic CSS variables (dark theme) + a runtime
+  `tailwind.config` mapping semantic colour aliases, so a future light theme needs no per-screen edits;
+  a `NavModel` single source for the five sidebar sections + User Guide; a `UiPreferenceService` that
+  persists text size and Assistant-panel state via the existing `localStorage` interop; and an
+  `AppShell` layout skeleton.
+- **Console shell live (US1)**: the flat top-nav `MainLayout` is replaced by an `AppShell` — a
+  persistent left `SidebarNav` (branded "Admin Console / Control Plane", five sections + separated
+  User Guide + version footer, accent active-state, collapses to an icon rail below `lg`), a `TopBar`,
+  and a right-hand `AssistantPanel` rail — set as the default layout. The Workflow Builder now renders
+  inside a full-bleed variant of the same shell (`WorkflowBuilderLayout`) so the canvas keeps its space
+  while gaining the sidebar/top bar. The onboarding banner and field-tooltip portal moved into the shell.
+- **Graph folded into the Builder (US2)**: the standalone Graph page and its fixed intake-pipeline
+  diagram are retired (the Builder already renders the loaded workflow's own graph); the old `/graph`
+  route now redirects to the Workflow Builder so existing links never 404. Mermaid is retained for the
+  per-run step graph on the Run detail page. Obsolete "Topology/Full page" links removed from RunDetail.
+- **Grouped sub-tabs (US3)**: a `SectionTabs` strip renders a section's views as sub-tabs (Monitor →
+  Threads / Run History; Automation → Workflow Builder / Workflow Gallery) with the active tab tracking
+  the route; single-view sections show none. Active section/sub-view resolution is most-specific-prefix
+  (with an alternate prefix so the intake run detail also maps to Monitor); 19 NavModel unit tests cover
+  it. Every pre-redesign route resolves under a section (no orphans).
+- **Persistent, collapsible Assistant rail (US4)**: the right-hand `AssistantPanel` is now shell-wide
+  chrome on every screen — a header, intro, suggestion chips, and an input — that collapses to a compact
+  re-open strip (reclaiming the content width) and remembers its open/closed state across navigation and
+  reload via `UiPreferenceService` (now initialised on first render in both shell layouts). On the
+  Workflow Builder the rail hosts the existing `WorkflowChatPanel` through a Blazor `SectionOutlet`/
+  `SectionContent` seam, so the Builder keeps ownership of the panel's reference and callbacks while the
+  toolbar Chat toggle, the panel's close control, and the rail collapse all drive the one shared open
+  state. Generate/diff/save behaviour is unchanged; the seam is left open for the intelligent Assistant
+  (spec-015).
+- **In-app User Guide (US6)**: a new `/user-guide` destination (the separated sidebar entry) documents
+  what the Admin Console is and, for every primary section, what it does, which screens it contains, and
+  how to perform its key tasks. Section coverage is driven from the shared `NavModel`, so the guide stays
+  verifiably in sync with the navigation inventory (SC-009) and an undocumented section cannot pass
+  silently. Styled with the shell's semantic tokens; spec-015 later adopts this same content as the
+  Assistant's knowledge base.
+- **Top-bar text size + connection indicator (US5)**: the top bar gains a three-step text-size control
+  (`TextSizeControl`) bound to `UiPreferenceService` that drives the root `--text-scale` token through a
+  `setRootTextScale` JS helper, so all rem-based content rescales from one variable and the choice
+  persists across reloads (FR-018/FR-020). A `ConnectionIndicator` names the connected host (base-URI
+  authority) and flips between a connected/disconnected treatment by mirroring the Blazor circuit's
+  reconnect overlay via a `connectionMonitor` JS watcher (FR-019).
+- **Pages restyled to semantic tokens (Polish)**: the ten console screens (`Index`, `RunHistory`,
+  `RunHistoryDetail`, `RunDetail`, `ReviewQueue`, `NewTicket`, `WorkflowGallery`, `Apps`, `AppDetail`,
+  `ConnectorSettings`) now draw every colour from the semantic token aliases — no raw `gray-`/`cyan-`/
+  status-palette utilities remain (SC-005). Added `--accent-subtle`/`--ok-subtle`/`--warn-subtle`/
+  `--err-subtle` tokens so tinted banners/badges theme cleanly without opacity modifiers over
+  CSS-variable colours.
+- **E2E suite updated for the new IA (Polish)**: existing Playwright tests were re-pointed at the
+  grouped sidebar (`data-testid` nav), switched to URL polling for Blazor client-side navigations,
+  updated to the semantic-token selectors, and aligned with the chat-open-by-default rail. Suite result:
+  73 passing; the remaining failures are pre-existing/environment-gated (the `/apps` page blocks
+  server-prerender while probing the container executor — Docker-dependent, feature-013; and ADO/LLM
+  credential-gated tests), not introduced by this redesign.
+
+### Fixed
+
+- **Run detail page 500 on SQLite**: `RunHistoryDetail` ordered execution events by a `DateTimeOffset`
+  column in the database query, which SQLite cannot translate (`/runs/{id}` returned HTTP 500). Events
+  are now materialised and ordered client-side, so the run detail page renders for every run.
+- **`/apps` page hung ~20s on first load**: resolving `IAppExecutor` probed the Docker engine, and
+  Docker.DotNet's ping can block at the OS connect layer (e.g. a missing Windows named pipe) without
+  honoring its `CancellationToken`. The probe now runs on a worker task with a hard 3s wall-clock cap
+  (`AppExecutorSelector.TryConnectDocker`), so the page renders immediately and falls back to the
+  simulated executor when Docker is unreachable. Also corrected the repo-path placeholder, which
+  displayed doubled backslashes (`C:\\ProjectsWin\\DBAI`).
+
 ### Added — Admin Console UX: first-run onboarding + field tooltips (spec-009)
 
 Net-new guidance layer on top of the already-typed connector settings (the spec's earlier "retire the
