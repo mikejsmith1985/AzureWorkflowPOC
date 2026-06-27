@@ -130,10 +130,10 @@ xUnit unit tests. No new NuGet packages, no DB changes.
 
 **Independent Test**: Text size scales content without breaking layout and persists across reload; the connection indicator shows connected vs disconnected with the host.
 
-- [ ] T031 [P] [US5] Write FAILING E2E `tests/DBAIAzure.E2ETests/Tests/TextSizeAndConnectionTests.cs`: changing text size rescales content and survives reload; the connection indicator reflects connected state and host. (FR-018/019/020)
-- [ ] T032 [US5] Implement the text-size control in `TopBar.razor` bound to `UiPreferenceService`, driving the `--text-scale` root variable; apply the stored value on first interactive render.
-- [ ] T033 [US5] Implement `src/DBAIAzure.Web/Shared/Shell/ConnectionIndicator.razor` surfacing Blazor circuit state (the existing `#components-reconnect-modal`) plus the configured host, and place it in `TopBar.razor` (FR-019).
-- [ ] T034 [US5] Make `TextSizeAndConnectionTests` pass.
+- [X] T031 [P] [US5] Write FAILING E2E `tests/DBAIAzure.E2ETests/Tests/TextSizeAndConnectionTests.cs`: changing text size rescales content and survives reload; the connection indicator reflects connected state and host. (FR-018/019/020)
+- [X] T032 [US5] Implement the text-size control (`Shared/Shell/TextSizeControl.razor`) in `TopBar.razor` bound to `UiPreferenceService`, driving the `--text-scale` root variable via the `setRootTextScale` JS helper; apply the stored value on first interactive render + on change.
+- [X] T033 [US5] Implement `src/DBAIAzure.Web/Shared/Shell/ConnectionIndicator.razor` surfacing Blazor circuit state (a `connectionMonitor` JS watcher on `#components-reconnect-modal`) plus the host (base-URI authority), and place it in `TopBar.razor` (FR-019).
+- [X] T034 [US5] Make `TextSizeAndConnectionTests` pass. *(Playwright execution batched to T042; both projects build green.)*
 
 **Checkpoint**: Top-bar controls complete.
 

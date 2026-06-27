@@ -49,6 +49,12 @@ feature (spec-015). Landing incrementally:
   verifiably in sync with the navigation inventory (SC-009) and an undocumented section cannot pass
   silently. Styled with the shell's semantic tokens; spec-015 later adopts this same content as the
   Assistant's knowledge base.
+- **Top-bar text size + connection indicator (US5)**: the top bar gains a three-step text-size control
+  (`TextSizeControl`) bound to `UiPreferenceService` that drives the root `--text-scale` token through a
+  `setRootTextScale` JS helper, so all rem-based content rescales from one variable and the choice
+  persists across reloads (FR-018/FR-020). A `ConnectionIndicator` names the connected host (base-URI
+  authority) and flips between a connected/disconnected treatment by mirroring the Blazor circuit's
+  reconnect overlay via a `connectionMonitor` JS watcher (FR-019).
 
 ### Added — Admin Console UX: first-run onboarding + field tooltips (spec-009)
 
