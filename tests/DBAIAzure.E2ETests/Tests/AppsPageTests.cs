@@ -74,14 +74,36 @@ public sealed class AppsPageTests : E2ETestBase
 
         // The server's content root is guaranteed to exist — a valid local repo path for the test.
         var name = "e2e-app-" + Guid.NewGuid().ToString("N")[..6];
-        await Page.Locator("button:has-text('Register App')").ClickAsync();
-        await Page.Locator("input[placeholder='my-app']").FillAsync(name);
-        await Page.GetByPlaceholder("C:\\ProjectsWin\\DBAI").FillAsync(".");
-        await Page.GetByPlaceholder("npm start").FillAsync("echo run");
-        await Page.Locator("button:has-text('Register')").Last.ClickAsync();
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        try
+        {
+            await Page.Locator("button:has-text('Register App')").ClickAsync();
+            await Page.Locator("input[placeholder='my-app']").FillAsync(name);
+            await Page.GetByPlaceholder("C:\\ProjectsWin\\DBAI").FillAsync(".");
+            await Page.GetByPlaceholder("npm start").FillAsync("echo run");
+            await Page.Locator("button:has-text('Register')").Last.ClickAsync();
+            await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        await Assertions.Expect(Page.Locator($"text={name}")).ToBeVisibleAsync();
-        Assert.True(await IsBlazorConnectedAsync());
+            await Assertions.Expect(Page.Locator($"text={name}")).ToBeVisibleAsync();
+            Assert.True(await IsBlazorConnectedAsync());
+        }
+        finally
+        {
+            // The E2E fixture shares the dev SQLite database, so a registered app persists after the run.
+            // Remove what this test created so monitored apps do not accumulate across runs.
+            await RemoveAppByNameAsync(name);
+        }
+    }
+
+    // Clicks the Remove button on the monitored-app card matching <paramref name="appName"/>. Tolerant of
+    // the card being absent (e.g. registration failed before the assertion) so cleanup never masks the
+    // real test failure.
+    private async Task RemoveAppByNameAsync(string appName)
+    {
+        var appCard = Page.Locator("div.bg-surface").Filter(new() { HasTextString = appName });
+        if (await appCard.CountAsync() == 0)
+            return;
+
+        await appCard.First.Locator("button:has-text('Remove')").ClickAsync();
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
     }
 }
