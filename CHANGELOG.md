@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Pipeline creation now goes through the work-tracker adapter (spec-018 increment 2b)
+
+`CreateWorkItemStep` creates/upserts work items via `IWorkTrackerAdapter` instead of `IBoardsClient`
+directly, so the core pipeline no longer assumes Azure DevOps. `CreatedWorkItemRef.WorkItemId` is now a
+tracker-neutral `WorkItemRef` (numeric for ADO, string-key for Jira); the adapter is injected into the
+per-run phase kernel. `IBoardsClient` is retained as the ADO adapter's internal seam, so ADO behaviour is
+unchanged (the binding stamp + cost projection route through the adapter, which re-prefixes logical field
+names to `Custom.*`). The per-item token snapshot (`TelemetryWriteBackService`) still uses the numeric id
+and is skipped for non-numeric refs — a Jira-snapshot follow-up. Full suite green (1 pre-existing failure).
+
 ### Added — Epic and Bug telemetry + cost fields (ADO telemetry config)
 
 Extended `default-telemetry-config.json` so the run anchors — **Epic** (the Plan anchor) and **Bug** (the

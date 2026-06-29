@@ -1,4 +1,5 @@
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Models.WorkTracker;
 using DBAIAzure.Storage;
 using DBAIAzure.Storage.Repositories;
 using Microsoft.Data.Sqlite;
@@ -70,7 +71,7 @@ public sealed class SqlitePhaseRunRepositoryTests : IDisposable
         {
             CreatedWorkItems =
             [
-                new CreatedWorkItemRef { WorkItemId = 42, WorkItemType = "Epic", Url = "http://x/42" },
+                new CreatedWorkItemRef { WorkItemId = WorkItemRef.From(42), WorkItemType = "Epic", Url = "http://x/42" },
             ],
         };
         await _repository.UpsertRunAsync(completed);
@@ -80,7 +81,7 @@ public sealed class SqlitePhaseRunRepositoryTests : IDisposable
         Assert.NotNull(view);
         Assert.Equal(PhaseRunStatus.Completed, view!.Status);
         Assert.Single(view.CreatedWorkItems);
-        Assert.Equal(42, view.CreatedWorkItems[0].WorkItemId);
+        Assert.Equal(WorkItemRef.From(42), view.CreatedWorkItems[0].WorkItemId);
     }
 
     [Fact]
@@ -98,7 +99,7 @@ public sealed class SqlitePhaseRunRepositoryTests : IDisposable
         {
             CreatedWorkItems =
             [
-                new CreatedWorkItemRef { WorkItemId = 7, WorkItemType = "Epic", Url = "http://x/7" },
+                new CreatedWorkItemRef { WorkItemId = WorkItemRef.From(7), WorkItemType = "Epic", Url = "http://x/7" },
             ],
         };
         await _repository.UpsertRunAsync(first);
@@ -111,7 +112,7 @@ public sealed class SqlitePhaseRunRepositoryTests : IDisposable
         var view = await _repository.GetByFeaturePhaseAsync("001-feature", SpecKitPhase.Specify);
         Assert.NotNull(view);
         Assert.Single(view!.CreatedWorkItems);
-        Assert.Equal(7, view.CreatedWorkItems[0].WorkItemId);
+        Assert.Equal(WorkItemRef.From(7), view.CreatedWorkItems[0].WorkItemId);
     }
 
     [Fact]

@@ -34,7 +34,7 @@ public sealed class AzureDevOpsAdapterTests
 
         Assert.Equal("User Story", boards.Creates.Single().Type);
         Assert.Equal(10, boards.Creates.Single().ParentId);
-        Assert.True(reference.TryAsInt(out _));   // ADO refs are numeric
+        Assert.True(reference.WorkItemId.TryAsInt(out _));   // ADO refs are numeric
     }
 
     [Fact]

@@ -247,6 +247,7 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
     var costLedger         = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ICostLedger>();
     var costProjection     = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ICostProjection>();
     var runTelemetrySource = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IRunTelemetrySource>();
+    var workTrackerAdapter = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IWorkTrackerAdapterProvider>().GetAdapter();
 
     Func<IPhaseProgressSink, Kernel> kernelFactory = sink =>
     {
@@ -284,6 +285,7 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
         kernelBuilder.Services.AddSingleton(costLedger);
         kernelBuilder.Services.AddSingleton(costProjection);
         kernelBuilder.Services.AddSingleton(runTelemetrySource);
+        kernelBuilder.Services.AddSingleton(workTrackerAdapter);
         return kernelBuilder.Build();
     };
 

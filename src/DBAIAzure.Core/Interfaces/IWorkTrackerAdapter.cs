@@ -1,4 +1,5 @@
 // The single seam between the pipeline/cost/binding layers and a work tracker (spec-018).
+using DBAIAzure.Core.Models;
 using DBAIAzure.Core.Models.AdoTelemetry;
 using DBAIAzure.Core.Models.WorkTracker;
 
@@ -15,12 +16,12 @@ public interface IWorkTrackerAdapter
     string TrackerKey { get; }
 
     /// <summary>Creates a work item of the logical type, linked under <paramref name="parent"/> when set.</summary>
-    Task<WorkItemRef> CreateWorkItemAsync(
+    Task<CreatedWorkItemRef> CreateWorkItemAsync(
         WorkItemType type, string title, string description,
         WorkItemRef? parent, CancellationToken cancellationToken = default);
 
-    /// <summary>Refreshes an item's title/description and appends a comment (non-destructive).</summary>
-    Task UpsertWorkItemAsync(
+    /// <summary>Refreshes an item's title/description and appends a comment (non-destructive); returns the ref.</summary>
+    Task<CreatedWorkItemRef> UpsertWorkItemAsync(
         WorkItemRef item, string title, string description, string appendComment,
         CancellationToken cancellationToken = default);
 

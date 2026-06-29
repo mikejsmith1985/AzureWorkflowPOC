@@ -32,6 +32,7 @@ public class ReadArtifactsStepTests
             builder.Services.AddSingleton(reader);
             builder.Services.AddSingleton<IStructuredCompletionService>(new FakeStructuredCompletionService(validation));
             builder.Services.AddSingleton<IBoardsClient>(boards);
+            builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter>(WorkTrackerAdapters.AdoAdapterFor(boards));
             builder.Services.AddSingleton(sink);
             return builder.Build();
         };
