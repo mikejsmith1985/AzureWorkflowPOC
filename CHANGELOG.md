@@ -28,6 +28,15 @@ ADO work tree via **ADO Analytics** (no rollup engine — Framework-First).
 - All capture is best-effort — a cost/telemetry failure never disrupts a run, validation, board write,
   or developer session (FR-011). Re-run the ADO field preflight to provision the new fields.
 
+### Added — Triggering-user attribution on AI telemetry
+
+The telemetry write-back now records **who triggered the run** on the work item's new
+`Custom.AITriggeredBy` field, so a run's AI usage is attributable to a person, not just a RunId.
+The phase signal carries an optional `triggered_by` (self-asserted by the secret-gated caller); when
+absent, the approver (`decided_by`) is used as the fallback. The field is created by the preflight
+(Bootstrap) or mapped to `System.Tags` (Adaptive). No authentication is added — attribution is
+best-available identity within trusted infra. Re-run the ADO field preflight to provision the new field.
+
 ### Added — Accurate AI usage telemetry capture (spec-016)
 
 The Anthropic connector discarded the response `usage` block, so the AI telemetry fields written to

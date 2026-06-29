@@ -123,7 +123,9 @@ public sealed class CreateWorkItemStep : KernelProcessStep
                 try
                 {
                     await writeBack.WriteBackAsync(new TelemetryWriteBackRequest(
-                        state.RunId, workItem.WorkItemType, workItem.WorkItemId, state.Phase.ToString()));
+                        state.RunId, workItem.WorkItemType, workItem.WorkItemId, state.Phase.ToString(),
+                        // Attribute to the signal's requester; fall back to the approver when none was given (#44).
+                        TriggeredBy: state.TriggeredBy ?? state.Decision?.DecidedBy));
                 }
                 catch { /* token snapshot is non-essential */ }
             }

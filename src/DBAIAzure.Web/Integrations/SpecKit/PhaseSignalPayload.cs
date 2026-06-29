@@ -20,6 +20,14 @@ public sealed record PhaseSignalPayload
     /// <summary>Completed phase (specify | plan | implement; others recorded Unsupported).</summary>
     [JsonPropertyName("phase")]
     public string? Phase { get; init; }
+
+    /// <summary>
+    /// Identity that triggered this phase signal (e.g. the developer or automation that advanced the
+    /// spec). Optional and self-asserted by the (secret-gated) caller — used to attribute AI usage on
+    /// the resulting work item. Falls back to the approver when omitted.
+    /// </summary>
+    [JsonPropertyName("triggered_by")]
+    public string? TriggeredBy { get; init; }
 }
 
 /// <summary>
