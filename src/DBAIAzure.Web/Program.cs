@@ -219,6 +219,7 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
     var artifactReader = sp.GetRequiredService<IArtifactReader>();
     var boardsClient   = sp.GetRequiredService<IBoardsClient>();
     var phaseRepo      = sp.GetRequiredService<IPhaseRunRepository>();
+    var telemetryWriteBack = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ITelemetryWriteBack>();
 
     Func<IPhaseProgressSink, Kernel> kernelFactory = sink =>
     {
@@ -250,6 +251,7 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
         kernelBuilder.Services.AddSingleton(boardsClient);
         kernelBuilder.Services.AddSingleton(phaseRepo);
         kernelBuilder.Services.AddSingleton(sink);
+        kernelBuilder.Services.AddSingleton(telemetryWriteBack);
         return kernelBuilder.Build();
     };
 
@@ -334,9 +336,19 @@ builder.Services.AddScoped<WorkflowBuilderService>();
 // Named HttpClient for the preflight service — reuses the ADO-scoped client pattern.
 builder.Services.AddHttpClient(nameof(DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryPreflightService),
     client => client.Timeout = TimeSpan.FromSeconds(30));
-builder.Services.AddScoped<DBAIAzure.Web.Integrations.AzureDevOps.ManifestPathResolver>();
+// Singleton (stateless path resolver) so the telemetry write-back — itself injected into the
+// singleton phase-handler kernel — can depend on it without a scoped-from-root capture.
+builder.Services.AddSingleton<DBAIAzure.Web.Integrations.AzureDevOps.ManifestPathResolver>();
 builder.Services.AddScoped<DBAIAzure.Core.Interfaces.IAdoTelemetryPreflightService,
     DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryPreflightService>();
+
+// ── ADO Telemetry write-back (pushes a run's AI telemetry onto the work item it produced) ─────
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IRunTelemetrySource,
+    DBAIAzure.Storage.Repositories.SqlRunTelemetrySource>();
+builder.Services.AddSingleton<DBAIAzure.Web.Integrations.AzureDevOps.IAdoTelemetryManifestReader,
+    DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryManifestReader>();
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.ITelemetryWriteBack,
+    DBAIAzure.Web.Services.TelemetryWriteBackService>();
 
 // ── LLM model fetcher — live model list from Anthropic / OpenAI ───────────────
 builder.Services.AddHttpClient(nameof(DBAIAzure.Web.Integrations.LLM.LlmModelFetcherService),

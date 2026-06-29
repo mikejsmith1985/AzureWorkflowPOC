@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — ADO telemetry write-back (LLM metrics → work item fields)
+
+Closes the second half of the ADO telemetry feature: spec-009 *created* the custom fields; this
+writes a run's captured AI telemetry into them. After the phase handler creates/upserts a work item,
+`TelemetryWriteBackService` aggregates the run's `WorkflowExecutionEvents`, reads the preflight
+manifest, and patches the work item — using the created **custom fields** (Bootstrap mode) or the
+**native fallbacks** (Adaptive mode; string/picklist fields fold into a non-destructive `System.Tags`
+entry, integers into Story Points).
+
+- New: `IBoardsClient.UpdateFieldsAsync` (arbitrary-field patch with non-destructive tag merge),
+  `IRunTelemetrySource` + `SqlRunTelemetrySource`, `IAdoTelemetryManifestReader`, `ITelemetryWriteBack`,
+  `RunTelemetryAggregate`, and `ModelPricing` (estimated USD cost).
+- Write-back is **best-effort** — a telemetry failure never undoes an approved board write.
+- **Scope/limits:** only metrics the pipeline captures today are written — session id, model, input/
+  output tokens, LLM call count, duration, and estimated cost. Cache tokens, tool-accept rate, API
+  errors, and cache-hit rate have no capture source yet and are omitted (never fabricated). Fields are
+  applied per the configured work item types (UserStory/Task); Epic/Bug have no configured telemetry
+  fields until the config is extended.
+
 ### Changed — Apps E2E test cleans up after itself
 
 The `Register_ValidPath_AppearsInList` Playwright test now removes the app it registers (the
