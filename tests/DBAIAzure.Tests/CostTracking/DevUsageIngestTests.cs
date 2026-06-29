@@ -1,6 +1,7 @@
 // Tests for TelemetryIngestController dev-usage ingest — attributed/unattributed entries + secret gate.
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models.AdoTelemetry;
+using DBAIAzure.Core.Models.WorkTracker;
 using DBAIAzure.Web.Controllers;
 using DBAIAzure.Web.Integrations.Telemetry;
 using Microsoft.AspNetCore.Http;
@@ -35,7 +36,7 @@ public sealed class DevUsageIngestTests
         Assert.IsType<AcceptedResult>(result);
         var entry = Assert.Single(ledger.Entries);
         Assert.Equal(CostDimension.Development, entry.Dimension);
-        Assert.Equal(100, entry.WorkItemId);
+        Assert.Equal("100", entry.WorkItemId);
         Assert.False(entry.IsUnattributed);
         Assert.True(entry.CostUsd > 0, "cost should be re-priced from tokens");
     }
@@ -98,12 +99,13 @@ public sealed class DevUsageIngestTests
     {
         private readonly int? _workItemId;
         public StubMap(int? workItemId) => _workItemId = workItemId;
-        public Task PutAsync(string bindingKey, int workItemId, CancellationToken ct = default) => Task.CompletedTask;
-        public Task<int?> ResolveAsync(string bindingKey, CancellationToken ct = default) => Task.FromResult(_workItemId);
+        public Task PutAsync(string bindingKey, WorkItemRef workItem, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<WorkItemRef?> ResolveAsync(string bindingKey, CancellationToken ct = default) =>
+            Task.FromResult(_workItemId is int id ? (WorkItemRef?)WorkItemRef.From(id) : null);
     }
 
     private sealed class NoOpProjection : ICostProjection
     {
-        public Task ProjectAsync(string bindingKey, int workItemId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task ProjectAsync(string bindingKey, WorkItemRef workItem, CancellationToken ct = default) => Task.CompletedTask;
     }
 }

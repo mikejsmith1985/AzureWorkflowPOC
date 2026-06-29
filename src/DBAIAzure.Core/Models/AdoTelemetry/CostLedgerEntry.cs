@@ -28,8 +28,8 @@ public sealed record CostLedgerEntry
     /// <summary>Runtime vs Development.</summary>
     public required CostDimension Dimension { get; init; }
 
-    /// <summary>The anchor work item the cost lands on; null when unattributed.</summary>
-    public int? WorkItemId { get; init; }
+    /// <summary>The anchor work item the cost lands on (opaque ref — numeric ADO / string-key Jira); null when unattributed.</summary>
+    public string? WorkItemId { get; init; }
 
     /// <summary>Model that produced the usage (null when unknown).</summary>
     public string? ModelName { get; init; }

@@ -49,7 +49,7 @@ public sealed class TelemetryIngestController : ControllerBase
             return BadRequest(new { error = "binding_key is required" });
 
         // Resolve the binding key locally (C1); a miss is recorded as unattributed, never dropped.
-        var workItemId = await _bindingMap.ResolveAsync(payload.BindingKey);
+        var workItem = await _bindingMap.ResolveAsync(payload.BindingKey);
 
         // Prefer a supplied cost; otherwise re-price the tokens (one source of truth — ModelPricing).
         var cost = payload.CostUsd
@@ -61,7 +61,7 @@ public sealed class TelemetryIngestController : ControllerBase
             Id = Guid.NewGuid(),
             BindingKey = payload.BindingKey,
             Dimension = CostDimension.Development,
-            WorkItemId = workItemId,
+            WorkItemId = workItem?.Value,
             ModelName = payload.Model,
             InputTokens = payload.InputTokens,
             OutputTokens = payload.OutputTokens,
@@ -69,12 +69,13 @@ public sealed class TelemetryIngestController : ControllerBase
             CostUsd = cost,
             OccurredAt = payload.OccurredAt ?? DateTimeOffset.UtcNow,
             SourceId = payload.SessionId,
-            IsUnattributed = workItemId is null,
+            IsUnattributed = workItem is null,
         });
 
-        if (workItemId is int resolvedWorkItemId)
-            await _projection.ProjectAsync(payload.BindingKey, resolvedWorkItemId);
+        // Project the cumulative cost onto the resolved item through the active tracker (any tracker).
+        if (workItem is { } resolved)
+            await _projection.ProjectAsync(payload.BindingKey, resolved);
 
-        return Accepted(new { bindingKey = payload.BindingKey, attributed = workItemId is not null });
+        return Accepted(new { bindingKey = payload.BindingKey, attributed = workItem is not null });
     }
 }

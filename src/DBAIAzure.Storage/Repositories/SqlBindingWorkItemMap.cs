@@ -1,5 +1,6 @@
 // EF-backed binding key → work item map (spec-017, C1). Populated at creation; read by dev-usage ingest.
 using DBAIAzure.Core.Interfaces;
+using DBAIAzure.Core.Models.WorkTracker;
 using DBAIAzure.Storage.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,24 +15,24 @@ public sealed class SqlBindingWorkItemMap : IBindingWorkItemMap
         _contextFactory = contextFactory;
 
     /// <inheritdoc/>
-    public async Task PutAsync(string bindingKey, int workItemId, CancellationToken cancellationToken = default)
+    public async Task PutAsync(string bindingKey, WorkItemRef workItem, CancellationToken cancellationToken = default)
     {
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var existing = await db.BindingWorkItemMap.FindAsync(new object?[] { bindingKey }, cancellationToken);
         if (existing is null)
-            db.BindingWorkItemMap.Add(new BindingWorkItemMapEntity { BindingKey = bindingKey, WorkItemId = workItemId });
+            db.BindingWorkItemMap.Add(new BindingWorkItemMapEntity { BindingKey = bindingKey, WorkItemId = workItem.Value });
         else
-            existing.WorkItemId = workItemId;
+            existing.WorkItemId = workItem.Value;
         await db.SaveChangesAsync(cancellationToken);
     }
 
     /// <inheritdoc/>
-    public async Task<int?> ResolveAsync(string bindingKey, CancellationToken cancellationToken = default)
+    public async Task<WorkItemRef?> ResolveAsync(string bindingKey, CancellationToken cancellationToken = default)
     {
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var row = await db.BindingWorkItemMap
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.BindingKey == bindingKey, cancellationToken);
-        return row?.WorkItemId;
+        return row is null ? null : new WorkItemRef(row.WorkItemId);
     }
 }

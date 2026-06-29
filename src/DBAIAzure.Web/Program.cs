@@ -229,9 +229,9 @@ builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.ICostProjection,
 // onto it (that is a later increment), so live ADO behaviour is unchanged. Scoped because the ADO
 // adapter depends on the scoped IAdoTelemetryPreflightService.
 builder.Services.AddSingleton<DBAIAzure.Web.Integrations.AzureDevOps.AdoFieldReferenceResolver>();
-builder.Services.AddScoped<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter,
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter,
     DBAIAzure.Web.Integrations.AzureDevOps.AzureDevOpsWorkTrackerAdapter>();
-builder.Services.AddScoped<DBAIAzure.Core.Interfaces.IWorkTrackerAdapterProvider,
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapterProvider,
     DBAIAzure.Web.Services.WorkTrackerAdapterProvider>();
 
 builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>

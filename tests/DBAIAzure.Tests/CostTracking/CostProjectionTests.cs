@@ -1,5 +1,6 @@
-// Unit test for CostProjectionService — writes both cumulative cost fields from the ledger totals.
+// Unit test for CostProjectionService — writes both cumulative cost fields (logical) via the active adapter.
 using DBAIAzure.Core.Interfaces;
+using DBAIAzure.Core.Models.WorkTracker;
 using DBAIAzure.Tests.Fakes;
 using DBAIAzure.Web.Services;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -12,16 +13,17 @@ public sealed class CostProjectionTests
     [Fact]
     public async Task ProjectAsync_WritesBothCostFields_FromLedgerTotals()
     {
-        var boards = new FakeBoardsClient();
+        var tracker = new FakeWorkTrackerAdapter();
         var service = new CostProjectionService(
             new StubLedger(new CostTotals(RuntimeUsd: 2.50, DevelopmentUsd: 4.00)),
-            boards, NullLogger<CostProjectionService>.Instance);
+            new SingleAdapterProvider(tracker), NullLogger<CostProjectionService>.Instance);
 
-        await service.ProjectAsync("BIND-X", workItemId: 42);
+        await service.ProjectAsync("BIND-X", WorkItemRef.From(42));
 
-        var fields = Assert.Single(boards.FieldUpdates).Fields;
-        Assert.Equal(2.50, fields["Custom.AIRuntimeCostUSD"]);
-        Assert.Equal(4.00, fields["Custom.AIDevCostUSD"]);
+        var (item, fields) = Assert.Single(tracker.FieldSets);
+        Assert.Equal(WorkItemRef.From(42), item);
+        Assert.Equal(2.50, fields[LogicalField.AIRuntimeCostUSD]);
+        Assert.Equal(4.00, fields[LogicalField.AIDevCostUSD]);
     }
 
     private sealed class StubLedger : ICostLedger

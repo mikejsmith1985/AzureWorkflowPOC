@@ -4,6 +4,7 @@ using DBAIAzure.Core.Models.AdoTelemetry;
 using DBAIAzure.Core.Models.WorkTracker;
 using DBAIAzure.Tests.Fakes;
 using DBAIAzure.Web.Integrations.AzureDevOps;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -11,9 +12,16 @@ namespace DBAIAzure.Tests.WorkTracker;
 
 public sealed class AzureDevOpsAdapterTests
 {
-    private static AzureDevOpsWorkTrackerAdapter Build(FakeBoardsClient boards, int? resolveTo = null) =>
-        new(boards, new StubBindingMap(resolveTo), new StubPreflight(), new AdoFieldReferenceResolver(),
-            NullLogger<AzureDevOpsWorkTrackerAdapter>.Instance);
+    private static AzureDevOpsWorkTrackerAdapter Build(FakeBoardsClient boards, int? resolveTo = null)
+    {
+        // A real scope factory so the adapter can resolve the scoped preflight (provisioning path only).
+        var scopeFactory = new ServiceCollection()
+            .AddScoped<IAdoTelemetryPreflightService>(_ => new StubPreflight())
+            .BuildServiceProvider()
+            .GetRequiredService<IServiceScopeFactory>();
+        return new AzureDevOpsWorkTrackerAdapter(boards, new StubBindingMap(resolveTo), scopeFactory,
+            new AdoFieldReferenceResolver(), NullLogger<AzureDevOpsWorkTrackerAdapter>.Instance);
+    }
 
     [Fact]
     public async Task Create_MapsLogicalType_AndReturnsNumericRef()
@@ -68,8 +76,9 @@ public sealed class AzureDevOpsAdapterTests
     {
         private readonly int? _resolveTo;
         public StubBindingMap(int? resolveTo) => _resolveTo = resolveTo;
-        public Task PutAsync(string bindingKey, int workItemId, CancellationToken ct = default) => Task.CompletedTask;
-        public Task<int?> ResolveAsync(string bindingKey, CancellationToken ct = default) => Task.FromResult(_resolveTo);
+        public Task PutAsync(string bindingKey, WorkItemRef workItem, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<WorkItemRef?> ResolveAsync(string bindingKey, CancellationToken ct = default) =>
+            Task.FromResult(_resolveTo is int id ? (WorkItemRef?)WorkItemRef.From(id) : null);
     }
 
     private sealed class StubPreflight : IAdoTelemetryPreflightService
