@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — Messaging connector's default MCP argument template is now platform-aware (Slack)
+
+A blank **MCP Argument Template** on a Slack connector previously produced `{"target":…,"text":…}`, whose
+keys Slack's `slack_send_message` tool ignores — so the call failed with `no_text` even though auth, the
+tool name, and the channel were all correct. The default is now resolved per platform: Slack gets its
+verified `{"channel_id":"{{target}}","message":"{{message}}"}`, while platforms without a verified tool
+schema keep the generic template (which operators override per tool).
+
+- `McpArgumentTemplate.DefaultFor(MessagingPlatform)` returns the platform-specific default; `MessageDelivery`
+  applies it when the operator leaves the template blank.
+- The connector form's placeholder now shows the Slack-correct example.
+
 ### Added — Slack MCP token helper
 
 - `scripts/mint-slack-mcp-token.ps1` mints a Slack **user** OAuth token (`xoxp-`) for the Messaging

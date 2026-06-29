@@ -95,8 +95,14 @@ public sealed class MessageDelivery : IMessageDelivery
             return new MessageDeliveryResult(false, config.Platform, DeliveryPath.Mcp,
                 $"{config.Platform}: an MCP server is configured but no tool name is set.");
 
+        // When the operator left the argument template blank, fall back to a platform-aware default so a
+        // Slack connector works out of the box (Slack requires channel_id/message, not the generic keys).
+        var argumentTemplate = string.IsNullOrWhiteSpace(config.McpArgumentTemplate)
+            ? McpArgumentTemplate.DefaultFor(config.Platform)
+            : config.McpArgumentTemplate;
+
         var request = new McpSendRequest(
-            config.McpServerUrl!, config.McpToolName!, config.McpArgumentTemplate,
+            config.McpServerUrl!, config.McpToolName!, argumentTemplate,
             config.Target ?? string.Empty, message, secrets?.McpAuthToken);
 
         var result = await _mcpGateway.SendAsync(request, cancellationToken);

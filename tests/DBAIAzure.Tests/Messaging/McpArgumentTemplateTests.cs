@@ -1,6 +1,7 @@
 // Unit tests for MCP argument-template substitution — placeholders, JSON-escaping, default (T026, FR-007).
 using System.Text.Json;
 using DBAIAzure.Connectors.Messaging;
+using DBAIAzure.Core.Models;
 using Xunit;
 
 namespace DBAIAzure.Tests.Messaging;
@@ -45,6 +46,30 @@ public sealed class McpArgumentTemplateTests
 
         using var doc = JsonDocument.Parse(json);
         Assert.Equal("U9", doc.RootElement.GetProperty("target").GetString());
+        Assert.Equal("ping", doc.RootElement.GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public void DefaultFor_Slack_ProducesChannelIdAndMessage_AsSlackToolRequires()
+    {
+        // Slack's slack_send_message rejects any keys other than channel_id/message with a no_text error.
+        var json = McpArgumentTemplate.Substitute(McpArgumentTemplate.DefaultFor(MessagingPlatform.Slack), "C123", "hi");
+
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal("C123", doc.RootElement.GetProperty("channel_id").GetString());
+        Assert.Equal("hi", doc.RootElement.GetProperty("message").GetString());
+    }
+
+    [Theory]
+    [InlineData(MessagingPlatform.Teams)]
+    [InlineData(MessagingPlatform.Discord)]
+    public void DefaultFor_PlatformWithoutVerifiedSchema_UsesGenericTargetTextKeys(MessagingPlatform platform)
+    {
+        // Platforms with no verified tool schema keep the generic template; operators override it per tool.
+        var json = McpArgumentTemplate.Substitute(McpArgumentTemplate.DefaultFor(platform), "X1", "ping");
+
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal("X1", doc.RootElement.GetProperty("target").GetString());
         Assert.Equal("ping", doc.RootElement.GetProperty("text").GetString());
     }
 }

@@ -1,5 +1,6 @@
 // Builds MCP tool arguments by substituting {{target}}/{{message}} into a JSON template (FR-007).
 using System.Text.Json;
+using DBAIAzure.Core.Models;
 
 namespace DBAIAzure.Connectors.Messaging;
 
@@ -15,8 +16,30 @@ public static class McpArgumentTemplate
     private const string TargetPlaceholder = "{{target}}";
     private const string MessagePlaceholder = "{{message}}";
 
-    /// <summary>The template used when the operator leaves the argument template blank.</summary>
+    /// <summary>
+    /// Generic fallback used when the operator leaves the template blank on a platform that has no verified
+    /// tool schema. Its <c>target</c>/<c>text</c> keys match no specific MCP tool, so operators on those
+    /// platforms are expected to override it with their tool's real argument names.
+    /// </summary>
     public const string Default = """{"target":"{{target}}","text":"{{message}}"}""";
+
+    /// <summary>
+    /// Default for Slack's hosted MCP server. Its <c>slack_send_message</c> tool requires exactly
+    /// <c>channel_id</c> and <c>message</c>; any other body key yields a <c>no_text</c> error. Verified
+    /// against mcp.slack.com.
+    /// </summary>
+    public const string SlackDefault = """{"channel_id":"{{target}}","message":"{{message}}"}""";
+
+    /// <summary>
+    /// Returns the best-known default template for <paramref name="platform"/> when the operator has not
+    /// supplied one. Slack has a verified tool schema and gets its specific keys; every other platform
+    /// falls back to the generic template, which the operator should override for their MCP tool.
+    /// </summary>
+    public static string DefaultFor(MessagingPlatform platform) => platform switch
+    {
+        MessagingPlatform.Slack => SlackDefault,
+        _ => Default,
+    };
 
     /// <summary>
     /// Returns the template (or <see cref="Default"/> when blank) with the placeholders replaced by the
