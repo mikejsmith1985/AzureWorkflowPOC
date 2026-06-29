@@ -224,6 +224,16 @@ builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IBindingWorkItemMap,
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.ICostProjection,
     DBAIAzure.Web.Services.CostProjectionService>();
 
+// ── Work-tracker adapter (spec-018): tracker-neutral seam + ADO implementation ───────────────
+// Additive — the adapter wraps the existing ADO client/preflight; the pipeline is not yet rewired
+// onto it (that is a later increment), so live ADO behaviour is unchanged. Scoped because the ADO
+// adapter depends on the scoped IAdoTelemetryPreflightService.
+builder.Services.AddSingleton<DBAIAzure.Web.Integrations.AzureDevOps.AdoFieldReferenceResolver>();
+builder.Services.AddScoped<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter,
+    DBAIAzure.Web.Integrations.AzureDevOps.AzureDevOpsWorkTrackerAdapter>();
+builder.Services.AddScoped<DBAIAzure.Core.Interfaces.IWorkTrackerAdapterProvider,
+    DBAIAzure.Web.Services.WorkTrackerAdapterProvider>();
+
 builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
 {
     var configRepo     = sp.GetRequiredService<IConnectorConfigRepository>();
