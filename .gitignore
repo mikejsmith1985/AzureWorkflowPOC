@@ -27,6 +27,9 @@ coverage/
 *.db
 *.db-wal
 *.db-shm
+*.db.bak-*
+*.db-wal.bak-*
+*.db-shm.bak-*
 
 # Machine-specific SDK resolution (hardcoded user-local dotnet path)
 global.json
