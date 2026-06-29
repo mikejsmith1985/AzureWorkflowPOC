@@ -49,3 +49,6 @@ src/DBAIAzure.Web/specs/
 deploy/aca/team.env
 **/*.env
 !**/*.env.example
+
+# ADO preflight runtime manifest (generated)
+specs/.ado-bootstrap-manifest.json

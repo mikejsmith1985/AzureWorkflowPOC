@@ -138,7 +138,7 @@ public sealed class AdoTelemetryPreflightServiceTests
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    """{"capabilities":{"processTemplate":{"templateTypeId":"6b724908-ef14-45cf-84f8-768b5384da45"}}}""",
+                    """{"capabilities":{"processTemplate":{"templateTypeId":"adcc42ab-9882-485e-a3ed-7678f01f66bc"}}}""",
                     Encoding.UTF8, "application/json"),
             });
         handler.AddDefaultAdminOkResponse();
@@ -165,7 +165,7 @@ public sealed class AdoTelemetryPreflightServiceTests
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    """{"capabilities":{"processTemplate":{"templateTypeId":"adcc42ab-9882-485e-a3ed-7678f01f66bc"}}}""",
+                    """{"capabilities":{"processTemplate":{"templateTypeId":"6b724908-ef14-45cf-84f8-768b5384da45"}}}""",
                     Encoding.UTF8, "application/json"),
             });
         handler.AddDefaultAdminOkResponse();
@@ -180,6 +180,43 @@ public sealed class AdoTelemetryPreflightServiceTests
         Assert.True(result.IsSuccess);
         var manifest = (BootstrapManifest)result.Manifest!;
         Assert.Equal(AdoProcessType.Scrum, manifest.ProcessType);
+    }
+
+    [Fact]
+    public async Task RunPreflightAsync_InheritedProcessSystemWit_MaterializesBeforeAttaching()
+    {
+        // An inherited process exposes its system WITs with customization == "system"; they must be
+        // materialized as an inherited override before fields can be attached (else attach 404s, VS402805).
+        var handler = new FakeHttpHandler();
+        handler.AddDefaultProcessResponse(isAgile: true);
+        handler.AddDefaultAdminOkResponse();
+        // GET workitemtypes -> a not-yet-customized system "User Story"; POST (materialize) -> inherited refName.
+        handler.AddSequencedResponse(
+            url => url.Contains("/workitemtypes") && !url.Contains("/fields"),
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"value":[{"referenceName":"Microsoft.VSTS.WorkItemTypes.UserStory","name":"User Story","customization":"system","inherits":null}],"count":1}""",
+                    Encoding.UTF8, "application/json"),
+            },
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"referenceName":"Agile-Inherited.UserStory","name":"User Story","customization":"inherited","inherits":"Microsoft.VSTS.WorkItemTypes.UserStory"}""",
+                    Encoding.UTF8, "application/json"),
+            });
+        handler.AddDefaultFieldExistsResponse(HttpStatusCode.NotFound);
+        handler.AddDefaultFieldCreateResponse();
+        handler.AddDefaultFieldAttachResponse();
+        handler.AddDefaultManifestResponse();
+
+        var service = BuildService(handler);
+        var result = await service.RunPreflightAsync(MinimalFieldConfig());
+
+        Assert.True(result.IsSuccess);
+        var manifest = (BootstrapManifest)result.Manifest!;
+        Assert.Equal(AdoProcessType.Agile, manifest.ProcessType);
+        Assert.Contains("Custom.AISessionID", manifest.FieldsCreated);
     }
 
     [Fact]
@@ -206,7 +243,7 @@ public sealed class AdoTelemetryPreflightServiceTests
     public async Task RunPreflightAsync_WhenProcessIsCustomInheritedFromAgile_DetectsAgile()
     {
         const string customGuid  = "b8a3a935-7e91-48b8-a94c-606d37c3e9f2";
-        const string agileParent = "6b724908-ef14-45cf-84f8-768b5384da45";
+        const string agileParent = "adcc42ab-9882-485e-a3ed-7678f01f66bc";
         var handler = new FakeHttpHandler();
         handler.AddResponse(
             url => url.Contains("/_apis/projects/") && url.Contains("includeCapabilities=true"),
@@ -464,8 +501,8 @@ internal sealed class FakeHttpHandler : HttpMessageHandler
     public void AddDefaultProcessResponse(bool isAgile)
     {
         var templateId = isAgile
-            ? "6b724908-ef14-45cf-84f8-768b5384da45"
-            : "adcc42ab-9882-485e-a3ed-7678f01f66bc";
+            ? "adcc42ab-9882-485e-a3ed-7678f01f66bc"
+            : "6b724908-ef14-45cf-84f8-768b5384da45";
         // Service now calls _apis/projects/{project}?includeCapabilities=true for templateTypeId.
         AddResponse(
             url => url.Contains("/_apis/projects/") && url.Contains("includeCapabilities=true"),
@@ -485,7 +522,7 @@ internal sealed class FakeHttpHandler : HttpMessageHandler
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    """{"value":[{"id":"test-process-id","typeId":"6b724908-ef14-45cf-84f8-768b5384da45","name":"TestAgile"},{"id":"test-scrum-id","typeId":"adcc42ab-9882-485e-a3ed-7678f01f66bc","name":"TestScrum"}],"count":2}""",
+                    """{"value":[{"id":"test-process-id","typeId":"adcc42ab-9882-485e-a3ed-7678f01f66bc","name":"TestAgile"},{"id":"test-scrum-id","typeId":"6b724908-ef14-45cf-84f8-768b5384da45","name":"TestScrum"}],"count":2}""",
                     Encoding.UTF8, "application/json"),
             });
 

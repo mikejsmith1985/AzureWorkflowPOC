@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — ADO telemetry preflight never attached fields on Agile / inherited processes
+
+The field preflight created the custom telemetry + cost fields at org level but never attached them to
+any work item type on an Agile (or any inherited) process, so they never appeared on work items and the
+telemetry write-back / cost projection silently failed. Three compounding root causes, found by live
+verification against a real Agile-inherited project:
+
+- **Swapped process-template GUIDs** — the `Agile`/`Scrum` template-type GUID constants were reversed, so
+  an Agile process (and an Agile-inherited process, whose `parentProcessTypeId` is the Agile GUID) was
+  detected as **Scrum** and fields were attached to `ProductBacklogItem`, a Scrum-only WIT (404 NotFound).
+  The test fixtures encoded the same swap, which masked it.
+- **Process-id lookup matched the wrong field** — `_apis/process/processes` returns the GUID in `id` with
+  `typeId` empty, but the lookup matched `typeId`, so the attach targeted `"unknown-process-id"`.
+- **Inherited system WITs were not materialized** — a system work item type in an inherited process must
+  be materialized as an inherited override before fields can be added (else `VS402805`). The preflight now
+  materializes it and attaches to the resulting reference name. Existing fields are also (re)attached, not
+  just newly-created ones.
+
+Verified live: all telemetry + cost fields now attach to **User Story** and **Task** on the real project.
+
 ### Added — Two-dimensional AI cost tracking on the work hierarchy (spec-017)
 
 Tracks AI spend as two dimensions — **runtime** (pipeline model calls) and **development** (coding-agent
