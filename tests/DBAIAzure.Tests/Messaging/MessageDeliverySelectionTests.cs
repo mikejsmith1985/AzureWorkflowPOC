@@ -109,6 +109,32 @@ public sealed class MessageDeliverySelectionTests
     }
 
     [Fact]
+    public async Task McpConfigured_BlankTemplate_OnSlack_DefaultsToChannelIdMessage()
+    {
+        var repo = new StubConnectorConfigRepository
+        {
+            NonSecretConfigJson = JsonSerializer.Serialize(new
+            {
+                platform = nameof(MessagingPlatform.Slack),
+                mcpServerUrl = "https://mcp.slack.com/mcp",
+                mcpToolName = "slack_send_message",
+                target = "C0BD",
+                // mcpArgumentTemplate intentionally omitted → must fall back to the Slack-specific default.
+            }),
+            DecryptedSecretsJson = """{"mcpAuthToken":"xoxp-token"}""",
+        };
+        var gateway = new FakeMcpMessageGateway(succeeds: true);
+        var delivery = new MessageDelivery(repo,
+            new SingleHandlerHttpClientFactory(new CapturingHttpHandler(HttpStatusCode.OK, "ok")), Profiles(), gateway);
+
+        var result = await delivery.SendAsync("hello");
+
+        Assert.Equal(DeliveryPath.Mcp, result.Path);
+        Assert.NotNull(gateway.LastRequest);
+        Assert.Equal(McpArgumentTemplate.SlackDefault, gateway.LastRequest!.ArgumentTemplateJson);
+    }
+
+    [Fact]
     public async Task McpGatewayFailure_StaysOnMcpPath_DoesNotFallBackOrThrow()
     {
         var repo = new StubConnectorConfigRepository
