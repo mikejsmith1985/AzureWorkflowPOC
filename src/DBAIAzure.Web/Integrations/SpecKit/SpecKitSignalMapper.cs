@@ -14,7 +14,8 @@ public static class SpecKitSignalMapper
     /// Builds the initial state for a run. The feature directory falls back to the feature key
     /// resolved under the specs root when the signal omits it.
     /// </summary>
-    public static PhaseHandlerState ToInitialState(PhaseSignalPayload payload, string runId, string specsRoot)
+    public static PhaseHandlerState ToInitialState(
+        PhaseSignalPayload payload, string runId, string specsRoot, string costBindingKey)
     {
         var featureKey = payload.FeatureKey!.Trim();
         var featureDirectory = string.IsNullOrWhiteSpace(payload.FeatureDirectory)
@@ -28,6 +29,7 @@ public static class SpecKitSignalMapper
             FeatureDirectory = featureDirectory,
             Phase = PhaseWorkItemMap.Parse(payload.Phase),
             Status = PhaseRunStatus.Received,
+            CostBindingKey = costBindingKey,   // minted at intake (spec-017)
         };
     }
 }

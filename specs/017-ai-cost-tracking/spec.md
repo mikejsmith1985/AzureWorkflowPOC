@@ -126,6 +126,10 @@ weigh AI spend against the value of that initiative.
 
 ## Out of Scope
 
+- **ServiceNow write-back of the binding key (deferred — implementation finding T037).** The ServiceNow
+  integration is intake-only (no set-field client), so the binding key is written to the **ADO work
+  item** and the local resolution map only. Resolution works without the SNow write; stamping the key
+  back onto the SNow ticket is a follow-up if cross-system human lookup from ServiceNow is needed.
 - Authenticated per-person identity (a separate effort: wire an identity provider and capture the
   authenticated principal). Per-person attribution remains a secondary dimension, not this feature's
   axis.

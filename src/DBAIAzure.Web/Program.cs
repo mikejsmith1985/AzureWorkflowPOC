@@ -214,6 +214,16 @@ builder.Services.AddSingleton<IPhaseApprovalNotifier>(sp =>
     new ForgeApprovalNotifier(sp.GetRequiredService<IHttpClientFactory>(),
                               sp.GetRequiredService<ILogger<ForgeApprovalNotifier>>()));
 
+// ── AI cost tracking (spec-017): minter, ledger, binding→work-item resolution map ────────────
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IBindingKeyMinter,
+    DBAIAzure.Web.Services.BindingKeyMinter>();
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.ICostLedger,
+    DBAIAzure.Storage.Repositories.SqlCostLedger>();
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IBindingWorkItemMap,
+    DBAIAzure.Storage.Repositories.SqlBindingWorkItemMap>();
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.ICostProjection,
+    DBAIAzure.Web.Services.CostProjectionService>();
+
 builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
 {
     var configRepo     = sp.GetRequiredService<IConnectorConfigRepository>();
@@ -222,6 +232,11 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
     var phaseRepo      = sp.GetRequiredService<IPhaseRunRepository>();
     var telemetryWriteBack = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ITelemetryWriteBack>();
     var phaseUsageReporter = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ILlmUsageReporter>();
+    var bindingKeyMinter   = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IBindingKeyMinter>();
+    var bindingWorkItemMap = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IBindingWorkItemMap>();
+    var costLedger         = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ICostLedger>();
+    var costProjection     = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ICostProjection>();
+    var runTelemetrySource = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IRunTelemetrySource>();
 
     Func<IPhaseProgressSink, Kernel> kernelFactory = sink =>
     {
@@ -254,6 +269,11 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
         kernelBuilder.Services.AddSingleton(phaseRepo);
         kernelBuilder.Services.AddSingleton(sink);
         kernelBuilder.Services.AddSingleton(telemetryWriteBack);
+        kernelBuilder.Services.AddSingleton(bindingKeyMinter);
+        kernelBuilder.Services.AddSingleton(bindingWorkItemMap);
+        kernelBuilder.Services.AddSingleton(costLedger);
+        kernelBuilder.Services.AddSingleton(costProjection);
+        kernelBuilder.Services.AddSingleton(runTelemetrySource);
         return kernelBuilder.Build();
     };
 

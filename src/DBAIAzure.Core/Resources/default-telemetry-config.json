@@ -20,6 +20,30 @@
           "fallback_display_name": "Tags"
         },
         {
+          "name": "Cost Binding Key",
+          "reference": "Custom.CostBindingKey",
+          "type": "string",
+          "required": false,
+          "fallback_reference": "System.Tags",
+          "fallback_display_name": "Tags"
+        },
+        {
+          "name": "AI Runtime Cost USD",
+          "reference": "Custom.AIRuntimeCostUSD",
+          "type": "double",
+          "required": false,
+          "fallback_reference": null,
+          "fallback_display_name": null
+        },
+        {
+          "name": "AI Dev Cost USD",
+          "reference": "Custom.AIDevCostUSD",
+          "type": "double",
+          "required": false,
+          "fallback_reference": null,
+          "fallback_display_name": null
+        },
+        {
           "name": "AI Input Tokens",
           "reference": "Custom.AIInputTokens",
           "type": "integer",
@@ -119,6 +143,30 @@
           "required": false,
           "fallback_reference": "System.Tags",
           "fallback_display_name": "Tags"
+        },
+        {
+          "name": "Cost Binding Key",
+          "reference": "Custom.CostBindingKey",
+          "type": "string",
+          "required": false,
+          "fallback_reference": "System.Tags",
+          "fallback_display_name": "Tags"
+        },
+        {
+          "name": "AI Runtime Cost USD",
+          "reference": "Custom.AIRuntimeCostUSD",
+          "type": "double",
+          "required": false,
+          "fallback_reference": null,
+          "fallback_display_name": null
+        },
+        {
+          "name": "AI Dev Cost USD",
+          "reference": "Custom.AIDevCostUSD",
+          "type": "double",
+          "required": false,
+          "fallback_reference": null,
+          "fallback_display_name": null
         }
       ]
     }

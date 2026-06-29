@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Two-dimensional AI cost tracking on the work hierarchy (spec-017)
+
+Tracks AI spend as two dimensions — **runtime** (pipeline model calls) and **development** (coding-agent
+sessions) — joined by a pipeline-minted, DoR-enforced source-neutral **binding key** and rolled up the
+ADO work tree via **ADO Analytics** (no rollup engine — Framework-First).
+
+- **Cost ledger** (`ICostLedger`/`SqlCostLedger`): append-only, dimension-split; per-ticket totals are
+  cumulative sums (FR-007) and a multi-item run contributes once on its **anchor** (the Epic for a Plan
+  run), never duplicated (FR-008).
+- **Binding key** (`IBindingKeyMinter`): minted at intake, asserted at DoR (`PhaseValidationStep`),
+  written to the ADO work item (`Custom.CostBindingKey`), resolved locally via `IBindingWorkItemMap`.
+- **Runtime**: `CreateWorkItemStep` appends one runtime entry on the anchor; `CostProjectionService`
+  projects cumulative `Custom.AIRuntimeCostUSD`/`Custom.AIDevCostUSD` for Analytics.
+- **Development**: secret-gated `POST /api/telemetry/dev-usage` appends Development entries by binding
+  key (re-priced via `ModelPricing`); unresolvable keys are recorded **unattributed**, never dropped (FR-010).
+- Docs: `docs/ado-cost-analytics.md` (rollup view) + `docs/dev-agent-telemetry-setup.md` (org runbook).
+- **Deferred (T037):** ServiceNow write-back of the binding key — the SNow integration is intake-only;
+  the key lives on the ADO item + local map, which is sufficient for resolution.
+- All capture is best-effort — a cost/telemetry failure never disrupts a run, validation, board write,
+  or developer session (FR-011). Re-run the ADO field preflight to provision the new fields.
+
 ### Added — Accurate AI usage telemetry capture (spec-016)
 
 The Anthropic connector discarded the response `usage` block, so the AI telemetry fields written to

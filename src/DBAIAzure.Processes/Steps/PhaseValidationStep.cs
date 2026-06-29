@@ -62,6 +62,22 @@ public sealed class PhaseValidationStep : KernelProcessStep
     {
         var structuredService = kernel.GetRequiredService<IStructuredCompletionService>();
         var sink = kernel.Services.GetService<IPhaseProgressSink>();
+
+        // DoR gate (spec-017 FR-002): a ticket cannot be ready without a valid cost binding key. The
+        // pipeline mints it at intake, so this is a belt-and-suspenders assertion against a wiring regression.
+        var bindingKeyMinter = kernel.Services.GetService<IBindingKeyMinter>();
+        if (bindingKeyMinter is not null && !bindingKeyMinter.IsValid(state.CostBindingKey))
+        {
+            var blocked = state with
+            {
+                Status = PhaseRunStatus.Failed,
+                FailureReason = "Definition of Ready: missing or invalid cost binding key.",
+            };
+            sink?.Report(blocked);
+            await ctx.EmitEventAsync(new() { Id = PhaseHandlerEvents.Failed, Data = blocked });
+            return;
+        }
+
         var userMessage = BuildUserMessage(state);
 
         try
