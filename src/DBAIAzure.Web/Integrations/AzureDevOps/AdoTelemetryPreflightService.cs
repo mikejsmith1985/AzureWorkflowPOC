@@ -27,10 +27,13 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
         attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt + 1));
     private const string ApiVersion = "7.1";
 
-    // ADO Agile process templateTypeId (system GUID — does not change across orgs).
-    private const string AgileTemplateTypeId = "6b724908-ef14-45cf-84f8-768b5384da45";
+    // ADO Agile process templateTypeId (Microsoft well-known system GUID — does not change across orgs).
+    // NOTE: these were previously swapped, which mis-detected Agile projects (and Agile-inherited ones,
+    // whose parentProcessTypeId is this Agile GUID) as Scrum, so fields attached to ProductBacklogItem
+    // (a Scrum-only WIT) and silently failed with NotFound on every Agile project.
+    private const string AgileTemplateTypeId = "adcc42ab-9882-485e-a3ed-7678f01f66bc";
     // ADO Scrum process templateTypeId.
-    private const string ScrumTemplateTypeId = "adcc42ab-9882-485e-a3ed-7678f01f66bc";
+    private const string ScrumTemplateTypeId = "6b724908-ef14-45cf-84f8-768b5384da45";
 
     // Work item type reference names by process type.
     private static readonly Dictionary<AdoProcessType, Dictionary<string, string>> WitRefNames = new()
@@ -170,45 +173,59 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
         var fieldsExisting = new List<string>();
         var fieldsFailed = new List<FieldBootstrapFailure>();
 
+        // The work item types currently on the process — used to resolve the attachable reference name.
+        var processWits = await GetProcessWorkItemTypesAsync(http, orgUrl, processId, ct);
+
         foreach (var (witKey, witConfig) in config.WorkItemTypes)
         {
-            var witRefName = ResolveWitRefName(processType, witKey);
+            // In an inherited process a system WIT must be materialized as an inherited override before
+            // fields can be added to it; this returns that customizable reference name (e.g. "MyProc.Task").
+            var systemRefName = ResolveWitRefName(processType, witKey);
+            var witRefName = await ResolveCustomizableWitRefNameAsync(
+                http, orgUrl, processId, systemRefName, processWits, ct) ?? systemRefName;
+
             foreach (var field in witConfig.Fields)
             {
-                // Existence check — skip creation if already present.
+                // Create the org-level field only if missing — but a field can exist org-wide yet still
+                // need attaching to THIS work item type (e.g. a prior run created it but failed to attach,
+                // or it was added manually). So the attach below runs for existing fields too.
                 var exists = await CheckFieldExistsAsync(http, orgUrl, field.ReferenceName, ct);
                 if (exists)
                 {
                     fieldsExisting.Add(field.ReferenceName);
-                    continue;
                 }
-
-                // For picklist fields, create the picklist first.
-                string? picklistId = null;
-                if (field.FieldType == AdoFieldType.PicklistString && field.PicklistValues is { Count: > 0 } picklist)
-                    picklistId = await CreatePicklistAsync(http, orgUrl, field.ReferenceName, picklist, ct);
-
-                // Create the org-level field with retry.
-                var createError = await RetryWithBackoffAsync(
-                    async attempt =>
-                    {
-                        await CreateFieldOrgLevelAsync(http, orgUrl, field, picklistId, ct);
-                        return true;
-                    },
-                    ct);
-
-                if (createError is not null)
+                else
                 {
-                    fieldsFailed.Add(new FieldBootstrapFailure
+                    // For picklist fields, create the picklist first.
+                    string? picklistId = null;
+                    if (field.FieldType == AdoFieldType.PicklistString && field.PicklistValues is { Count: > 0 } picklist)
+                        picklistId = await CreatePicklistAsync(http, orgUrl, field.ReferenceName, picklist, ct);
+
+                    // Create the org-level field with retry.
+                    var createError = await RetryWithBackoffAsync(
+                        async attempt =>
+                        {
+                            await CreateFieldOrgLevelAsync(http, orgUrl, field, picklistId, ct);
+                            return true;
+                        },
+                        ct);
+
+                    if (createError is not null)
                     {
-                        ReferenceName = field.ReferenceName,
-                        Error = createError,
-                        AttemptsExhausted = MaxRetryAttempts,
-                    });
-                    continue;
+                        fieldsFailed.Add(new FieldBootstrapFailure
+                        {
+                            ReferenceName = field.ReferenceName,
+                            Error = createError,
+                            AttemptsExhausted = MaxRetryAttempts,
+                        });
+                        continue;   // cannot attach a field that was not created
+                    }
+
+                    fieldsCreated.Add(field.ReferenceName);
                 }
 
-                // Attach the field to the WIT.
+                // Attach the field to the WIT — for both newly-created AND pre-existing fields. ADO's
+                // add-field-to-WIT is idempotent (a no-op/conflict when already attached, logged not thrown).
                 await RetryWithBackoffAsync(
                     async attempt =>
                     {
@@ -216,8 +233,6 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
                         return true;
                     },
                     ct);
-
-                fieldsCreated.Add(field.ReferenceName);
             }
         }
 
@@ -423,10 +438,15 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
             if (!doc.RootElement.TryGetProperty("value", out var values)) return null;
             foreach (var proc in values.EnumerateArray())
             {
-                if (proc.TryGetProperty("typeId", out var typeProp)
-                    && string.Equals(typeProp.GetString(), templateTypeId, StringComparison.OrdinalIgnoreCase)
-                    && proc.TryGetProperty("id", out var idProp))
-                    return idProp.GetString();
+                // The _apis/process/processes endpoint returns the process GUID in "id" and leaves
+                // "typeId" empty; the project's templateTypeId equals that id. Match on either so we
+                // find the process across both API shapes, and always return the concrete "id".
+                var id = proc.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+                var typeId = proc.TryGetProperty("typeId", out var typeProp) ? typeProp.GetString() : null;
+
+                if (string.Equals(id, templateTypeId, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(typeId, templateTypeId, StringComparison.OrdinalIgnoreCase))
+                    return id ?? typeId;
             }
         }
         catch { /* best-effort parse */ }
@@ -548,6 +568,81 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
         var response = await http.PostAsync(url, new StringContent(payload, Encoding.UTF8, "application/json"), ct);
         if (!response.IsSuccessStatusCode)
             _logger.LogWarning("Field attach for {Field} to {Wit} returned {Status}.", fieldRefName, witRefName, response.StatusCode);
+    }
+
+    /// <summary>A work item type as it currently exists on an inherited process.</summary>
+    private sealed record ProcessWit(
+        string ReferenceName, string Name, string Customization, string? Inherits, string? Color, string? Icon);
+
+    /// <summary>Reads the work item types currently on the process (empty list on any failure).</summary>
+    private async Task<List<ProcessWit>> GetProcessWorkItemTypesAsync(
+        HttpClient http, string orgUrl, string processId, CancellationToken ct)
+    {
+        var result = new List<ProcessWit>();
+        var url = $"{orgUrl.TrimEnd('/')}/_apis/work/processes/{processId}/workitemtypes?api-version={ApiVersion}";
+        try
+        {
+            var response = await http.GetAsync(url, ct);
+            if (!response.IsSuccessStatusCode) return result;
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            if (!doc.RootElement.TryGetProperty("value", out var values)) return result;
+            foreach (var w in values.EnumerateArray())
+            {
+                result.Add(new ProcessWit(
+                    w.TryGetProperty("referenceName", out var rn) ? rn.GetString() ?? "" : "",
+                    w.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "",
+                    w.TryGetProperty("customization", out var cz) ? cz.GetString() ?? "" : "",
+                    w.TryGetProperty("inherits", out var ih) ? ih.GetString() : null,
+                    w.TryGetProperty("color", out var cl) ? cl.GetString() : null,
+                    w.TryGetProperty("icon", out var ic) ? ic.GetString() : null));
+            }
+        }
+        catch { /* best-effort — fall back to the system reference name */ }
+        return result;
+    }
+
+    /// <summary>
+    /// Returns a work item type reference name that fields can be attached to. In an inherited process a
+    /// system type (customization == "system") cannot take new fields until it is MATERIALIZED as an
+    /// inherited override — without this, the add-field call fails with VS402805 on every inherited
+    /// process (the common real-world case). Already-inherited/custom types are returned as-is.
+    /// </summary>
+    private async Task<string?> ResolveCustomizableWitRefNameAsync(
+        HttpClient http, string orgUrl, string processId, string systemRefName,
+        List<ProcessWit> processWits, CancellationToken ct)
+    {
+        var match = processWits.FirstOrDefault(w =>
+            string.Equals(w.ReferenceName, systemRefName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(w.Inherits, systemRefName, StringComparison.OrdinalIgnoreCase));
+
+        if (match is null)
+            return null;   // unknown — caller falls back to the system reference name
+
+        // Already customizable (inherited or custom) — fields can be attached directly.
+        if (!string.Equals(match.Customization, "system", StringComparison.OrdinalIgnoreCase))
+            return match.ReferenceName;
+
+        // Materialize an inherited override so the type becomes customizable. Reuse the system type's
+        // own colour/icon so the inherited copy looks identical to the user.
+        var payload = JsonSerializer.Serialize(new
+        {
+            name = match.Name,
+            inheritsFrom = systemRefName,
+            isDisabled = false,
+            color = match.Color ?? "f6546a",
+            icon = match.Icon ?? "icon_clipboard",
+        });
+        var url = $"{orgUrl.TrimEnd('/')}/_apis/work/processes/{processId}/workitemtypes?api-version={ApiVersion}";
+        var response = await http.PostAsync(url, new StringContent(payload, Encoding.UTF8, "application/json"), ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("Could not materialize inherited work item type {Wit}: {Status}.",
+                systemRefName, response.StatusCode);
+            return null;
+        }
+
+        using var created = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        return created.RootElement.TryGetProperty("referenceName", out var rn) ? rn.GetString() : null;
     }
 
     private async Task<HashSet<string>> FetchAvailableFieldsAsync(
