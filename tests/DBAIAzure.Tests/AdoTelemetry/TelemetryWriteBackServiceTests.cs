@@ -133,6 +133,47 @@ public sealed class TelemetryWriteBackServiceTests
         Assert.Empty(boards.FieldUpdates);
     }
 
+    [Fact]
+    public async Task WriteBack_Bootstrap_WithCache_WritesCacheTokensAndHitRate()
+    {
+        var boards = new FakeBoardsClient();
+        var aggregate = new RunTelemetryAggregate
+        {
+            RunId = "run-cache",
+            ModelName = "claude-sonnet-4-6",
+            InputTokens = 1000,
+            OutputTokens = 200,
+            CacheReadTokens = 500,
+            LlmCallCount = 2,
+            DurationSeconds = 5,
+        };
+        var service = BuildService(aggregate, BootstrapTargetsForAllFields(), boards);
+
+        var result = await service.WriteBackAsync(
+            new TelemetryWriteBackRequest("run-cache", UserStoryType, WorkItemId: 11, SpeckitPhase: "Plan"));
+
+        Assert.True(result.Attempted);
+        var fields = Assert.Single(boards.FieldUpdates).Fields;
+        Assert.Equal(500, fields["Custom.AICacheTokens"]);
+        Assert.Equal(33.3, fields["Custom.AICacheHitRatePct"]);   // 500 / (500 + 1000) × 100
+    }
+
+    [Fact]
+    public async Task WriteBack_WithErrors_WritesApiErrorCount_EvenWithoutSuccessfulCalls()
+    {
+        var boards = new FakeBoardsClient();
+        var aggregate = new RunTelemetryAggregate { RunId = "run-err", ErrorCount = 3 };
+        var service = BuildService(aggregate, BootstrapTargetsForAllFields(), boards);
+
+        var result = await service.WriteBackAsync(
+            new TelemetryWriteBackRequest("run-err", UserStoryType, WorkItemId: 12, SpeckitPhase: null));
+
+        Assert.True(result.Attempted);
+        var fields = Assert.Single(boards.FieldUpdates).Fields;
+        Assert.Equal(3, fields["Custom.AIAPIErrors"]);
+        Assert.False(fields.ContainsKey("Custom.AIInputTokens"));   // no successful calls → no token fields
+    }
+
     // ── Test doubles ──────────────────────────────────────────────────────────
 
     // Bootstrap mode: every configured UserStory custom field maps to itself (all were created/exist).

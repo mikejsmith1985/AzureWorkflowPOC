@@ -45,6 +45,8 @@ public sealed class SqlWorkflowObserver : IWorkflowObserver
                 LlmModelName   = evt.LlmModelName,
                 LlmInputTokens = evt.LlmInputTokens,
                 LlmOutputTokens = evt.LlmOutputTokens,
+                LlmCacheReadTokens = evt.LlmCacheReadTokens,
+                LlmCacheCreationTokens = evt.LlmCacheCreationTokens,
             });
             await db.SaveChangesAsync(ct);
         }

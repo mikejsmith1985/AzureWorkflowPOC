@@ -41,5 +41,11 @@ public sealed record WorkflowExecutionEvent(
     int? LlmInputTokens,
 
     /// <summary>Number of tokens in the completion returned by the LLM.</summary>
-    int? LlmOutputTokens
+    int? LlmOutputTokens,
+
+    /// <summary>Prompt tokens served from cache (reuse). Null for non-AI / no-cache events.</summary>
+    int? LlmCacheReadTokens = null,
+
+    /// <summary>Prompt tokens written to cache. Null for non-AI / no-cache events.</summary>
+    int? LlmCacheCreationTokens = null
 );

@@ -146,6 +146,7 @@ builder.Services.AddSingleton<IHitlNotifier, DBAIAzure.Web.Integrations.Messagin
 builder.Services.AddSingleton<PipelineOrchestrator>(sp =>
 {
     var configRepo = sp.GetRequiredService<IConnectorConfigRepository>();
+    var usageReporter = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ILlmUsageReporter>();
 
     // Kernel factory: resolves LLM credentials from DB at each run start (hot-reload, FR-014).
     // Runs on a thread-pool thread (inside Task.Run), so synchronous .GetResult() is safe.
@@ -177,7 +178,7 @@ builder.Services.AddSingleton<PipelineOrchestrator>(sp =>
 
         var kernelBuilder = Kernel.CreateBuilder();
         kernelBuilder.Services.AddSingleton<IChatCompletionService>(
-            new AnthropicChatCompletionService(effectiveKey, effectiveModel));
+            new AnthropicChatCompletionService(effectiveKey, effectiveModel, usageReporter));
         kernelBuilder.Services.AddSingleton<IProgressReporter>(reporter);
         return kernelBuilder.Build();
     };
@@ -220,6 +221,7 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
     var boardsClient   = sp.GetRequiredService<IBoardsClient>();
     var phaseRepo      = sp.GetRequiredService<IPhaseRunRepository>();
     var telemetryWriteBack = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ITelemetryWriteBack>();
+    var phaseUsageReporter = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ILlmUsageReporter>();
 
     Func<IPhaseProgressSink, Kernel> kernelFactory = sink =>
     {
@@ -246,7 +248,7 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
 
         var kernelBuilder = Kernel.CreateBuilder();
         kernelBuilder.Services.AddSingleton<IStructuredCompletionService>(
-            new AnthropicChatCompletionService(effectiveKey, effectiveModel));
+            new AnthropicChatCompletionService(effectiveKey, effectiveModel, phaseUsageReporter));
         kernelBuilder.Services.AddSingleton(artifactReader);
         kernelBuilder.Services.AddSingleton(boardsClient);
         kernelBuilder.Services.AddSingleton(phaseRepo);
@@ -284,6 +286,11 @@ builder.Services.AddSingleton<IWorkflowRunRepository, EfWorkflowRunRepository>()
 builder.Services.AddSingleton<IWorkflowObserver, SqlWorkflowObserver>();
 builder.Services.AddSingleton<IWorkflowObserver, SignalRWorkflowObserver>();
 builder.Services.AddSingleton<IWorkflowObserver, AzureMonitorWorkflowObserver>();
+
+// Single LLM-usage capture point — records each call's tokens/cache/errors as a run-correlated event
+// (covers both runner and phase-handler paths; injected into the Anthropic connector below).
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.ILlmUsageReporter,
+    DBAIAzure.Web.Services.LlmUsageReporter>();
 
 // ── SK kernel filters (FR-21.2 token tracing, Article IX prompt hashing) ──────
 builder.Services.AddSingleton<WorkflowFunctionInvocationFilter>();

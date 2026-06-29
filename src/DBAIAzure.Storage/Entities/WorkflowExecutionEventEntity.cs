@@ -38,4 +38,10 @@ public sealed class WorkflowExecutionEventEntity
     public string? LlmModelName { get; set; }
     public int? LlmInputTokens { get; set; }
     public int? LlmOutputTokens { get; set; }
+
+    /// <summary>Prompt tokens served from cache (reuse); null for non-AI / no-cache events.</summary>
+    public int? LlmCacheReadTokens { get; set; }
+
+    /// <summary>Prompt tokens written to cache; null for non-AI / no-cache events.</summary>
+    public int? LlmCacheCreationTokens { get; set; }
 }

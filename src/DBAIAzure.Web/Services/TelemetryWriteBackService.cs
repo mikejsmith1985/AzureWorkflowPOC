@@ -88,17 +88,31 @@ public sealed class TelemetryWriteBackService : ITelemetryWriteBack
         if (!string.IsNullOrWhiteSpace(request.SpeckitPhase))
             values["Custom.SpeckitPhase"] = request.SpeckitPhase;
 
+        // Errors can occur even when no call succeeded, so record them independently of LLM activity.
+        if (aggregate.ErrorCount > 0)
+            values["Custom.AIAPIErrors"] = aggregate.ErrorCount;
+
         if (aggregate.HasLlmActivity)
         {
             values["Custom.AIInputTokens"] = aggregate.InputTokens;
             values["Custom.AIOutputTokens"] = aggregate.OutputTokens;
             values["Custom.AIToolCalls"] = aggregate.LlmCallCount;
 
+            // Surface cache metrics only when caching actually occurred (SC-003) — avoids writing a
+            // misleading 0% hit rate on every non-cache run.
+            if (aggregate.CacheReadTokens > 0)
+            {
+                values["Custom.AICacheTokens"] = aggregate.CacheReadTokens;
+                if (aggregate.CacheHitRatePct is { } cacheHitRate)
+                    values["Custom.AICacheHitRatePct"] = cacheHitRate;
+            }
+
             if (aggregate.DurationSeconds > 0)
                 values["Custom.AISessionDurationSec"] = aggregate.DurationSeconds;
 
             var estimatedCost = ModelPricing.EstimateCostUsd(
-                aggregate.ModelName, aggregate.InputTokens, aggregate.OutputTokens);
+                aggregate.ModelName, aggregate.InputTokens, aggregate.OutputTokens,
+                aggregate.CacheReadTokens, aggregate.CacheCreationTokens);
             if (estimatedCost is not null)
                 values["Custom.AIEstimatedCostUSD"] = estimatedCost;
         }

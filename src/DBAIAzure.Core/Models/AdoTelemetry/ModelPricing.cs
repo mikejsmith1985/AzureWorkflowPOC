@@ -15,6 +15,11 @@ public static class ModelPricing
     private const decimal TokensPerMillion = 1_000_000m;
     private const int CostDecimalPlaces = 4;
 
+    // Cache pricing relative to the input rate (approximate Anthropic prompt-caching multipliers):
+    // a cache write costs ~1.25× input, a cache read ~0.1× input.
+    private const decimal CacheWriteMultiplier = 1.25m;
+    private const decimal CacheReadMultiplier = 0.10m;
+
     // Matched by case-insensitive substring of the model name (e.g. "claude-opus-4-8" → opus tier).
     private static readonly IReadOnlyList<(string ModelNameContains, TokenRate Rate)> Tiers = new[]
     {
@@ -25,10 +30,13 @@ public static class ModelPricing
     };
 
     /// <summary>
-    /// Returns the estimated cost in USD for the given token usage, or null when the model name is
-    /// blank or does not match a known pricing tier (so callers can omit the field rather than write 0).
+    /// Returns the estimated cost in USD for the given token usage (including prompt-cache read/write
+    /// contributions), or null when the model name is blank or does not match a known pricing tier (so
+    /// callers can omit the field rather than write a misleading 0).
     /// </summary>
-    public static double? EstimateCostUsd(string? modelName, int inputTokens, int outputTokens)
+    public static double? EstimateCostUsd(
+        string? modelName, int inputTokens, int outputTokens,
+        int cacheReadTokens = 0, int cacheCreationTokens = 0)
     {
         if (string.IsNullOrWhiteSpace(modelName))
             return null;
@@ -40,7 +48,9 @@ public static class ModelPricing
                 continue;
 
             var estimated = (inputTokens / TokensPerMillion) * rate.InputPerMillionUsd
-                          + (outputTokens / TokensPerMillion) * rate.OutputPerMillionUsd;
+                          + (outputTokens / TokensPerMillion) * rate.OutputPerMillionUsd
+                          + (cacheReadTokens / TokensPerMillion) * (rate.InputPerMillionUsd * CacheReadMultiplier)
+                          + (cacheCreationTokens / TokensPerMillion) * (rate.InputPerMillionUsd * CacheWriteMultiplier);
             return (double)Math.Round(estimated, CostDecimalPlaces);
         }
 

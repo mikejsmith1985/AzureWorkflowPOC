@@ -44,4 +44,15 @@ public sealed class ModelPricingTests
 
         Assert.Null(cost);
     }
+
+    [Fact]
+    public void EstimateCostUsd_IncludesCacheContributions()
+    {
+        // sonnet: input $3/M, output $15/M, cache-read 0.1×=$0.30/M, cache-write 1.25×=$3.75/M.
+        // 1M each → 3 + 15 + 0.30 + 3.75 = 22.05
+        var cost = ModelPricing.EstimateCostUsd(
+            "claude-sonnet-4-6", 1_000_000, 1_000_000, cacheReadTokens: 1_000_000, cacheCreationTokens: 1_000_000);
+
+        Assert.Equal(22.05, cost);
+    }
 }

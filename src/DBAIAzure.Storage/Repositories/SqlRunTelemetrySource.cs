@@ -1,5 +1,6 @@
 // Reads a run's recorded LLM execution events from the database and aggregates them for write-back.
 using DBAIAzure.Core.Interfaces;
+using DBAIAzure.Core.Models;
 using DBAIAzure.Core.Models.AdoTelemetry;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,11 +25,12 @@ public sealed class SqlRunTelemetrySource : IRunTelemetrySource
     {
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
 
-        // Only events with LLM usage matter; non-AI events (step entry/exit) carry no token data.
+        // All LLM-call events for the run — including failures (Outcome="error", null tokens) so they
+        // are counted. The integer compare is translatable; the error/cache mapping happens in memory.
+        var llmCallCompleted = (int)WorkflowEventType.LlmCallCompleted;
         var rows = await db.WorkflowExecutionEvents
             .AsNoTracking()
-            .Where(evt => evt.RunId == runId
-                && (evt.LlmInputTokens != null || evt.LlmOutputTokens != null || evt.LlmModelName != null))
+            .Where(evt => evt.RunId == runId && evt.EventType == llmCallCompleted)
             .Select(evt => new
             {
                 evt.OccurredAt,
@@ -36,12 +38,18 @@ public sealed class SqlRunTelemetrySource : IRunTelemetrySource
                 evt.LlmModelName,
                 evt.LlmInputTokens,
                 evt.LlmOutputTokens,
+                evt.LlmCacheReadTokens,
+                evt.LlmCacheCreationTokens,
+                evt.Outcome,
             })
             .ToListAsync(cancellationToken);
 
         var samples = rows
             .Select(row => new LlmTelemetrySample(
-                row.OccurredAt, row.DurationMs, row.LlmModelName, row.LlmInputTokens, row.LlmOutputTokens))
+                row.OccurredAt, row.DurationMs, row.LlmModelName, row.LlmInputTokens, row.LlmOutputTokens,
+                CacheReadTokens: row.LlmCacheReadTokens ?? 0,
+                CacheCreationTokens: row.LlmCacheCreationTokens ?? 0,
+                IsError: string.Equals(row.Outcome, "error", StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
         return RunTelemetryAggregate.FromSamples(runId, samples);
