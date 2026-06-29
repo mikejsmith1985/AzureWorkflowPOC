@@ -3,6 +3,7 @@
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models.AdoTelemetry;
 using DBAIAzure.Core.Models.WorkTracker;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace DBAIAzure.Web.Integrations.AzureDevOps;
@@ -17,17 +18,20 @@ public sealed class AzureDevOpsWorkTrackerAdapter : IWorkTrackerAdapter
 {
     private readonly IBoardsClient _boards;
     private readonly IBindingWorkItemMap _bindingMap;
-    private readonly IAdoTelemetryPreflightService _preflight;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly AdoFieldReferenceResolver _fieldResolver;
     private readonly ILogger<AzureDevOpsWorkTrackerAdapter> _logger;
 
+    // The create/set/resolve path uses only singletons, so this adapter is itself a singleton. The ADO
+    // preflight (provisioning) is scoped, so it is resolved on demand from a fresh scope rather than held
+    // as a field — this is what lets the adapter be injected into the per-run phase kernel.
     public AzureDevOpsWorkTrackerAdapter(
-        IBoardsClient boards, IBindingWorkItemMap bindingMap, IAdoTelemetryPreflightService preflight,
+        IBoardsClient boards, IBindingWorkItemMap bindingMap, IServiceScopeFactory scopeFactory,
         AdoFieldReferenceResolver fieldResolver, ILogger<AzureDevOpsWorkTrackerAdapter> logger)
     {
         _boards = boards;
         _bindingMap = bindingMap;
-        _preflight = preflight;
+        _scopeFactory = scopeFactory;
         _fieldResolver = fieldResolver;
         _logger = logger;
     }
@@ -78,7 +82,10 @@ public sealed class AzureDevOpsWorkTrackerAdapter : IWorkTrackerAdapter
     public async Task<ProvisioningResult> ProvisionFieldsAsync(
         AdoTelemetryFieldConfig fieldConfig, CancellationToken ct = default)
     {
-        var result = await _preflight.RunPreflightAsync(fieldConfig, ct);
+        // Resolve the scoped preflight from a fresh scope (the adapter itself is a singleton).
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var preflight = scope.ServiceProvider.GetRequiredService<IAdoTelemetryPreflightService>();
+        var result = await preflight.RunPreflightAsync(fieldConfig, ct);
         if (!result.IsSuccess)
             return new ProvisioningResult
             {

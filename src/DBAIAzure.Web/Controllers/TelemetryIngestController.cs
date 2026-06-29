@@ -72,9 +72,9 @@ public sealed class TelemetryIngestController : ControllerBase
             IsUnattributed = workItem is null,
         });
 
-        // Projection is ADO-numeric for now; cross-tracker projection lands with the pipeline rewire.
-        if (workItem is { } resolved && resolved.TryAsInt(out var resolvedWorkItemId))
-            await _projection.ProjectAsync(payload.BindingKey, resolvedWorkItemId);
+        // Project the cumulative cost onto the resolved item through the active tracker (any tracker).
+        if (workItem is { } resolved)
+            await _projection.ProjectAsync(payload.BindingKey, resolved);
 
         return Accepted(new { bindingKey = payload.BindingKey, attributed = workItem is not null });
     }

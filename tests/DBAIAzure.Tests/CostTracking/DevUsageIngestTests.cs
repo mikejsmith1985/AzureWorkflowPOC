@@ -106,6 +106,6 @@ public sealed class DevUsageIngestTests
 
     private sealed class NoOpProjection : ICostProjection
     {
-        public Task ProjectAsync(string bindingKey, int workItemId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task ProjectAsync(string bindingKey, WorkItemRef workItem, CancellationToken ct = default) => Task.CompletedTask;
     }
 }

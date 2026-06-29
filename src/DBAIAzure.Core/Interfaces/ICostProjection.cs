@@ -1,4 +1,6 @@
 // Projects a binding key's cumulative ledger totals onto its work item's cost fields (spec-017).
+using DBAIAzure.Core.Models.WorkTracker;
+
 namespace DBAIAzure.Core.Interfaces;
 
 /// <summary>
@@ -9,5 +11,5 @@ namespace DBAIAzure.Core.Interfaces;
 public interface ICostProjection
 {
     /// <summary>Writes the ledger totals for <paramref name="bindingKey"/> onto the work item's cost fields.</summary>
-    Task ProjectAsync(string bindingKey, int workItemId, CancellationToken cancellationToken = default);
+    Task ProjectAsync(string bindingKey, WorkItemRef workItem, CancellationToken cancellationToken = default);
 }

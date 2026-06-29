@@ -185,7 +185,7 @@ public sealed class CreateWorkItemStep : KernelProcessStep
 
             var projection = kernel.Services.GetService<ICostProjection>();
             if (projection is not null)
-                await projection.ProjectAsync(state.CostBindingKey!, anchorWorkItemId);
+                await projection.ProjectAsync(state.CostBindingKey!, WorkItemRef.From(anchorWorkItemId));
         }
         catch { /* runtime cost capture is best-effort (FR-011) */ }
     }
