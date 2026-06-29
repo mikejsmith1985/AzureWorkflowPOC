@@ -185,6 +185,46 @@
           "fallback_display_name": null
         }
       ]
+    },
+    "Epic": {
+      "fields": [
+        { "name": "AI Session ID", "reference": "Custom.AISessionID", "type": "string", "required": false, "fallback_reference": "System.Tags", "fallback_display_name": "Tags" },
+        { "name": "AI Model Used", "reference": "Custom.AIModelUsed", "type": "string", "required": false, "fallback_reference": "System.Tags", "fallback_display_name": "Tags" },
+        { "name": "AI Triggered By", "reference": "Custom.AITriggeredBy", "type": "string", "required": false, "fallback_reference": "System.Tags", "fallback_display_name": "Tags" },
+        { "name": "Cost Binding Key", "reference": "Custom.CostBindingKey", "type": "string", "required": false, "fallback_reference": "System.Tags", "fallback_display_name": "Tags" },
+        { "name": "AI Runtime Cost USD", "reference": "Custom.AIRuntimeCostUSD", "type": "double", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Dev Cost USD", "reference": "Custom.AIDevCostUSD", "type": "double", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Input Tokens", "reference": "Custom.AIInputTokens", "type": "integer", "required": false, "fallback_reference": "Microsoft.VSTS.Scheduling.StoryPoints", "fallback_display_name": "Story Points" },
+        { "name": "AI Output Tokens", "reference": "Custom.AIOutputTokens", "type": "integer", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Cache Tokens", "reference": "Custom.AICacheTokens", "type": "integer", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Estimated Cost USD", "reference": "Custom.AIEstimatedCostUSD", "type": "double", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Session Duration Sec", "reference": "Custom.AISessionDurationSec", "type": "integer", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Tool Calls", "reference": "Custom.AIToolCalls", "type": "integer", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Tool Accept Rate Pct", "reference": "Custom.AIToolAcceptRatePct", "type": "double", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI API Errors", "reference": "Custom.AIAPIErrors", "type": "integer", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Cache Hit Rate Pct", "reference": "Custom.AICacheHitRatePct", "type": "double", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "Speckit Phase", "reference": "Custom.SpeckitPhase", "type": "picklistString", "picklist": [ "Spec", "Plan", "Tasks", "Analyze", "Implement" ], "required": false, "fallback_reference": "System.Tags", "fallback_display_name": "Tags" }
+      ]
+    },
+    "Bug": {
+      "fields": [
+        { "name": "AI Session ID", "reference": "Custom.AISessionID", "type": "string", "required": false, "fallback_reference": "System.Tags", "fallback_display_name": "Tags" },
+        { "name": "AI Model Used", "reference": "Custom.AIModelUsed", "type": "string", "required": false, "fallback_reference": "System.Tags", "fallback_display_name": "Tags" },
+        { "name": "AI Triggered By", "reference": "Custom.AITriggeredBy", "type": "string", "required": false, "fallback_reference": "System.Tags", "fallback_display_name": "Tags" },
+        { "name": "Cost Binding Key", "reference": "Custom.CostBindingKey", "type": "string", "required": false, "fallback_reference": "System.Tags", "fallback_display_name": "Tags" },
+        { "name": "AI Runtime Cost USD", "reference": "Custom.AIRuntimeCostUSD", "type": "double", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Dev Cost USD", "reference": "Custom.AIDevCostUSD", "type": "double", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Input Tokens", "reference": "Custom.AIInputTokens", "type": "integer", "required": false, "fallback_reference": "Microsoft.VSTS.Scheduling.StoryPoints", "fallback_display_name": "Story Points" },
+        { "name": "AI Output Tokens", "reference": "Custom.AIOutputTokens", "type": "integer", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Cache Tokens", "reference": "Custom.AICacheTokens", "type": "integer", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Estimated Cost USD", "reference": "Custom.AIEstimatedCostUSD", "type": "double", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Session Duration Sec", "reference": "Custom.AISessionDurationSec", "type": "integer", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Tool Calls", "reference": "Custom.AIToolCalls", "type": "integer", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Tool Accept Rate Pct", "reference": "Custom.AIToolAcceptRatePct", "type": "double", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI API Errors", "reference": "Custom.AIAPIErrors", "type": "integer", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "AI Cache Hit Rate Pct", "reference": "Custom.AICacheHitRatePct", "type": "double", "required": false, "fallback_reference": null, "fallback_display_name": null },
+        { "name": "Speckit Phase", "reference": "Custom.SpeckitPhase", "type": "picklistString", "picklist": [ "Spec", "Plan", "Tasks", "Analyze", "Implement" ], "required": false, "fallback_reference": "System.Tags", "fallback_display_name": "Tags" }
+      ]
     }
   },
   "fallback_strategy": {

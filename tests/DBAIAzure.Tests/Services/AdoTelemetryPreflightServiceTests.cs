@@ -434,17 +434,21 @@ public sealed class AdoTelemetryPreflightServiceTests
     // ── T045: Config loading ──────────────────────────────────────────────────────
 
     [Fact]
-    public async Task LoadDefaultConfig_EmbeddedResource_Deserializes_With16UserStoryAnd6TaskFields()
+    public async Task LoadDefaultConfig_EmbeddedResource_Deserializes_WithExpectedFieldCounts()
     {
         var config = await AdoTelemetryPreflightService.LoadDefaultConfigAsync(CancellationToken.None);
 
         Assert.Equal("1.0", config.Version);
         Assert.True(config.WorkItemTypes.ContainsKey("UserStory"));
         Assert.True(config.WorkItemTypes.ContainsKey("Task"));
-        // 16/6 = the spec-009 baseline (12/2) + AITriggeredBy (#44) + the spec-017 cost fields
-        // (CostBindingKey, AIRuntimeCostUSD, AIDevCostUSD) added to each work item type.
+        Assert.True(config.WorkItemTypes.ContainsKey("Epic"));
+        Assert.True(config.WorkItemTypes.ContainsKey("Bug"));
+        // 16 = spec-009 baseline (12) + AITriggeredBy (#44) + 3 spec-017 cost fields. Epic + Bug carry the
+        // full set (they are run anchors — Plan→Epic, Implement→Bug); Task keeps its lighter 6-field set.
         Assert.Equal(16, config.WorkItemTypes["UserStory"].Fields.Count);
         Assert.Equal(6, config.WorkItemTypes["Task"].Fields.Count);
+        Assert.Equal(16, config.WorkItemTypes["Epic"].Fields.Count);
+        Assert.Equal(16, config.WorkItemTypes["Bug"].Fields.Count);
 
         var speckitPhase = config.WorkItemTypes["UserStory"].Fields
             .First(f => f.ReferenceName == "Custom.SpeckitPhase");
@@ -469,7 +473,7 @@ public sealed class AdoTelemetryPreflightServiceTests
 
         Assert.True(result.IsSuccess);
         var manifest = (BootstrapManifest)result.Manifest!;
-        // Only the 2 fields from customConfig should appear — not the full 22 from embedded default
+        // Only the 2 fields from customConfig should appear — not the full 54 from embedded default
         Assert.Equal(2, manifest.FieldsCreated.Count + manifest.FieldsExisting.Count + manifest.FieldsFailed.Count);
     }
 }

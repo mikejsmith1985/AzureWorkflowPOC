@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Epic and Bug telemetry + cost fields (ADO telemetry config)
+
+Extended `default-telemetry-config.json` so the run anchors — **Epic** (the Plan anchor) and **Bug** (the
+Implement anchor) — carry the full telemetry + cost field set alongside User Story. Without this the cost
+projection wrote `Custom.AIRuntimeCostUSD`/`Custom.AIDevCostUSD` (and the runtime ledger) to an Epic/Bug
+that did not have the field. Added `Epic`/`Bug` work-item-type reference-name mappings to the preflight.
+Verified live against the real Agile-inherited project: all fields now attach to **User Story, Task, Epic,
+and Bug**. Re-run the preflight after deploy to provision them.
+
 ### Fixed — ADO telemetry preflight never attached fields on Agile / inherited processes
 
 The field preflight created the custom telemetry + cost fields at org level but never attached them to
