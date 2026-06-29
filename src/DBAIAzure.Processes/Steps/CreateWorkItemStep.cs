@@ -50,6 +50,10 @@ public sealed class CreateWorkItemStep : KernelProcessStep
                 ? await WritePlanTasksAsync(state, boardsClient, repository)
                 : [await WriteSingleItemAsync(state, workItemType, boardsClient, repository)];
 
+            // Best-effort: stamp the run's AI telemetry onto the work item(s) just written. Never let a
+            // telemetry failure undo an approved board write (FR-015 spirit) — the work item stands.
+            await WriteTelemetryAsync(kernel, state, created);
+
             await EmitAsync(ctx, sink,
                 state with { Status = PhaseRunStatus.Completed, CreatedWorkItems = created },
                 PhaseHandlerEvents.WorkItemWritten);
@@ -64,6 +68,32 @@ public sealed class CreateWorkItemStep : KernelProcessStep
                     FailureReason = $"Board write failed after approval: {ex.Message}",
                 },
                 PhaseHandlerEvents.Failed);
+        }
+    }
+
+    /// <summary>
+    /// Writes the run's aggregated AI telemetry onto each created work item, if a telemetry write-back
+    /// service is registered. Entirely best-effort: any failure is swallowed so an approved board write
+    /// is never undone by a telemetry problem. The service itself also returns (never throws) on errors.
+    /// </summary>
+    private static async Task WriteTelemetryAsync(
+        Kernel kernel, PhaseHandlerState state, IReadOnlyList<CreatedWorkItemRef> created)
+    {
+        var writeBack = kernel.Services.GetService<ITelemetryWriteBack>();
+        if (writeBack is null)
+            return;
+
+        foreach (var workItem in created)
+        {
+            try
+            {
+                await writeBack.WriteBackAsync(new TelemetryWriteBackRequest(
+                    state.RunId, workItem.WorkItemType, workItem.WorkItemId, state.Phase.ToString()));
+            }
+            catch
+            {
+                // Telemetry is non-essential; the work item creation already succeeded.
+            }
         }
     }
 

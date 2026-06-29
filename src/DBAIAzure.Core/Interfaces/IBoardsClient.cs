@@ -31,4 +31,14 @@ public interface IBoardsClient
     /// <summary>Appends a discussion comment to an existing work item (append-only).</summary>
     Task AppendDiscussionCommentAsync(
         int workItemId, string comment, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Patches arbitrary fields on an existing work item, keyed by ADO reference name
+    /// (e.g. <c>Custom.AIInputTokens</c>). <c>System.Tags</c> is merged non-destructively — existing
+    /// tags are preserved. Used by telemetry write-back to set the AI telemetry fields. Other fields
+    /// are replaced with the supplied value.
+    /// </summary>
+    Task UpdateFieldsAsync(
+        int workItemId, IReadOnlyDictionary<string, object?> fields,
+        CancellationToken cancellationToken = default);
 }

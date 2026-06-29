@@ -53,6 +53,9 @@ public sealed class FakeBoardsClient : IBoardsClient
     /// <summary>Every appended comment, in order.</summary>
     public List<(int Id, string Comment)> Comments { get; } = [];
 
+    /// <summary>Every field-update call's arguments, in order (telemetry write-back).</summary>
+    public List<(int Id, IReadOnlyDictionary<string, object?> Fields)> FieldUpdates { get; } = [];
+
     /// <summary>When set, every call throws this to simulate a board-write failure (FR-015).</summary>
     public Exception? FailWith { get; set; }
 
@@ -92,6 +95,14 @@ public sealed class FakeBoardsClient : IBoardsClient
     {
         if (FailWith is not null) throw FailWith;
         Comments.Add((workItemId, comment));
+        return Task.CompletedTask;
+    }
+
+    public Task UpdateFieldsAsync(
+        int workItemId, IReadOnlyDictionary<string, object?> fields, CancellationToken cancellationToken = default)
+    {
+        if (FailWith is not null) throw FailWith;
+        FieldUpdates.Add((workItemId, fields));
         return Task.CompletedTask;
     }
 }

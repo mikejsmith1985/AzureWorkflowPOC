@@ -30,6 +30,9 @@ public sealed class AzureDevOpsBoardsClient : IBoardsClient, IDisposable
     private const string IterationPathField = "/fields/System.IterationPath";
     private const string ParentRelation = "System.LinkTypes.Hierarchy-Reverse";
 
+    // Reference name (not a JSON-Patch path) — used to look up and merge tags in UpdateFieldsAsync.
+    private const string TagsField = "System.Tags";
+
     private readonly AzureDevOpsOptions _options;
     private readonly IConnectorConfigRepository? _configRepo;
 
@@ -99,6 +102,61 @@ public sealed class AzureDevOpsBoardsClient : IBoardsClient, IDisposable
         var (client, _) = await GetClientAsync(cancellationToken);
         var patch = new JsonPatchDocument { AddField(HistoryField, comment) };
         await client.UpdateWorkItemAsync(patch, workItemId, cancellationToken: cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public async Task UpdateFieldsAsync(
+        int workItemId, IReadOnlyDictionary<string, object?> fields,
+        CancellationToken cancellationToken = default)
+    {
+        if (fields.Count == 0)
+            return;
+
+        var (client, _) = await GetClientAsync(cancellationToken);
+        var patch = new JsonPatchDocument();
+
+        foreach (var (referenceName, value) in fields)
+        {
+            // System.Tags is a single delimited string — merge so we never clobber the user's tags.
+            var fieldValue = string.Equals(referenceName, TagsField, StringComparison.OrdinalIgnoreCase)
+                ? await MergeTagsAsync(client, workItemId, value?.ToString(), cancellationToken)
+                : value;
+
+            patch.Add(new JsonPatchOperation
+            {
+                Operation = Operation.Add,
+                Path = $"/fields/{referenceName}",
+                Value = fieldValue,
+            });
+        }
+
+        await client.UpdateWorkItemAsync(patch, workItemId, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads the work item's current tags and appends <paramref name="newTag"/> if not already present,
+    /// returning the merged semicolon-delimited set so existing tags are preserved (non-destructive).
+    /// </summary>
+    private static async Task<string> MergeTagsAsync(
+        WorkItemTrackingHttpClient client, int workItemId, string? newTag, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(newTag))
+            return string.Empty;
+
+        var existing = await client.GetWorkItemAsync(
+            workItemId, new[] { TagsField }, cancellationToken: cancellationToken);
+        var currentTags = existing.Fields.TryGetValue(TagsField, out var tagsValue)
+            ? tagsValue?.ToString() ?? string.Empty
+            : string.Empty;
+
+        var tags = currentTags
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+        if (!tags.Contains(newTag, StringComparer.OrdinalIgnoreCase))
+            tags.Add(newTag);
+
+        return string.Join("; ", tags);
     }
 
     /// <summary>
