@@ -36,6 +36,12 @@ public class PipelineDbContext : DbContext
     /// <summary>Close-the-loop dedup signatures per monitored app (feature 013).</summary>
     public DbSet<AppRaisedIssueRecord> AppRaisedIssues { get; set; } = null!;
 
+    /// <summary>Append-only AI-cost ledger — runtime + development spend per binding key (spec-017).</summary>
+    public DbSet<CostLedgerEntryEntity> CostLedgerEntries { get; set; } = null!;
+
+    /// <summary>binding key → work item map for dev-usage resolution (spec-017, C1).</summary>
+    public DbSet<BindingWorkItemMapEntity> BindingWorkItemMap { get; set; } = null!;
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<RunRecord>(entity =>
@@ -139,6 +145,22 @@ public class PipelineDbContext : DbContext
             entity.HasKey(r => r.Signature);
             entity.Property(r => r.Signature).ValueGeneratedNever();
             entity.HasIndex(r => r.AppId);
+        });
+
+        modelBuilder.Entity<CostLedgerEntryEntity>(entity =>
+        {
+            entity.ToTable("CostLedgerEntries");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            // Totals are summed by binding key + dimension — index both.
+            entity.HasIndex(e => new { e.BindingKey, e.Dimension });
+        });
+
+        modelBuilder.Entity<BindingWorkItemMapEntity>(entity =>
+        {
+            entity.ToTable("BindingWorkItemMap");
+            entity.HasKey(e => e.BindingKey);
+            entity.Property(e => e.BindingKey).ValueGeneratedNever();
         });
     }
 }
