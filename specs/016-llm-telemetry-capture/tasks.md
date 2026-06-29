@@ -148,9 +148,13 @@ run completes, `AIAPIErrors` ≥ 1 on a produced work item.
   known pre-existing `ConnectorSettings_WhenSaveClicked` bUnit failure.
 - [x] T034 Code-quality pass against the constitution (naming, XML docs, guard clauses, <40-line
   methods, no suppressed nullable warnings) across all changed files.
-- [ ] T035 Execute `quickstart.md` Scenarios A–D against the running app (evidence per Article X).
-  **Deferred to live verification** — needs a real Anthropic key + ADO round-trip (and the Azure site,
-  currently billing-blocked). Unit suite (572 passing) covers the logic; this is the live proof.
+- [x] T035 Live capture verification (Scenarios A/B core) — `AnthropicUsageCaptureIntegrationTests`
+  drives the real connector with the vaulted Anthropic key and asserts real tokens + model are
+  captured. **Passed** against the live API (Article X evidence for FR-001/FR-002/SC-002).
+- [ ] T036 Live ADO write-back round-trip (Scenarios C/D) — telemetry → work item fields on a real
+  phase run. **Deferred**: needs configured ADO/LLM connectors + a phase pipeline writing real work
+  items (and ideally the Azure site, currently billing-blocked). Logic is unit-covered; this is the
+  remaining end-to-end proof.
 
 ---
 
