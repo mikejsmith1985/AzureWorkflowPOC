@@ -13,18 +13,14 @@ namespace DBAIAzure.Web.Services;
 /// Captures the model name and token usage from every AI function invocation and
 /// fans them out as <see cref="WorkflowEventType.LlmCallCompleted"/> events to all
 /// registered <see cref="IWorkflowObserver"/> implementations.
-/// The current run ID is threaded via <see cref="CurrentRunId"/> so observers can
-/// correlate the event with the right execution record.
+/// The current run ID is threaded via <see cref="DBAIAzure.Core.Diagnostics.LlmRunContext"/> so
+/// observers can correlate the event with the right execution record. (Token capture now happens at
+/// the connector via ILlmUsageReporter; this filter only fires when a connector populates usage
+/// metadata, and is otherwise dormant.)
 /// Never throws — exceptions are logged and swallowed so the kernel pipeline continues.
 /// </summary>
 public sealed class WorkflowFunctionInvocationFilter : IFunctionInvocationFilter
 {
-    /// <summary>
-    /// Ambient run ID for the currently executing orchestrator run in this async context.
-    /// Set by <c>WorkflowExecutionOrchestrator.StartRunAsync</c> before invoking the kernel.
-    /// </summary>
-    public static readonly AsyncLocal<string?> CurrentRunId = new();
-
     private readonly IEnumerable<IWorkflowObserver> _observers;
     private readonly ILogger<WorkflowFunctionInvocationFilter> _logger;
 
@@ -64,7 +60,7 @@ public sealed class WorkflowFunctionInvocationFilter : IFunctionInvocationFilter
 
             var evt = new WorkflowExecutionEvent(
                 EventId:         Guid.NewGuid(),
-                RunId:           CurrentRunId.Value ?? "unknown",
+                RunId:           DBAIAzure.Core.Diagnostics.LlmRunContext.CurrentRunId.Value ?? "unknown",
                 NodeId:          null,
                 NodeLabel:       $"{context.Function.PluginName}.{context.Function.Name}",
                 EventType:       WorkflowEventType.LlmCallCompleted,

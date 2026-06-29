@@ -67,4 +67,42 @@ public sealed class RunTelemetryAggregateTests
         Assert.Equal("run-4", aggregate.RunId);
         Assert.Equal(0, aggregate.LlmCallCount);
     }
+
+    [Fact]
+    public void FromSamples_SumsCache_AndDerivesHitRate()
+    {
+        var samples = new[]
+        {
+            new LlmTelemetrySample(Earlier, 100, "claude-sonnet-4-6", InputTokens: 1000, OutputTokens: 200,
+                CacheReadTokens: 800, CacheCreationTokens: 50),
+        };
+
+        var aggregate = RunTelemetryAggregate.FromSamples("run-cache", samples);
+
+        Assert.Equal(800, aggregate.CacheReadTokens);
+        Assert.Equal(50, aggregate.CacheCreationTokens);
+        Assert.Equal(44.4, aggregate.CacheHitRatePct);   // 800 / (800 + 1000) × 100
+    }
+
+    [Fact]
+    public void FromSamples_ExcludesErrorsFromCallCount_AndCountsErrors()
+    {
+        var samples = new[]
+        {
+            new LlmTelemetrySample(Earlier, 100, "claude-sonnet-4-6", 100, 40),
+            new LlmTelemetrySample(Later, 0, null, null, null, IsError: true),
+        };
+
+        var aggregate = RunTelemetryAggregate.FromSamples("run-err", samples);
+
+        Assert.Equal(1, aggregate.LlmCallCount);     // error sample is not a successful call
+        Assert.Equal(1, aggregate.ErrorCount);
+        Assert.Equal(100, aggregate.InputTokens);    // error sample contributes no tokens
+    }
+
+    [Fact]
+    public void CacheHitRatePct_NoInput_ReturnsNull()
+    {
+        Assert.Null(RunTelemetryAggregate.Empty("run-z").CacheHitRatePct);
+    }
 }

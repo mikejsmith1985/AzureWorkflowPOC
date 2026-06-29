@@ -288,6 +288,9 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
     {
         var runId = runState.Run.RunId;
 
+        // Make the run id ambient so the LLM connector's usage reporter tags this run's calls (FR-008).
+        DBAIAzure.Core.Diagnostics.LlmRunContext.CurrentRunId.Value = runId;
+
         try
         {
             // ── Mark the run as active ────────────────────────────────────────────

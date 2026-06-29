@@ -1,5 +1,6 @@
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Models.AdoTelemetry;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using System.Net.Http.Headers;
@@ -29,6 +30,10 @@ public sealed class AnthropicChatCompletionService : IChatCompletionService, ISt
     private readonly HttpClient _http;
     private readonly string _model;
 
+    // Optional usage sink — when set, every Messages API call (chat or structured) is reported here so
+    // it can be recorded as run-correlated telemetry. Null keeps the connector standalone/testable.
+    private readonly ILlmUsageReporter? _usageReporter;
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
@@ -38,9 +43,10 @@ public sealed class AnthropicChatCompletionService : IChatCompletionService, ISt
     public IReadOnlyDictionary<string, object?> Attributes { get; } =
         new Dictionary<string, object?> { { "provider", "anthropic" }, { "model_id", string.Empty } };
 
-    public AnthropicChatCompletionService(string apiKey, string model)
+    public AnthropicChatCompletionService(string apiKey, string model, ILlmUsageReporter? usageReporter = null)
     {
         _model = model;
+        _usageReporter = usageReporter;
         _http = new HttpClient { BaseAddress = new Uri("https://api.anthropic.com") };
         _http.DefaultRequestHeaders.Add("x-api-key", apiKey);
         _http.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
@@ -76,17 +82,55 @@ public sealed class AnthropicChatCompletionService : IChatCompletionService, ISt
         var json = JsonSerializer.Serialize(requestBody, JsonOpts);
         using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var response = await _http.PostAsync("/v1/messages", content, cancellationToken);
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        stopwatch.Stop();
 
         if (!response.IsSuccessStatusCode)
+        {
+            ReportUsage(responseBody: null, stopwatch.ElapsedMilliseconds, isError: true);
             throw new HttpRequestException($"Anthropic API error {response.StatusCode}: {responseBody}");
+        }
 
         var apiResponse = JsonSerializer.Deserialize<AnthropicResponse>(responseBody, JsonOpts)
             ?? throw new InvalidOperationException("Empty response from Anthropic API");
 
+        ReportUsage(responseBody, stopwatch.ElapsedMilliseconds, isError: false);
+
         var text = apiResponse.Content?.FirstOrDefault()?.Text ?? string.Empty;
         return [new ChatMessageContent(AuthorRole.Assistant, text)];
+    }
+
+    /// <summary>
+    /// Builds an <see cref="LlmUsage"/> from a raw Anthropic Messages response body (the success case),
+    /// pulling token counts incl. both cache figures and the model. Public static so usage parsing is
+    /// unit-testable without an HTTP round-trip (mirrors <see cref="ParseToolUseResult{T}"/>).
+    /// </summary>
+    public static LlmUsage BuildUsage(string responseBody, string fallbackModel, long durationMs)
+    {
+        var apiResponse = JsonSerializer.Deserialize<AnthropicResponse>(responseBody, JsonOpts);
+        var usage = apiResponse?.Usage;
+        return new LlmUsage(
+            ModelName:           apiResponse?.Model ?? fallbackModel,
+            InputTokens:         usage?.InputTokens ?? 0,
+            OutputTokens:        usage?.OutputTokens ?? 0,
+            CacheReadTokens:     usage?.CacheReadTokens ?? 0,
+            CacheCreationTokens: usage?.CacheCreationTokens ?? 0,
+            IsError:             false,
+            DurationMs:          durationMs);
+    }
+
+    /// <summary>Reports an LLM call's usage (success → parsed body; failure → zeroed, IsError).</summary>
+    private void ReportUsage(string? responseBody, long durationMs, bool isError)
+    {
+        if (_usageReporter is null)
+            return;
+
+        var usage = isError || string.IsNullOrWhiteSpace(responseBody)
+            ? new LlmUsage(_model, 0, 0, 0, 0, IsError: isError, DurationMs: durationMs)
+            : BuildUsage(responseBody, _model, durationMs);
+        _usageReporter.Report(usage);
     }
 
     public async IAsyncEnumerable<StreamingChatMessageContent> GetStreamingChatMessageContentsAsync(
@@ -130,11 +174,18 @@ public sealed class AnthropicChatCompletionService : IChatCompletionService, ISt
         var json = JsonSerializer.Serialize(requestBody, JsonOpts);
         using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var response = await _http.PostAsync("/v1/messages", content, cancellationToken);
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        stopwatch.Stop();
 
         if (!response.IsSuccessStatusCode)
+        {
+            ReportUsage(responseBody: null, stopwatch.ElapsedMilliseconds, isError: true);
             throw new HttpRequestException($"Anthropic API error {response.StatusCode}: {responseBody}");
+        }
+
+        ReportUsage(responseBody, stopwatch.ElapsedMilliseconds, isError: false);
 
         return ParseToolUseResult<T>(responseBody, toolName);
     }
@@ -251,7 +302,17 @@ public sealed class AnthropicChatCompletionService : IChatCompletionService, ISt
     private record AnthropicMessage(string Role, string Content);
 
     private record AnthropicResponse(
-        List<AnthropicContentBlock>? Content);
+        List<AnthropicContentBlock>? Content,
+        string? Model = null,
+        AnthropicUsage? Usage = null);
+
+    // Anthropic Messages API usage block. input/output map via the snake_case policy; the cache fields
+    // need explicit names because their JSON keys include "_input_" which the policy would not produce.
+    private record AnthropicUsage(
+        int InputTokens = 0,
+        int OutputTokens = 0,
+        [property: JsonPropertyName("cache_read_input_tokens")] int CacheReadTokens = 0,
+        [property: JsonPropertyName("cache_creation_input_tokens")] int CacheCreationTokens = 0);
 
     private record AnthropicContentBlock(
         string Type,

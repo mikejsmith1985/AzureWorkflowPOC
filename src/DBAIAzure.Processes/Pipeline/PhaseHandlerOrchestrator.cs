@@ -106,6 +106,10 @@ public sealed class PhaseHandlerOrchestrator
 
     private async Task ExecuteRunAsync(PhaseHandlerRun run)
     {
+        // Tag this phase run's LLM calls (validation + any connector test) so their usage is recorded
+        // against this run — set before the kernel runs so the AsyncLocal flows to the validation call.
+        DBAIAzure.Core.Diagnostics.LlmRunContext.CurrentRunId.Value = run.RunId;
+
         try
         {
             // Pre-flight: all four connectors must pass a live functional test before the run starts (FR-018).

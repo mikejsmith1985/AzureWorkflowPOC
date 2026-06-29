@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Accurate AI usage telemetry capture (spec-016)
+
+The Anthropic connector discarded the response `usage` block, so the AI telemetry fields written to
+ADO work items (#42) were silently empty. Capture is now real and covers both the workflow runner and
+the phase-handler validation:
+
+- The connector parses `usage` (input/output + `cache_read_input_tokens`/`cache_creation_input_tokens`)
+  and the model, and reports every call (success or failure) through a new `ILlmUsageReporter` seam —
+  the single capture point for both paths (SK function-invocation filters can't observe the direct
+  `GetStructuredAsync` call). Run correlation flows via `LlmRunContext` (an ambient run id now set by
+  both orchestrators — it was previously never assigned).
+- New per-call event fields (`LlmCacheReadTokens`/`LlmCacheCreationTokens`) are persisted; the run
+  aggregate gains cache sums, an AI **error count**, and a derived **cache-hit rate**.
+- Write-back adds `Custom.AICacheTokens`, `Custom.AICacheHitRatePct`, and `Custom.AIAPIErrors`; the cost
+  estimate now includes cache read/write contributions. Tool-accept rate remains out of scope (no
+  capture source). All capture is best-effort — a telemetry failure never disrupts the run.
+
 ### Added — ADO telemetry write-back (LLM metrics → work item fields)
 
 Closes the second half of the ADO telemetry feature: spec-009 *created* the custom fields; this
