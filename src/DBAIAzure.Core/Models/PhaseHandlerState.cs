@@ -75,6 +75,12 @@ public record PhaseHandlerState
 
     /// <summary>Populated on a recorded failure (missing artifacts, board write, etc.).</summary>
     public string? FailureReason { get; init; }
+
+    /// <summary>
+    /// Canonical, source-neutral AI-cost binding key minted at intake (spec-017). Carried through the
+    /// run, enforced at DoR, written to the work item + ServiceNow ticket, and used to attribute cost.
+    /// </summary>
+    public string? CostBindingKey { get; init; }
 }
 
 /// <summary>A single artifact file read for the phase.</summary>

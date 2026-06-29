@@ -2,6 +2,7 @@
 // a board-write failure rather than discarding the approval (FR-015).
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Models.AdoTelemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
 using System.Text;
@@ -79,22 +80,111 @@ public sealed class CreateWorkItemStep : KernelProcessStep
     private static async Task WriteTelemetryAsync(
         Kernel kernel, PhaseHandlerState state, IReadOnlyList<CreatedWorkItemRef> created)
     {
-        var writeBack = kernel.Services.GetService<ITelemetryWriteBack>();
-        if (writeBack is null)
+        if (created.Count == 0)
             return;
 
-        foreach (var workItem in created)
+        var boardsClient = kernel.GetRequiredService<IBoardsClient>();
+        var repository = kernel.Services.GetService<IPhaseRunRepository>() ?? NullPhaseRunRepository.Instance;
+        var anchorWorkItemId = await ResolveAnchorWorkItemIdAsync(state, created, repository);
+
+        // spec-017 US1: stamp the binding key on every created item + record the binding→work-item map
+        // (keyed to the cost anchor) so dev-usage ingest resolves the key. Best-effort — a cost/telemetry
+        // failure never undoes an approved board write (FR-011).
+        if (!string.IsNullOrWhiteSpace(state.CostBindingKey))
         {
-            try
+            foreach (var workItem in created)
             {
-                await writeBack.WriteBackAsync(new TelemetryWriteBackRequest(
-                    state.RunId, workItem.WorkItemType, workItem.WorkItemId, state.Phase.ToString()));
+                try
+                {
+                    await boardsClient.UpdateFieldsAsync(workItem.WorkItemId,
+                        new Dictionary<string, object?> { ["Custom.CostBindingKey"] = state.CostBindingKey });
+                }
+                catch { /* binding stamp is best-effort */ }
             }
-            catch
+
+            var bindingMap = kernel.Services.GetService<IBindingWorkItemMap>();
+            if (bindingMap is not null)
             {
-                // Telemetry is non-essential; the work item creation already succeeded.
+                try { await bindingMap.PutAsync(state.CostBindingKey!, anchorWorkItemId); }
+                catch { /* map population is best-effort */ }
+            }
+
+            // spec-017 US2: append ONE runtime cost entry on the anchor (no per-child duplication, FR-008)
+            // then project the cumulative cost fields for ADO Analytics rollup.
+            await AppendRuntimeCostAsync(kernel, state, anchorWorkItemId);
+        }
+
+        // Existing per-item token snapshot (spec-016) — unchanged.
+        var writeBack = kernel.Services.GetService<ITelemetryWriteBack>();
+        if (writeBack is not null)
+        {
+            foreach (var workItem in created)
+            {
+                try
+                {
+                    await writeBack.WriteBackAsync(new TelemetryWriteBackRequest(
+                        state.RunId, workItem.WorkItemType, workItem.WorkItemId, state.Phase.ToString()));
+                }
+                catch { /* token snapshot is non-essential */ }
             }
         }
+    }
+
+    /// <summary>
+    /// The cost anchor: the feature's Epic for a Plan run (planning cost belongs to the feature, not an
+    /// arbitrary Task), otherwise the single created item. Read-only — the Epic already exists by now.
+    /// </summary>
+    private static async Task<int> ResolveAnchorWorkItemIdAsync(
+        PhaseHandlerState state, IReadOnlyList<CreatedWorkItemRef> created, IPhaseRunRepository repository)
+    {
+        if (state.Phase == SpecKitPhase.Plan)
+        {
+            var specifyRun = await repository.GetByFeaturePhaseAsync(state.FeatureKey, SpecKitPhase.Specify);
+            var epic = specifyRun?.CreatedWorkItems.FirstOrDefault(i => i.WorkItemType == PhaseWorkItemMap.EpicType);
+            if (epic is not null)
+                return epic.WorkItemId;
+        }
+        return created[0].WorkItemId;
+    }
+
+    /// <summary>Appends the run's single runtime cost entry on the anchor, then projects the totals.</summary>
+    private static async Task AppendRuntimeCostAsync(Kernel kernel, PhaseHandlerState state, int anchorWorkItemId)
+    {
+        var ledger = kernel.Services.GetService<ICostLedger>();
+        if (ledger is null)
+            return;
+
+        try
+        {
+            var telemetrySource = kernel.Services.GetService<IRunTelemetrySource>();
+            var aggregate = telemetrySource is not null
+                ? await telemetrySource.GetAggregateAsync(state.RunId)
+                : RunTelemetryAggregate.Empty(state.RunId);
+
+            var cost = ModelPricing.EstimateCostUsd(
+                aggregate.ModelName, aggregate.InputTokens, aggregate.OutputTokens,
+                aggregate.CacheReadTokens, aggregate.CacheCreationTokens) ?? 0;
+
+            await ledger.AppendAsync(new CostLedgerEntry
+            {
+                Id = Guid.NewGuid(),
+                BindingKey = state.CostBindingKey!,
+                Dimension = CostDimension.Runtime,
+                WorkItemId = anchorWorkItemId,
+                ModelName = aggregate.ModelName,
+                InputTokens = aggregate.InputTokens,
+                OutputTokens = aggregate.OutputTokens,
+                CacheReadTokens = aggregate.CacheReadTokens,
+                CostUsd = cost,
+                OccurredAt = DateTimeOffset.UtcNow,
+                SourceId = state.RunId,
+            });
+
+            var projection = kernel.Services.GetService<ICostProjection>();
+            if (projection is not null)
+                await projection.ProjectAsync(state.CostBindingKey!, anchorWorkItemId);
+        }
+        catch { /* runtime cost capture is best-effort (FR-011) */ }
     }
 
     // ── Per-phase write strategies ────────────────────────────────────────────────

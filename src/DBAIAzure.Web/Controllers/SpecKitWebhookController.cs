@@ -22,17 +22,20 @@ public sealed class SpecKitWebhookController : ControllerBase
     private readonly PhaseHandlerOrchestrator _orchestrator;
     private readonly SpecKitOptions _specKitOptions;
     private readonly IConfiguration _config;
+    private readonly DBAIAzure.Core.Interfaces.IBindingKeyMinter _bindingKeyMinter;
     private readonly ILogger<SpecKitWebhookController> _logger;
 
     public SpecKitWebhookController(
         PhaseHandlerOrchestrator orchestrator,
         IOptions<SpecKitOptions> specKitOptions,
         IConfiguration config,
+        DBAIAzure.Core.Interfaces.IBindingKeyMinter bindingKeyMinter,
         ILogger<SpecKitWebhookController> logger)
     {
         _orchestrator = orchestrator;
         _specKitOptions = specKitOptions.Value;
         _config = config;
+        _bindingKeyMinter = bindingKeyMinter;
         _logger = logger;
     }
 
@@ -48,7 +51,9 @@ public sealed class SpecKitWebhookController : ControllerBase
             return BadRequest(new { error = "phase is required" });
 
         var runId = Guid.NewGuid().ToString("N")[..8];
-        var initialState = SpecKitSignalMapper.ToInitialState(payload, runId, _specKitOptions.SpecsRoot);
+        // Mint the canonical cost binding key at intake (spec-017) — present before DoR and assignment.
+        var bindingKey = _bindingKeyMinter.Mint();
+        var initialState = SpecKitSignalMapper.ToInitialState(payload, runId, _specKitOptions.SpecsRoot, bindingKey);
         _orchestrator.StartRun(initialState);
 
         _logger.LogInformation(

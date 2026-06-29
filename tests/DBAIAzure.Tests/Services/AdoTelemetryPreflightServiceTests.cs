@@ -397,15 +397,17 @@ public sealed class AdoTelemetryPreflightServiceTests
     // ── T045: Config loading ──────────────────────────────────────────────────────
 
     [Fact]
-    public async Task LoadDefaultConfig_EmbeddedResource_Deserializes_With12UserStoryAnd2TaskFields()
+    public async Task LoadDefaultConfig_EmbeddedResource_Deserializes_With15UserStoryAnd5TaskFields()
     {
         var config = await AdoTelemetryPreflightService.LoadDefaultConfigAsync(CancellationToken.None);
 
         Assert.Equal("1.0", config.Version);
         Assert.True(config.WorkItemTypes.ContainsKey("UserStory"));
         Assert.True(config.WorkItemTypes.ContainsKey("Task"));
-        Assert.Equal(12, config.WorkItemTypes["UserStory"].Fields.Count);
-        Assert.Equal(2, config.WorkItemTypes["Task"].Fields.Count);
+        // 15/5 = the spec-009 baseline (12/2) + the spec-017 cost fields (CostBindingKey,
+        // AIRuntimeCostUSD, AIDevCostUSD) added to each work item type.
+        Assert.Equal(15, config.WorkItemTypes["UserStory"].Fields.Count);
+        Assert.Equal(5, config.WorkItemTypes["Task"].Fields.Count);
 
         var speckitPhase = config.WorkItemTypes["UserStory"].Fields
             .First(f => f.ReferenceName == "Custom.SpeckitPhase");
@@ -430,7 +432,7 @@ public sealed class AdoTelemetryPreflightServiceTests
 
         Assert.True(result.IsSuccess);
         var manifest = (BootstrapManifest)result.Manifest!;
-        // Only the 2 fields from customConfig should appear — not the full 14 from embedded default
+        // Only the 2 fields from customConfig should appear — not the full 20 from embedded default
         Assert.Equal(2, manifest.FieldsCreated.Count + manifest.FieldsExisting.Count + manifest.FieldsFailed.Count);
     }
 }
