@@ -125,9 +125,9 @@ public sealed class TelemetryWriteBackServiceTests
         var boards = new FakeBoardsClient();
         var service = BuildService(ActiveRun("run-e"), BootstrapTargetsForAllFields(), boards);
 
-        // "Epic" is not present in the telemetry field config (only UserStory + Task are).
+        // "Feature" is not present in the telemetry field config (UserStory, Task, Epic, Bug are).
         var result = await service.WriteBackAsync(
-            new TelemetryWriteBackRequest("run-e", "Epic", WorkItemId: 5, SpeckitPhase: null));
+            new TelemetryWriteBackRequest("run-e", "Feature", WorkItemId: 5, SpeckitPhase: null));
 
         Assert.False(result.Attempted);
         Assert.Empty(boards.FieldUpdates);

@@ -42,11 +42,15 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
         {
             ["UserStory"] = "Microsoft.VSTS.WorkItemTypes.UserStory",
             ["Task"] = "Microsoft.VSTS.WorkItemTypes.Task",
+            ["Epic"] = "Microsoft.VSTS.WorkItemTypes.Epic",
+            ["Bug"] = "Microsoft.VSTS.WorkItemTypes.Bug",
         },
         [AdoProcessType.Scrum] = new()
         {
             ["UserStory"] = "Microsoft.VSTS.WorkItemTypes.ProductBacklogItem",
             ["Task"] = "Microsoft.VSTS.WorkItemTypes.Task",
+            ["Epic"] = "Microsoft.VSTS.WorkItemTypes.Epic",
+            ["Bug"] = "Microsoft.VSTS.WorkItemTypes.Bug",
         },
     };
 
