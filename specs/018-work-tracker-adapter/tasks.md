@@ -54,7 +54,7 @@ cost fields; the core pipeline contains no tracker-specific types.
 ### Tests (write first)
 - [x] T010 [P] [US1] Contract tests against the **ADO** adapter (fake ADO client) — create/set/resolve/
   best-effort, in `tests/DBAIAzure.Tests/WorkTracker/AzureDevOpsAdapterTests.cs`.
-- [ ] T011 [P] [US1] Contract tests against the **Jira** adapter (fake Jira REST handler) —
+- [x] T011 [P] [US1] Contract tests against the **Jira** adapter (fake Jira REST handler) —
   create/set/resolve, in `tests/DBAIAzure.Tests/WorkTracker/JiraAdapterTests.cs`.
 - [x] T012 [P] [US1] Unit: ADO resolver maps logical→`Custom.<logical>`; Jira resolver maps logical→
   `customfield_*` by name, in `tests/DBAIAzure.Tests/WorkTracker/FieldReferenceResolverTests.cs`.
@@ -65,7 +65,7 @@ cost fields; the core pipeline contains no tracker-specific types.
 - [x] T014 [US1] `AzureDevOpsWorkTrackerAdapter` delegating to `AzureDevOpsBoardsClient` (create/upsert/
   comment/set via `UpdateFieldsAsync`), `WorkItemRef ↔ int`, logical→`Custom.*`, in
   `src/DBAIAzure.Web/Integrations/AzureDevOps/AzureDevOpsWorkTrackerAdapter.cs`.
-- [ ] T015 [US1] Jira REST client + `JiraWorkTrackerAdapter` (create issue, set fields by resolved
+- [x] T015 [US1] Jira REST client + `JiraWorkTrackerAdapter` (create issue, set fields by resolved
   `customfield_*`, resolve binding via JQL) + `JiraFieldReferenceResolver`, in
   `src/DBAIAzure.Web/Integrations/Jira/`.
 - [x] T016 [US1] `WorkTrackerAdapterProvider` resolving the single active adapter from connector config
@@ -132,7 +132,7 @@ dev-usage ingest.
 **Independent test**: ADO → `Native("ADO Analytics")`; Jira with Advanced Roadmaps → `Native`, without →
 `RequiresAddOn` with an operator notice; per-item fields correct either way.
 
-- [ ] T030 [P] [US4] Unit: `GetRollupCapability` returns the right `RollupCapability` per adapter, in
+- [x] T030 [P] [US4] Unit: `GetRollupCapability` returns the right `RollupCapability` per adapter, in
   `tests/DBAIAzure.Tests/WorkTracker/RollupCapabilityTests.cs`.
 - [ ] T031 [US4] Implement `GetRollupCapability` per adapter + surface the notice; document ADO Analytics
   vs Jira Advanced Roadmaps in `docs/work-tracker-rollup.md`.

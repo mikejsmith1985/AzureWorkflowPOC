@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Jira work-tracker adapter (spec-018 increment 3a)
+
+A second `IWorkTrackerAdapter` implementation — `JiraWorkTrackerAdapter` (Jira Cloud REST v3): creates
+issues, sets custom fields (resolved logical→`customfield_*` by name, cached), appends comments, upserts,
+and resolves binding keys via the shared local map. Work items are referenced by issue key (`PROJ-123`).
+Registered alongside the ADO adapter; `WorkTrackerAdapterProvider` selects the active one by the
+`WorkTracker:Active` setting (default `AzureDevOps`). `GetRollupCapability` reports `RequiresAddOn`
+("Jira Advanced Roadmaps") — honestly surfacing that Jira lacks native hierarchical rollup. Field
+provisioning (field + context + screen) and the dev-token snapshot for Jira are follow-ups. Unit-tested
+via a fake REST handler; full suite green (1 pre-existing failure).
+
 ### Changed — Pipeline creation now goes through the work-tracker adapter (spec-018 increment 2b)
 
 `CreateWorkItemStep` creates/upserts work items via `IWorkTrackerAdapter` instead of `IBoardsClient`
