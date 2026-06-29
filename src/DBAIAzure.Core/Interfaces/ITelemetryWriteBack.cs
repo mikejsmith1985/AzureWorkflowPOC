@@ -10,7 +10,8 @@ public sealed record TelemetryWriteBackRequest(
     string RunId,
     string WorkItemType,
     int WorkItemId,
-    string? SpeckitPhase = null);
+    string? SpeckitPhase = null,
+    string? TriggeredBy = null);
 
 /// <summary>
 /// Outcome of a telemetry write-back. <see cref="Attempted"/> is false when nothing was written —

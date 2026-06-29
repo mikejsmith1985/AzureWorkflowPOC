@@ -30,6 +30,7 @@ public static class SpecKitSignalMapper
             Phase = PhaseWorkItemMap.Parse(payload.Phase),
             Status = PhaseRunStatus.Received,
             CostBindingKey = costBindingKey,   // minted at intake (spec-017)
+            TriggeredBy = string.IsNullOrWhiteSpace(payload.TriggeredBy) ? null : payload.TriggeredBy!.Trim(),
         };
     }
 }

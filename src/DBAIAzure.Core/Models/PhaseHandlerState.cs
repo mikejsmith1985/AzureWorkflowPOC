@@ -81,6 +81,12 @@ public record PhaseHandlerState
     /// run, enforced at DoR, written to the work item + ServiceNow ticket, and used to attribute cost.
     /// </summary>
     public string? CostBindingKey { get; init; }
+
+    /// <summary>
+    /// Identity that triggered this run (from the phase signal). Attributes the run's AI usage to a
+    /// person on the work item. Null when the signal omitted it (the approver is used as a fallback).
+    /// </summary>
+    public string? TriggeredBy { get; init; }
 }
 
 /// <summary>A single artifact file read for the phase.</summary>

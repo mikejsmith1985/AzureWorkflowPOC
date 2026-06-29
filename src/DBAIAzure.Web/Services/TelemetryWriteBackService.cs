@@ -88,6 +88,10 @@ public sealed class TelemetryWriteBackService : ITelemetryWriteBack
         if (!string.IsNullOrWhiteSpace(request.SpeckitPhase))
             values["Custom.SpeckitPhase"] = request.SpeckitPhase;
 
+        // Attribute the run's AI usage to the person who triggered it (FR: triggering-user capture).
+        if (!string.IsNullOrWhiteSpace(request.TriggeredBy))
+            values["Custom.AITriggeredBy"] = request.TriggeredBy;
+
         // Errors can occur even when no call succeeded, so record them independently of LLM activity.
         if (aggregate.ErrorCount > 0)
             values["Custom.AIAPIErrors"] = aggregate.ErrorCount;

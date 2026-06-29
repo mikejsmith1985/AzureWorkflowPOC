@@ -20,6 +20,14 @@
           "fallback_display_name": "Tags"
         },
         {
+          "name": "AI Triggered By",
+          "reference": "Custom.AITriggeredBy",
+          "type": "string",
+          "required": false,
+          "fallback_reference": "System.Tags",
+          "fallback_display_name": "Tags"
+        },
+        {
           "name": "Cost Binding Key",
           "reference": "Custom.CostBindingKey",
           "type": "string",
@@ -139,6 +147,14 @@
         {
           "name": "AI Model Used",
           "reference": "Custom.AIModelUsed",
+          "type": "string",
+          "required": false,
+          "fallback_reference": "System.Tags",
+          "fallback_display_name": "Tags"
+        },
+        {
+          "name": "AI Triggered By",
+          "reference": "Custom.AITriggeredBy",
           "type": "string",
           "required": false,
           "fallback_reference": "System.Tags",

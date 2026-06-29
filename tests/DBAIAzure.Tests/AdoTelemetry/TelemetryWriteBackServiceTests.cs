@@ -174,6 +174,33 @@ public sealed class TelemetryWriteBackServiceTests
         Assert.False(fields.ContainsKey("Custom.AIInputTokens"));   // no successful calls → no token fields
     }
 
+    [Fact]
+    public async Task WriteBack_WithTriggeredBy_WritesTriggeredByField()
+    {
+        var boards = new FakeBoardsClient();
+        var service = BuildService(ActiveRun("run-tb"), BootstrapTargetsForAllFields(), boards);
+
+        var result = await service.WriteBackAsync(new TelemetryWriteBackRequest(
+            "run-tb", UserStoryType, WorkItemId: 21, SpeckitPhase: "Plan", TriggeredBy: "dev@example.com"));
+
+        Assert.True(result.Attempted);
+        var fields = Assert.Single(boards.FieldUpdates).Fields;
+        Assert.Equal("dev@example.com", fields["Custom.AITriggeredBy"]);
+    }
+
+    [Fact]
+    public async Task WriteBack_WithoutTriggeredBy_OmitsTriggeredByField()
+    {
+        var boards = new FakeBoardsClient();
+        var service = BuildService(ActiveRun("run-no-tb"), BootstrapTargetsForAllFields(), boards);
+
+        await service.WriteBackAsync(new TelemetryWriteBackRequest(
+            "run-no-tb", UserStoryType, WorkItemId: 22, SpeckitPhase: "Plan", TriggeredBy: null));
+
+        var fields = Assert.Single(boards.FieldUpdates).Fields;
+        Assert.False(fields.ContainsKey("Custom.AITriggeredBy"));
+    }
+
     // ── Test doubles ──────────────────────────────────────────────────────────
 
     // Bootstrap mode: every configured UserStory custom field maps to itself (all were created/exist).
@@ -184,7 +211,7 @@ public sealed class TelemetryWriteBackServiceTests
             "Custom.AISessionID", "Custom.AIModelUsed", "Custom.AIInputTokens", "Custom.AIOutputTokens",
             "Custom.AICacheTokens", "Custom.AIEstimatedCostUSD", "Custom.AISessionDurationSec",
             "Custom.AIToolCalls", "Custom.AIToolAcceptRatePct", "Custom.AIAPIErrors",
-            "Custom.AICacheHitRatePct", "Custom.SpeckitPhase",
+            "Custom.AICacheHitRatePct", "Custom.SpeckitPhase", "Custom.AITriggeredBy",
         };
         return new ResolvedTelemetryTargets(
             PreflightMode.Bootstrap, refs.ToDictionary(r => r, r => r));
