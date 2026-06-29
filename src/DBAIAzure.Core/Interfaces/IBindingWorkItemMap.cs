@@ -1,4 +1,6 @@
 // Resolves a binding key to the work item it was minted for (remediation C1) — populated at creation.
+using DBAIAzure.Core.Models.WorkTracker;
+
 namespace DBAIAzure.Core.Interfaces;
 
 /// <summary>
@@ -9,8 +11,8 @@ namespace DBAIAzure.Core.Interfaces;
 public interface IBindingWorkItemMap
 {
     /// <summary>Records the work item a binding key was minted for (called once at creation).</summary>
-    Task PutAsync(string bindingKey, int workItemId, CancellationToken cancellationToken = default);
+    Task PutAsync(string bindingKey, WorkItemRef workItem, CancellationToken cancellationToken = default);
 
     /// <summary>Returns the work item for a binding key, or null when the key is unknown.</summary>
-    Task<int?> ResolveAsync(string bindingKey, CancellationToken cancellationToken = default);
+    Task<WorkItemRef?> ResolveAsync(string bindingKey, CancellationToken cancellationToken = default);
 }

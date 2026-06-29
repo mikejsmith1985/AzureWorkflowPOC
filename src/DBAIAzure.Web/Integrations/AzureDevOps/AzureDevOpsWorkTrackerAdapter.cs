@@ -71,11 +71,8 @@ public sealed class AzureDevOpsWorkTrackerAdapter : IWorkTrackerAdapter
     }
 
     /// <inheritdoc/>
-    public async Task<WorkItemRef?> ResolveByBindingKeyAsync(string bindingKey, CancellationToken ct = default)
-    {
-        var workItemId = await _bindingMap.ResolveAsync(bindingKey, ct);
-        return workItemId is int id ? WorkItemRef.From(id) : null;
-    }
+    public Task<WorkItemRef?> ResolveByBindingKeyAsync(string bindingKey, CancellationToken ct = default) =>
+        _bindingMap.ResolveAsync(bindingKey, ct);
 
     /// <inheritdoc/>
     public async Task<ProvisioningResult> ProvisionFieldsAsync(

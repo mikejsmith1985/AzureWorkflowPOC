@@ -68,8 +68,9 @@ public sealed class AzureDevOpsAdapterTests
     {
         private readonly int? _resolveTo;
         public StubBindingMap(int? resolveTo) => _resolveTo = resolveTo;
-        public Task PutAsync(string bindingKey, int workItemId, CancellationToken ct = default) => Task.CompletedTask;
-        public Task<int?> ResolveAsync(string bindingKey, CancellationToken ct = default) => Task.FromResult(_resolveTo);
+        public Task PutAsync(string bindingKey, WorkItemRef workItem, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<WorkItemRef?> ResolveAsync(string bindingKey, CancellationToken ct = default) =>
+            Task.FromResult(_resolveTo is int id ? (WorkItemRef?)WorkItemRef.From(id) : null);
     }
 
     private sealed class StubPreflight : IAdoTelemetryPreflightService

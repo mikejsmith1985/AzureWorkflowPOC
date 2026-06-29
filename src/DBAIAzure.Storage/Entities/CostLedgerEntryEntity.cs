@@ -15,8 +15,8 @@ public sealed class CostLedgerEntryEntity
     /// <summary><c>CostDimension</c> stored as its integer ordinal (Runtime=0, Development=1).</summary>
     public int Dimension { get; set; }
 
-    /// <summary>Anchor work item; null when unattributed.</summary>
-    public int? WorkItemId { get; set; }
+    /// <summary>Anchor work item (opaque ref — numeric ADO / string-key Jira); null when unattributed.</summary>
+    public string? WorkItemId { get; set; }
 
     public string? ModelName { get; set; }
     public int InputTokens { get; set; }

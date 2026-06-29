@@ -3,6 +3,7 @@
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
 using DBAIAzure.Core.Models.AdoTelemetry;
+using DBAIAzure.Core.Models.WorkTracker;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
 using System.Text;
@@ -105,7 +106,7 @@ public sealed class CreateWorkItemStep : KernelProcessStep
             var bindingMap = kernel.Services.GetService<IBindingWorkItemMap>();
             if (bindingMap is not null)
             {
-                try { await bindingMap.PutAsync(state.CostBindingKey!, anchorWorkItemId); }
+                try { await bindingMap.PutAsync(state.CostBindingKey!, WorkItemRef.From(anchorWorkItemId)); }
                 catch { /* map population is best-effort */ }
             }
 
@@ -172,7 +173,7 @@ public sealed class CreateWorkItemStep : KernelProcessStep
                 Id = Guid.NewGuid(),
                 BindingKey = state.CostBindingKey!,
                 Dimension = CostDimension.Runtime,
-                WorkItemId = anchorWorkItemId,
+                WorkItemId = WorkItemRef.From(anchorWorkItemId).Value,
                 ModelName = aggregate.ModelName,
                 InputTokens = aggregate.InputTokens,
                 OutputTokens = aggregate.OutputTokens,

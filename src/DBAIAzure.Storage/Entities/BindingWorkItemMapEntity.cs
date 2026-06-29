@@ -7,8 +7,8 @@ public sealed class BindingWorkItemMapEntity
     /// <summary>Canonical binding key (primary key).</summary>
     public string BindingKey { get; set; } = string.Empty;
 
-    /// <summary>The anchor work item the key was minted for.</summary>
-    public int WorkItemId { get; set; }
+    /// <summary>The anchor work item the key was minted for — opaque ref (numeric ADO / string-key Jira).</summary>
+    public string WorkItemId { get; set; } = string.Empty;
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
