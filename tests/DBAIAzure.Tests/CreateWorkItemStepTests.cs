@@ -31,6 +31,7 @@ public class CreateWorkItemStepTests
             builder.Services.AddSingleton<IArtifactReader>(new FakeArtifactReader(canned));
             builder.Services.AddSingleton<IStructuredCompletionService>(new FakeStructuredCompletionService(validation));
             builder.Services.AddSingleton<IBoardsClient>(boards);
+            builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter>(WorkTrackerAdapters.AdoAdapterFor(boards));
             builder.Services.AddSingleton(repository ?? (IPhaseRunRepository)new FakePhaseRunRepository());
             builder.Services.AddSingleton(sink);
             return builder.Build();

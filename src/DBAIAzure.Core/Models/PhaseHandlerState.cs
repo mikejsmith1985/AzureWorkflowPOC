@@ -1,4 +1,6 @@
 // The immutable state object that flows through the phase-handler SK process, plus its sub-records.
+using DBAIAzure.Core.Models.WorkTracker;
+
 namespace DBAIAzure.Core.Models;
 
 /// <summary>
@@ -128,8 +130,8 @@ public record ApprovalDecision
 /// <summary>A reference to a work item created or upserted on the board.</summary>
 public record CreatedWorkItemRef
 {
-    /// <summary>Azure DevOps work item id.</summary>
-    public required int WorkItemId { get; init; }
+    /// <summary>Opaque work item reference (numeric for ADO, string-key for Jira).</summary>
+    public required WorkItemRef WorkItemId { get; init; }
 
     /// <summary>Work item type — <c>Epic</c> / <c>Task</c> / <c>Bug</c>.</summary>
     public required string WorkItemType { get; init; }

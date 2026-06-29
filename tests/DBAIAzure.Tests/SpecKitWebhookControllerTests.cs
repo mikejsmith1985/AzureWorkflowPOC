@@ -70,7 +70,9 @@ public class SpecKitWebhookControllerTests
             builder.Services.AddSingleton<IArtifactReader>(
                 new FakeArtifactReader([new PhaseArtifact { FileName = "spec.md", Content = "x" }]));
             builder.Services.AddSingleton<IStructuredCompletionService>(new FakeStructuredCompletionService(validation));
-            builder.Services.AddSingleton<IBoardsClient>(new FakeBoardsClient());
+            var boards = new FakeBoardsClient();
+            builder.Services.AddSingleton<IBoardsClient>(boards);
+            builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter>(WorkTrackerAdapters.AdoAdapterFor(boards));
             builder.Services.AddSingleton(sink);
             return builder.Build();
         };

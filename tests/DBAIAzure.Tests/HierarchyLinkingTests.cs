@@ -27,6 +27,7 @@ public class HierarchyLinkingTests
             builder.Services.AddSingleton<IArtifactReader>(new FakeArtifactReader(artifacts));
             builder.Services.AddSingleton<IStructuredCompletionService>(new FakeStructuredCompletionService(validation));
             builder.Services.AddSingleton<IBoardsClient>(boards);
+            builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter>(WorkTrackerAdapters.AdoAdapterFor(boards));
             builder.Services.AddSingleton(repository);
             builder.Services.AddSingleton(sink);
             return builder.Build();
@@ -84,7 +85,8 @@ public class HierarchyLinkingTests
         var epics = boards.Creates.Where(c => c.Type == PhaseWorkItemMap.EpicType).ToList();
         Assert.Single(epics); // only the original Specify Epic — none auto-created
         var bug = boards.Creates.Single(c => c.Type == PhaseWorkItemMap.BugType);
-        Assert.Equal(epicId, bug.ParentId); // Bug linked under the existing Epic
+        Assert.True(epicId.TryAsInt(out var epicNumericId));
+        Assert.Equal(epicNumericId, bug.ParentId); // Bug linked under the existing Epic
     }
 
     [Fact]

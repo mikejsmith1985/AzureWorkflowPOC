@@ -1,6 +1,7 @@
 // Azure DevOps implementation of IWorkTrackerAdapter — delegates to the existing ADO client + preflight
 // so the live ADO behaviour is unchanged (spec-018, SC-001). Converts WorkItemRef<->int at the boundary.
 using DBAIAzure.Core.Interfaces;
+using DBAIAzure.Core.Models;
 using DBAIAzure.Core.Models.AdoTelemetry;
 using DBAIAzure.Core.Models.WorkTracker;
 using Microsoft.Extensions.DependencyInjection;
@@ -39,20 +40,20 @@ public sealed class AzureDevOpsWorkTrackerAdapter : IWorkTrackerAdapter
     public string TrackerKey => "AzureDevOps";
 
     /// <inheritdoc/>
-    public async Task<WorkItemRef> CreateWorkItemAsync(
+    public Task<CreatedWorkItemRef> CreateWorkItemAsync(
         WorkItemType type, string title, string description, WorkItemRef? parent, CancellationToken ct = default)
     {
         int? parentId = parent is { } p && p.TryAsInt(out var pid) ? pid : null;
-        var created = await _boards.CreateWorkItemAsync(ToAdoTypeName(type), title, description, parentId, ct);
-        return WorkItemRef.From(created.WorkItemId);
+        return _boards.CreateWorkItemAsync(ToAdoTypeName(type), title, description, parentId, ct);
     }
 
     /// <inheritdoc/>
-    public async Task UpsertWorkItemAsync(
+    public async Task<CreatedWorkItemRef> UpsertWorkItemAsync(
         WorkItemRef item, string title, string description, string appendComment, CancellationToken ct = default)
     {
-        if (item.TryAsInt(out var id))
-            await _boards.UpsertWorkItemAsync(id, title, description, appendComment, ct);
+        if (!item.TryAsInt(out var id))
+            throw new InvalidOperationException($"Azure DevOps work item ref '{item.Value}' is not numeric.");
+        return await _boards.UpsertWorkItemAsync(id, title, description, appendComment, ct);
     }
 
     /// <inheritdoc/>

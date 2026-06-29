@@ -71,12 +71,12 @@ cost fields; the core pipeline contains no tracker-specific types.
 - [x] T016 [US1] `WorkTrackerAdapterProvider` resolving the single active adapter from connector config
   (routing context reserved for later) in `src/DBAIAzure.Web/Services/WorkTrackerAdapterProvider.cs`;
   register both adapters + the provider in `src/DBAIAzure.Web/Program.cs`.
-- [ ] T017 [US1] Migrate `CreateWorkItemStep` from `IBoardsClient`/`int` to `IWorkTrackerAdapter`/
+- [x] T017 [US1] Migrate `CreateWorkItemStep` from `IBoardsClient`/`int` to `IWorkTrackerAdapter`/
   `WorkItemRef` (parent + anchor as refs) in `src/DBAIAzure.Processes/Steps/CreateWorkItemStep.cs`.
 - [ ] T018 [US1] Migrate `CostProjectionService` + `TelemetryWriteBackService` to the adapter + **logical**
   field keys (drop `Custom.*` literals) in `src/DBAIAzure.Web/Services/`.
-- [ ] T019 [US1] Migrate binding-map usage (creation + ingest) to `WorkItemRef`.
-- [ ] T020 [US1] Inject the provider/active adapter into the phase kernel in `Program.cs`, replacing the
+- [x] T019 [US1] Migrate binding-map usage (creation + ingest) to `WorkItemRef`.
+- [x] T020 [US1] Inject the provider/active adapter into the phase kernel in `Program.cs`, replacing the
   direct `IBoardsClient` injection (kept only as the ADO adapter's internal dependency).
 
 ---

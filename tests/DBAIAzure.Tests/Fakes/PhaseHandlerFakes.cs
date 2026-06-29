@@ -1,6 +1,7 @@
 // Hand-rolled fakes shared across the phase-handler unit tests (no I/O, no network).
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Models.WorkTracker;
 using System.Collections.Concurrent;
 
 namespace DBAIAzure.Tests.Fakes;
@@ -68,7 +69,7 @@ public sealed class FakeBoardsClient : IBoardsClient
         var id = _nextId++;
         return Task.FromResult(new CreatedWorkItemRef
         {
-            WorkItemId = id,
+            WorkItemId = WorkItemRef.From(id),
             WorkItemType = workItemType,
             Url = $"https://dev.azure.com/org/proj/_workitems/edit/{id}",
             WasUpdated = false,
@@ -83,7 +84,7 @@ public sealed class FakeBoardsClient : IBoardsClient
         Upserts.Add((workItemId, title, description, appendComment));
         return Task.FromResult(new CreatedWorkItemRef
         {
-            WorkItemId = workItemId,
+            WorkItemId = WorkItemRef.From(workItemId),
             WorkItemType = PhaseWorkItemMap.EpicType,
             Url = $"https://dev.azure.com/org/proj/_workitems/edit/{workItemId}",
             WasUpdated = true,

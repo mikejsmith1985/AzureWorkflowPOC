@@ -329,7 +329,7 @@ public sealed class AzureDevOpsBoardsClient : IBoardsClient, IDisposable
 
     private static CreatedWorkItemRef ToRef(WorkItem workItem, string workItemType, bool wasUpdated) => new()
     {
-        WorkItemId = workItem.Id ?? 0,
+        WorkItemId = DBAIAzure.Core.Models.WorkTracker.WorkItemRef.From(workItem.Id ?? 0),
         WorkItemType = workItemType,
         Url = workItem.Url ?? string.Empty,
         WasUpdated = wasUpdated,

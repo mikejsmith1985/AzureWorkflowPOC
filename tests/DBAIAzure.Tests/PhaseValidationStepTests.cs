@@ -43,6 +43,7 @@ public class PhaseValidationStepTests
                 new FakeArtifactReader([new PhaseArtifact { FileName = "spec.md", Content = "UNIQUE_ARTIFACT_MARKER" }]));
             builder.Services.AddSingleton<IStructuredCompletionService>(fakeChat);
             builder.Services.AddSingleton<IBoardsClient>(boards);
+            builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter>(WorkTrackerAdapters.AdoAdapterFor(boards));
             builder.Services.AddSingleton(sink);
             return builder.Build();
         };
