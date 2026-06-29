@@ -43,7 +43,7 @@ Add to the existing sample record: `CacheReadTokens int`, `CacheCreationTokens i
 | `CacheReadTokens` | `int` | Σ sample cache-read |
 | `CacheCreationTokens` | `int` | Σ sample cache-creation |
 | `ErrorCount` | `int` | count of samples with `IsError` |
-| `CacheHitRatePct` (derived) | `double?` | `CacheReadTokens / (CacheReadTokens + InputTokens) × 100`; null when total input = 0 |
+| `CacheHitRatePct` (derived) | `double?` | `CacheReadTokens / (CacheReadTokens + InputTokens) × 100`; null when total input = 0. Write-back emits it only when caching occurred (cache-read > 0), so non-cache runs don't surface 0%. |
 
 `FromSamples` updated accordingly. `LlmCallCount` counts non-error samples; `ErrorCount` counts error
 samples (a failed call is not a "successful LLM call").

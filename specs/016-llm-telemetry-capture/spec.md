@@ -64,7 +64,8 @@ efficiency per piece of work.
   adding cache tokens, a derived cache-hit rate, and AI error count to the fields already supported.
 - **FR-007**: The cache-hit rate MUST be derived as `cache_read / (cache_read + input_tokens) × 100`
   — the percentage of prompt input served from cache (no separate capture needed). When a run made no
-  AI calls (zero total input), the rate is omitted rather than reported as 0.
+  AI calls (zero total input), the rate is omitted rather than reported as 0. It is written to the work
+  item only when caching actually occurred (cache-read > 0), so non-cache runs do not surface a 0% rate.
 - **FR-008**: Telemetry capture MUST cover both AI calls made by the workflow runner and AI calls made
   by the Spec Kit phase-handler validation.
 - **FR-009**: Metrics that have no capture source — specifically tool-accept rate — MUST NOT be written

@@ -61,7 +61,9 @@ emits an `LlmCallCompleted` event tagged with the phase run id.
 ### Implementation
 - [x] T012 [US1] Add `usage` + `model` to the Anthropic wire model and parse them in
   `src/DBAIAzure.Connectors/AnthropicChatCompletionService.cs` (both `GetChatMessageContentsAsync` and
-  `GetStructuredAsync`); populate `ChatMessageContent.Metadata["Usage"]/["ModelId"]` for back-compat.
+  `GetStructuredAsync`). Do NOT populate `ChatMessageContent.Metadata["Usage"]` — the connector-level
+  reporter is the single capture point; populating metadata would re-activate the dormant
+  `WorkflowFunctionInvocationFilter` and double-emit events.
 - [x] T013 [US1] Add optional `ILlmUsageReporter? usageReporter` ctor param to
   `AnthropicChatCompletionService` and call `Report(...)` after each successful response (null → no-op).
 - [x] T014 [P] [US1] Implement `LlmUsageReporter` (records a `WorkflowExecutionEvent` via
@@ -71,8 +73,9 @@ emits an `LlmCallCompleted` event tagged with the phase run id.
   `src/DBAIAzure.Web/Services/SqlWorkflowObserver.cs` (and any other event-persisting mapper) to copy
   `LlmCacheReadTokens`/`LlmCacheCreationTokens`, so the new fields actually persist for aggregation.
 - [x] T016 [US1] Set `LlmRunContext.CurrentRunId` in the workflow runner
-  (`src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`) and forward the existing
-  `WorkflowFunctionInvocationFilter.CurrentRunId` to it (alias, no breakage).
+  (`src/DBAIAzure.Processes/Pipeline/WorkflowExecutionOrchestrator.cs`) and migrate
+  `WorkflowFunctionInvocationFilter` to read `LlmRunContext` (its never-set static `CurrentRunId` field
+  is removed; nothing else referenced it → no breakage).
 - [x] T017 [US1] **(I1)** Set `LlmRunContext.CurrentRunId = state.RunId` in `PhaseHandlerOrchestrator`
   **immediately before the phase process is executed** (not at kernel-build time), so the `AsyncLocal`
   flows to the validation call; clear/restore it after. File: the phase-handler orchestrator in
