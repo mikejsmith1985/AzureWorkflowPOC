@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Apps E2E test cleans up after itself
+
+The `Register_ValidPath_AppearsInList` Playwright test now removes the app it registers (the
+E2E and dev runs share a SQLite database, so registered apps previously persisted as orphan
+`e2e-app-*` entries in Monitored Apps). Removal runs in a `finally` block so it never masks a
+real test failure.
+
 ### Fixed — Messaging connector's default MCP argument template is now platform-aware (Slack)
 
 A blank **MCP Argument Template** on a Slack connector previously produced `{"target":…,"text":…}`, whose
