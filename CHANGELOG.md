@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Spec-018 close-out: tracker-switch test + rollup/setup docs
+
+Closes the multi work-tracker feature. Added a tracker-switch data-preservation test (FR-011): the cost
+ledger + binding map are tracker-neutral, so changing `WorkTracker:Active` leaves existing rows intact and
+resolvable. Documented rollup per tracker (`docs/work-tracker-rollup.md` — ADO Analytics native vs Jira
+Advanced Roadmaps add-on) and Jira setup (`docs/jira-setup.md`). Spec-018 is feature-complete across PRs
+#48–#52; the only open items are external-dependency follow-ups (Jira token-snapshot path; a live Jira
+round-trip needing a real Jira Cloud site).
+
 ### Added — Jira field provisioning + tracker-neutral startup provisioning (spec-018 increment 3b)
 
 `JiraFieldProvisioner` makes the telemetry/cost fields usable on Jira — idempotently find-or-create each
