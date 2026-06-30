@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Jira field provisioning + tracker-neutral startup provisioning (spec-018 increment 3b)
+
+`JiraFieldProvisioner` makes the telemetry/cost fields usable on Jira — idempotently find-or-create each
+custom field by name, then ensure it has a (global) context so its value is writable on any project/issue
+type via the REST API (screen association, for UI visibility only, is intentionally out of scope). Wired
+into `JiraWorkTrackerAdapter.ProvisionFieldsAsync`. The startup field-provisioning hook now routes through
+the **active** work-tracker adapter (`provider.GetAdapter().ProvisionFieldsAsync`) instead of calling the
+ADO preflight directly — so ADO runs its preflight (incl. inherited-process handling) and Jira runs its
+field/context provisioner, depending on `WorkTracker:Active`. Unit-tested (create + idempotent no-op);
+full suite green (1 pre-existing failure).
+
 ### Added — Jira work-tracker adapter (spec-018 increment 3a)
 
 A second `IWorkTrackerAdapter` implementation — `JiraWorkTrackerAdapter` (Jira Cloud REST v3): creates

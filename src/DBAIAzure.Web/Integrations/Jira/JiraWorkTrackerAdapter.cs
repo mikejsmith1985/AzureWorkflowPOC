@@ -123,13 +123,7 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
 
     /// <inheritdoc/>
     public Task<ProvisioningResult> ProvisionFieldsAsync(AdoTelemetryFieldConfig fieldConfig, CancellationToken ct = default)
-        => Task.FromResult(new ProvisioningResult
-        {
-            IsSuccess = false,
-            Mode = "JiraNotProvisioned",
-            FieldsFailed = [new FieldProvisioningFailure("(all)",
-                "Jira field provisioning (field + context + screen) lands in a follow-up; create the fields manually for now.")],
-        });
+        => new JiraFieldProvisioner(_http, _logger).ProvisionAsync(fieldConfig, ct);
 
     /// <inheritdoc/>
     public RollupCapability GetRollupCapability() => new(

@@ -634,27 +634,33 @@ using (var scope = app.Services.CreateScope())
     await demoSeeder.SeedAsync();
 }
 
-// ── ADO Telemetry Preflight auto-run on startup (spec-009, T034) ──────────────
-// Fire-and-forget: runs in the background so startup is not blocked. Uses a scoped service
-// lifetime inside CreateScope to avoid capturing the root provider (captive dependency guard).
+// ── Field provisioning auto-run on startup (spec-009 T034; spec-018 T025) ──────
+// Fire-and-forget so startup is not blocked. Routes through the ACTIVE work-tracker adapter — ADO runs
+// its preflight (incl. inherited-process handling), Jira runs its field/context provisioner — so the
+// telemetry/cost fields are usable on whichever tracker is configured. Scoped to avoid a captive root provider.
 app.Lifetime.ApplicationStarted.Register(() =>
 {
     _ = Task.Run(async () =>
     {
         await using var scope = app.Services.CreateAsyncScope();
-        var preflight = scope.ServiceProvider.GetRequiredService<DBAIAzure.Core.Interfaces.IAdoTelemetryPreflightService>();
+        var adapter = scope.ServiceProvider
+            .GetRequiredService<DBAIAzure.Core.Interfaces.IWorkTrackerAdapterProvider>().GetAdapter();
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryPreflightService>>();
         try
         {
-            var result = await preflight.RunPreflightAsync(null, CancellationToken.None);
+            var config = await DBAIAzure.Web.Integrations.AzureDevOps.AdoTelemetryPreflightService
+                .LoadDefaultConfigAsync(CancellationToken.None);
+            var result = await adapter.ProvisionFieldsAsync(config, CancellationToken.None);
             if (result.IsSuccess)
-                logger.LogInformation("ADO preflight succeeded on startup: mode={Mode}", result.Manifest?.Mode);
+                logger.LogInformation("Field provisioning on startup: tracker={Tracker} mode={Mode} ready={Ready}",
+                    adapter.TrackerKey, result.Mode, result.FieldsReady.Count);
             else
-                logger.LogWarning("ADO preflight failed on startup: {Error}", result.ErrorMessage);
+                logger.LogWarning("Field provisioning incomplete on startup: tracker={Tracker} mode={Mode} failed={Failed}",
+                    adapter.TrackerKey, result.Mode, result.FieldsFailed.Count);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "ADO preflight threw unexpectedly on startup — pipeline continues.");
+            logger.LogWarning(ex, "Field provisioning threw unexpectedly on startup — pipeline continues.");
         }
     });
 });
