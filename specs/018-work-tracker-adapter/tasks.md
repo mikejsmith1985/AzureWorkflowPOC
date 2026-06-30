@@ -90,16 +90,16 @@ tracker is active — idempotently.
 ### Tests (write first)
 - [ ] T021 [P] [US2] Contract test: `ProvisionFieldsAsync` is idempotent (second run no-op, `IsSuccess`)
   for both adapters, in `tests/DBAIAzure.Tests/WorkTracker/ProvisioningContractTests.cs`.
-- [ ] T022 [P] [US2] Unit: Jira provisioner find-or-create field → context (issue types+project) → screen
+- [x] T022 [P] [US2] Unit: Jira provisioner find-or-create field → context (issue types+project) → screen
   sequence (fake REST), in `tests/DBAIAzure.Tests/WorkTracker/JiraFieldProvisionerTests.cs`.
 
 ### Implementation
-- [ ] T023 [US2] ADO `ProvisionFieldsAsync` delegates to `AdoTelemetryPreflightService` (preserving the
+- [x] T023 [US2] ADO `ProvisionFieldsAsync` delegates to `AdoTelemetryPreflightService` (preserving the
   #46/#47 inherited-process handling) in `AzureDevOpsWorkTrackerAdapter`.
-- [ ] T024 [US2] `JiraFieldProvisioner` — find-or-create global field, associate field context to the
+- [x] T024 [US2] `JiraFieldProvisioner` — find-or-create global field, associate field context to the
   relevant issue types + project, add to screens; idempotent, in
   `src/DBAIAzure.Web/Integrations/Jira/JiraFieldProvisioner.cs`.
-- [ ] T025 [US2] Route the startup/admin provisioning through `provider.GetAdapter().ProvisionFieldsAsync`
+- [x] T025 [US2] Route the startup/admin provisioning through `provider.GetAdapter().ProvisionFieldsAsync`
   instead of calling `AdoTelemetryPreflightService` directly, in `Program.cs`.
 
 ---
