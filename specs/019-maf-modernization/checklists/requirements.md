@@ -36,9 +36,9 @@
 
 ## Notes
 
-- The single scope-critical decision (model vendor stays Anthropic vs. switch to Azure OpenAI/Foundry)
-  was resolved by informed assumption — the entire codebase and constitution are built on Claude, and
-  "Microsoft's primary long-term solution" is read as the *agent framework*, not the model vendor. It
-  is recorded in Clarifications + Assumptions and can be overridden at `/speckit-plan` if the user
-  intends a vendor switch (which would substantially enlarge scope).
-- Ready for `/speckit-plan` (or `/speckit-clarify` if the model-vendor assumption needs confirming).
+- `/speckit-clarify` session 2026-07-12 resolved 6 decisions (all recorded in the spec's Clarifications
+  section): model vendor stays Claude with BYO-AI; **atomic** production cutover; **auto-migrate**
+  SK-paused runs in place; **≤10%** performance-regression budget; **per-instance (global)** provider
+  selection; and **streaming preserved**. Corresponding requirements/success-criteria were added
+  (FR-006a, FR-009a, FR-011a, FR-014a, FR-016; SC-009, SC-010).
+- All checklist items remain passing after clarification. Ready for `/speckit-plan`.

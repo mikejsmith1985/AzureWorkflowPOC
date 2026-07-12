@@ -57,6 +57,27 @@ telemetry filters, MCP tool delivery, and observability wiring) that are coupled
   and adding another provider (e.g., Azure OpenAI, OpenAI, a local/self-hosted model) MUST be a
   configuration + adapter concern, not a change to the orchestration core. See US6.
 
+- **Q: Migration cadence — may SK and MAF both execute runs in production during the transition, or is
+  cutover atomic?**
+  **A:** **Atomic cutover.** A single release flips all three pipelines to MAF; there is **no SK
+  execution in production** afterward and **no dual-runtime routing** in production. Incremental,
+  pipeline-by-pipeline work may happen during development off-production, but production sees one
+  switch. (Simpler end state; the whole suite — SC-001 — is the release gate.)
+
+- **Q: How are runs that are persisted in a paused state under SK handled at the atomic cutover?**
+  **A:** **Auto-migrate in place.** The release includes a one-time migration that converts persisted
+  SK-paused runs so MAF resumes them from where they paused — no lost approvals, no forced restart.
+  This migration is part of the cutover release and must be verified against real paused-run records.
+
+- **Q: At what granularity is the AI provider/model selected for BYO-AI?**
+  **A:** **Per instance (global).** One active provider/model applies to the whole deployment, chosen by
+  configuration. Per-workflow / per-node / per-run provider overrides are out of scope for this feature
+  (may be added later), which keeps the config model and cost attribution simple.
+
+- **Q: Must token streaming (the Run Detail "Stream" tab) be preserved?**
+  **A:** **Yes.** Token-level streaming and the Run Detail Stream tab MUST work equivalently after the
+  migration; producing only final output without live streaming is a regression.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Orchestration runs on the supported foundation with no behavior change (Priority: P1) 🎯
@@ -165,8 +186,9 @@ credentials), the same runs execute against the new provider — with no change 
 
 ### Edge Cases
 
-- A run that was **persisted while paused on the old stack** must remain resolvable after the upgrade,
-  or a documented, one-time migration/backfill path must exist. (Cross-version resume.)
+- A run that was **persisted while paused on the old stack** MUST be auto-migrated by the cutover
+  release so MAF resumes it in place from its pause point — no lost approvals, no forced restart
+  (see FR-006a).
 - A step that **fails or times out** mid-run must surface the same error/paused state and Review-Queue
   behavior as today.
 - **Structured (schema-bound) outputs** — routing decisions and node realization currently rely on
@@ -201,6 +223,10 @@ credentials), the same runs execute against the new provider — with no change 
   decision.
 - **FR-006**: Persisted paused runs MUST survive an application restart and remain resolvable
   (rehydration), preserving the current durable pause/resume guarantee.
+- **FR-006a**: The cutover release MUST include a **one-time migration** that converts runs persisted in
+  a paused state under SK so that MAF resumes them **in place** from their pause point — preserving the
+  pending approval and downstream steps, with no lost approvals and no forced restart. The migration
+  MUST be verified against representative real paused-run records.
 - **FR-007**: Existing approval timeout / escalation / auto-resolution behavior MUST be preserved.
 
 **LLM layer & metering**
@@ -213,9 +239,10 @@ credentials), the same runs execute against the new provider — with no change 
 
 **Bring your own AI (configurable provider)**
 
-- **FR-009a**: The application MUST select its AI **provider and model from configuration**, defaulting
-  to **Anthropic/Claude**. The product MUST run out of the box with only Claude credentials configured
-  and MUST NOT require any other AI subscription.
+- **FR-009a**: The application MUST select **a single active AI provider and model per deployment
+  instance** from configuration, defaulting to **Anthropic/Claude**. The product MUST run out of the box
+  with only Claude credentials configured and MUST NOT require any other AI subscription. Per-workflow /
+  per-node / per-run provider overrides are out of scope for this feature.
 - **FR-009b**: Adding or selecting a different provider (e.g., Azure OpenAI, OpenAI, self-hosted) MUST
   be achievable by supplying an `IChatClient`-compatible adapter plus configuration and credentials —
   **without** modifying pipelines, steps, or the orchestration engine.
@@ -231,6 +258,8 @@ credentials), the same runs execute against the new provider — with no change 
   middleware mechanism in place of the SK kernel filters.
 - **FR-011**: Structured, schema-bound outputs (routing decisions, node realization) MUST produce the
   same typed results as today.
+- **FR-011a**: Token-level **streaming** MUST be preserved — the Run Detail "Stream" tab MUST show live
+  token output equivalently after migration, not only the final result.
 
 **Complementary components**
 
@@ -241,6 +270,12 @@ credentials), the same runs execute against the new provider — with no change 
 - **FR-014**: Tool exposure that today requires the `[KernelFunction]` attribute MUST be re-expressed
   in the new framework's tool model without loss of any currently-exposed tool.
 
+**Non-functional**
+
+- **FR-014a**: The migrated system MUST NOT regress end-to-end run latency or per-model-call overhead by
+  more than **10%** versus the pre-migration build for equivalent runs (SC-010); a larger regression
+  blocks cutover.
+
 **Migration integrity**
 
 - **FR-015**: The migration MUST be verifiable against the existing automated test suite (unit,
@@ -248,7 +283,8 @@ credentials), the same runs execute against the new provider — with no change 
   MUST be updated to assert the equivalent behavior, not deleted to hide a gap.
 - **FR-016**: Any SK component retained temporarily for interop MUST be documented with the reason and
   the removal condition, so the end state is a single, consistent agent stack rather than a permanent
-  hybrid.
+  hybrid. Production cutover MUST be **atomic** — a single release moves all three pipelines to MAF with
+  no dual-runtime routing in production.
 - **FR-017**: `CHANGELOG.md` MUST record the modernization; the project's Framework-First guidance
   (constitution Article VII) MUST be updated to name MAF as the governing framework in place of the SK
   Process Framework.
@@ -288,6 +324,12 @@ credentials), the same runs execute against the new provider — with no change 
   subscription required**); and switching the active provider is achievable by **configuration only**,
   with **zero** changes to pipeline/step/orchestration code, demonstrated by pointing at least one
   additional `IChatClient` adapter at a representative run.
+- **SC-009**: **100%** of runs persisted in a paused state before cutover are auto-migrated and resume
+  successfully from their pause point on MAF (verified against a representative set of real paused-run
+  records), with **zero** lost approvals.
+- **SC-010**: For a representative set of equivalent runs, end-to-end run latency and per-model-call
+  overhead MUST NOT regress by more than **10%** versus the pre-migration build (measured on the same
+  host/model). A larger regression blocks the cutover until addressed.
 
 ## Assumptions
 
@@ -301,9 +343,10 @@ credentials), the same runs execute against the new provider — with no change 
   native checkpointing and request/response human-in-the-loop; the app's existing database-backed
   rehydration may be simplified onto it where equivalent, but the durable-pause guarantee is the
   requirement, not the mechanism.
-- **Incremental, low-risk migration** is preferred over a big-bang rewrite: pipelines may be migrated
-  one at a time, using the documented SK↔MAF interop path during the transition, provided the end state
-  is a single stack (FR-016).
+- **Atomic production cutover** (see Clarifications): a single release moves all three pipelines to
+  MAF; production never runs SK and MAF side by side. Development may still proceed incrementally
+  (pipeline-by-pipeline, using SK↔MAF interop) off-production, but the end state and the production
+  switch are a single MAF stack (FR-016).
 - **.NET 8** and the existing hosting model (Blazor Server web app + console runner) are retained.
 - The existing **Review Queue, SignalR run updates, and run persistence** remain the app-level
   constructs they are today; only their coupling to SK primitives changes.
