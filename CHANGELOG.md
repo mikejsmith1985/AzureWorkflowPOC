@@ -59,6 +59,17 @@ executors must declare `[SendsMessage]`/`[YieldsOutput]`; routing is broadcast +
 `ChatResponseFormat.ForJsonSchema`), which the phase-handler validation executor will use. The parity
 harness gained a 20s run-timeout so a non-terminating workflow fails loudly instead of hanging the suite.
 
+**All three pipelines now run on MAF Workflows with parity (US1 core, T014–T021 green).** The phase-handler
+(`ReadArtifacts`→`PhaseValidation`→approval `RequestPort`) and the visual runtime join intake. The visual
+`MafWorkflowRuntimeFactory` translates a `WorkflowDefinition` into a `Workflow` — one executor per node
+(id == node id), edges as `AddEdge`, terminal nodes via `WithOutputFrom` — and a `FunctionRoute` node picks
+an output port from schema-bound model output and **directs** the run to that port's target node
+(`SendMessageAsync(payload, targetNodeId)`), the GA analogue of the SK route step's port-label event (no
+`AddSwitch`). `FunctionRoute` and `FunctionNotify` node executors are ported; the remaining node types
+(`AgenticReason`, `FunctionTransform`, `FunctionData`, `HumanApproval`) throw a clear pending-T018 error.
+Full suite: **631 passing** (+4 parity), one pre-existing unrelated `ConnectorSettings` bUnit failure. Still
+additive — SK continues to run production; the orchestrator rewire (T022) and SK retirement (cutover) follow.
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly

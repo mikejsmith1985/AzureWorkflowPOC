@@ -50,11 +50,15 @@ public sealed class WorkflowRuntimeParityTests
             LastModifiedAt = DateTimeOffset.UtcNow,
         };
 
-        var chatClient = new RecordedChatClient(RecordedTurn.With("approve", inputTokens: 30, outputTokens: 2));
+        // The route executor parses a schema-bound RouteDecision, so the pinned model returns that JSON.
+        var chatClient = new RecordedChatClient(
+            RecordedTurn.With("{\"SelectedPortLabel\":\"approve\"}", inputTokens: 30, outputTokens: 6));
+
+        var seed = new WorkflowStepData { RunId = "run-1", NodeId = router.Id, InputPayload = "the item to route" };
 
         var factory = new MafWorkflowRuntimeFactory();
         var workflow = factory.Build(definition, chatClient);
-        var observation = await MafWorkflowRunner.RunAsync(workflow, definition);
+        var observation = await MafWorkflowRunner.RunAsync(workflow, seed);
 
         // The router runs, then only the "approve" branch — the "reject" node is never invoked.
         Assert.Equal(new[] { router.Id, approveNode.Id }, observation.ExecutorSequence);
