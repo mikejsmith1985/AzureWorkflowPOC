@@ -81,9 +81,8 @@
 }
 else if (!_runs.Any())
 {
-    <div class="bg-surface border border-line rounded-lg p-8 text-center text-muted">
-        No threads found. Submit a ticket or push one from ServiceNow to get started.
-    </div>
+    <EmptyState Icon="📭" IconLabel="no threads" Title="No threads yet"
+                Description="Submit a ticket or push one from ServiceNow to get started." />
 }
 else
 {

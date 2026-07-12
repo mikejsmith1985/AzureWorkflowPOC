@@ -31,7 +31,8 @@
 
             @if (Proposals.Count == 0 && !IsBusy)
             {
-                <p class="text-xs text-gray-500">No proposals yet.</p>
+                <EmptyState IsCompact="true" Icon="✨" IconLabel="no proposals" Title="No proposals yet"
+                            Description="Make your workflow real to see production-ready configuration here." />
             }
 
             @foreach (var proposal in Proposals)

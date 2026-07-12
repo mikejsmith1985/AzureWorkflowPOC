@@ -35,7 +35,8 @@
 }
 else if (_filtered.Count == 0)
 {
-    <div class="text-muted text-sm">No runs match the current filter.</div>
+    <EmptyState Icon="🔍" IconLabel="no matching runs" Title="No runs to show"
+                Description="No runs match the current filter — adjust or clear it to see more." />
 }
 else
 {

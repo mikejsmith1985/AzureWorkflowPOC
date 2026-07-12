@@ -17,9 +17,8 @@
 }
 else if (_pendingRuns.Count == 0)
 {
-    <div class="rounded bg-surface border border-line p-8 text-center">
-        <p class="text-muted text-sm">No runs are currently awaiting approval.</p>
-    </div>
+    <EmptyState Icon="✅" IconLabel="no runs awaiting approval" Title="No runs are currently awaiting approval"
+                Description="Runs that pause for human approval will appear here." />
 }
 else
 {

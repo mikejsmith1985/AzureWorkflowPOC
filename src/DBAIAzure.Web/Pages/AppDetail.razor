@@ -72,7 +72,8 @@
             }
             else if (_app.LinkedWorkflowId is not null)
             {
-                <div class="text-xs text-muted mt-3">No monitoring cycle has run yet.</div>
+                <EmptyState IsCompact="true" Icon="📊" IconLabel="no monitoring cycle" Title="No monitoring cycle has run yet"
+                            Description="Results appear here after the first monitoring cycle completes." />
             }
         </section>
 

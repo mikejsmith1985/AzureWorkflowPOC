@@ -60,19 +60,15 @@
     }
     else if (_workflows.Count == 0)
     {
-        @* Empty state *@
-        <div class="text-center py-20 flex flex-col items-center gap-4">
-            <span class="text-5xl" role="img" aria-label="empty">🗂️</span>
-            <div class="text-muted text-base font-medium">No workflows yet</div>
-            <p class="text-muted text-sm max-w-xs">
-                Build your first workflow by dragging steps onto the canvas.
-            </p>
+        @* Empty state — shared console-wide "nothing here yet" treatment (FR-022). *@
+        <EmptyState Icon="🗂️" IconLabel="no workflows" Title="No workflows yet"
+                    Description="Build your first workflow by dragging steps onto the canvas.">
             <a href="/workflow-builder"
-               class="bg-accent hover:opacity-90 text-onaccent px-5 py-2 rounded-lg text-sm font-medium transition-colors mt-2"
+               class="bg-accent hover:opacity-90 text-onaccent px-5 py-2 rounded-lg text-sm font-medium transition-colors"
                aria-label="Open the workflow builder">
                 Start Building
             </a>
-        </div>
+        </EmptyState>
     }
     else
     {
