@@ -1,8 +1,10 @@
 // Parity test for the phase-handler pipeline migrated onto MAF Workflows (spec-019 T015). Asserts the
 // migrated workflow reproduces the SK PhaseHandlerPipelineBuilder shape: read → validate → approval
 // gate, then create on the approved decision. FAILING first (Red): the factory is not yet built.
+using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
 using DBAIAzure.Processes.Pipeline.Maf;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace DBAIAzure.Tests.Parity;
@@ -24,17 +26,28 @@ public sealed class PhaseHandlerParityTests
         Phase = SpecKitPhase.Specify,
     };
 
+    // A reader that returns one artifact so the read step proceeds to validation (no file system).
+    private sealed class FakeArtifactReader : IArtifactReader
+    {
+        public Task<IReadOnlyList<PhaseArtifact>> ReadArtifactsAsync(string featureDirectory, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<PhaseArtifact>>(new[]
+            {
+                new PhaseArtifact { FileName = "spec.md", Content = "A sample spec." },
+            });
+    }
+
     [Fact]
     public async Task PhaseSignal_RunsRead_Validate_ThenSuspendsAtApprovalGate()
     {
-        // Pinned model turns: validation summary/gaps for the phase.
-        var chatClient = new RecordedChatClient(new[]
-        {
-            RecordedTurn.With("artifacts summarised", inputTokens: 50, outputTokens: 20),
-            RecordedTurn.With("validated: ready for approval", inputTokens: 45, outputTokens: 15),
-        }, repeatLast: true);
+        // Pinned model turn: the schema-bound validation result the structured service will bind.
+        var chatClient = new RecordedChatClient(
+            RecordedTurn.With("{\"summary\":\"The spec is clear.\",\"gaps\":[]}", inputTokens: 50, outputTokens: 20));
 
-        var workflow = MafPhaseHandlerWorkflowFactory.Build(chatClient);
+        var services = new ServiceCollection()
+            .AddSingleton<IArtifactReader>(new FakeArtifactReader())
+            .BuildServiceProvider();
+
+        var workflow = MafPhaseHandlerWorkflowFactory.Build(chatClient, services);
         var observation = await MafWorkflowRunner.RunAsync(workflow, SampleState);
 
         Assert.Equal(
