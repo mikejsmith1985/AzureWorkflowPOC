@@ -17,7 +17,21 @@ reaching Claude through the official `Anthropic` SDK's `.AsIChatClient()` (GA pa
 call and rebuilds only on change, and a `ChatClientProviderRegistry` that fails loud (naming the provider)
 with no silent fallback — the groundwork for bring-your-own-AI. Constitution **Article VII** was amended to
 name MAF as the governing framework. Packages added: `Microsoft.Extensions.AI` 10.7.0, official `Anthropic`
-12.35.1. TDD: 7 new unit tests (green); full unit suite 624 passing.
+12.35.1.
+
+Second Foundational slice adds the metering seam and its test harness (still additive — not yet wired into
+DI, which lands with US1). `CostCapturingChatClient : DelegatingChatClient` re-homes the two retired
+Semantic Kernel cost filters (`IFunctionInvocationFilter` + `IPromptRenderFilter`) onto the model call
+itself — the correct seam under MAF/M.E.AI, where token usage rides `ChatResponse.Usage` (streaming: the
+final `UsageContent`) rather than a function hook. It maps `UsageDetails` onto the existing `LlmUsage` and
+reports through the existing `ILlmUsageReporter`, so the cost ledger, binding key, and ingest downstream are
+fed exactly as before (parity), and it logs only a prompt SHA-256 (never the text). A deterministic
+`RecordedChatClient` record/replay harness (fixed token `UsageDetails` + streaming updates) lets the coming
+parity tests assert framework equivalence against pinned model output instead of a live LLM. TDD: 3 new
+unit tests (green); full unit suite 627 passing (one pre-existing, unrelated `ConnectorSettings` bUnit
+failure). Deferred to the "wire-live" slice (coupled with US1, which migrates the SK pipeline steps):
+`ChatClientStructuredCompletionService` (T011), design-time-consumer migration (T011a), the DI pipeline
+composition + SK-registration retirement (T012), and the OTel repoint (T013).
 
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 

@@ -15,6 +15,9 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.11" />
     <PackageReference Include="Z.Blazor.Diagrams" Version="3.0.4.1" />
     <PackageReference Include="Z.Blazor.Diagrams.Core" Version="3.0.4.1" />
+    <!-- MAF modernization (spec-019): the provider-neutral model layer. CostCapturingChatClient wraps
+         the pipeline as a DelegatingChatClient; abstractions carry ChatResponse/UsageDetails. -->
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.7.0" />
     <PackageReference Include="Microsoft.SemanticKernel" Version="1.77.0" />
     <PackageReference Include="Microsoft.SemanticKernel.Process.Core" Version="1.77.0-alpha" />
     <PackageReference Include="Microsoft.SemanticKernel.Process.LocalRuntime" Version="1.77.0-alpha" />
