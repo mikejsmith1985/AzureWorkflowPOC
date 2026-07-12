@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
+
+New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly
+"nothing here yet" treatment — an icon, a short heading, an optional supporting sentence, and an
+optional call-to-action — instead of a bare one-line message or blank region. An `IsCompact` mode
+tightens padding for inline panels. Applied to the Dashboard thread list, Workflow Gallery, Apps,
+Review Queue, Run History, Run Detail (state + stream tabs), App Detail monitoring, and the Workflow
+Builder realization panel (which also retired its last raw `text-gray-500` utility in favour of
+tokens). Component behaviour is bUnit-tested. Closes the final open spec-014 task.
+
 ### Added — Spec-018 close-out: tracker-switch test + rollup/setup docs
 
 Closes the multi work-tracker feature. Added a tracker-switch data-preservation test (FR-011): the cost

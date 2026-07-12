@@ -1,0 +1,51 @@
+@* EmptyState.razor — the console-wide "nothing here yet" treatment (spec-014 FR-022).
+   Shown in place of an empty list or panel instead of a blank region, so every screen
+   communicates emptiness the same friendly way: an icon, a short heading, an optional
+   supporting sentence, and an optional call-to-action. *@
+
+<div class="text-center @PaddingClass flex flex-col items-center gap-3" data-testid="empty-state">
+    <span class="@IconSizeClass" role="img" aria-label="@IconLabel">@Icon</span>
+    <div class="text-fg text-base font-medium">@Title</div>
+    @if (!string.IsNullOrWhiteSpace(Description))
+    {
+        <p class="text-muted text-sm max-w-xs" data-testid="empty-state-description">@Description</p>
+    }
+    @if (ChildContent is not null)
+    {
+        <div class="mt-1">@ChildContent</div>
+    }
+</div>
+
+@code {
+    // Default padding/icon sizing for a full-page list vs. a compact inline panel. Named so the
+    // two visual scales are chosen by intent (IsCompact) rather than by copying magic classes.
+    private const string FullPagePadding = "py-16";
+    private const string CompactPadding = "py-8";
+    private const string FullPageIconSize = "text-5xl";
+    private const string CompactIconSize = "text-3xl";
+
+    /// <summary>Emoji glyph shown above the message. Defaults to an empty-tray icon.</summary>
+    [Parameter] public string Icon { get; set; } = "📭";
+
+    /// <summary>Accessible label announced for the icon by screen readers.</summary>
+    [Parameter] public string IconLabel { get; set; } = "nothing here";
+
+    /// <summary>Primary heading — the short "nothing here yet" line. Required.</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Optional supporting sentence that guides the user toward the next action.</summary>
+    [Parameter] public string? Description { get; set; }
+
+    /// <summary>Optional call-to-action (e.g. a button or link) rendered beneath the message.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>
+    /// When true, uses tighter padding and a smaller icon for empty states that sit inside a
+    /// panel or card rather than filling a full-page list region.
+    /// </summary>
+    [Parameter] public bool IsCompact { get; set; }
+
+    private string PaddingClass => IsCompact ? CompactPadding : FullPagePadding;
+
+    private string IconSizeClass => IsCompact ? CompactIconSize : FullPageIconSize;
+}

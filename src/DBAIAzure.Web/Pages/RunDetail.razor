@@ -94,8 +94,9 @@ else
         var snapshots = _run.Snapshots;
         @if (!snapshots.Any())
         {
-            <div class="bg-surface border border-line rounded-lg p-6 text-muted text-sm mb-4">
-                No state snapshots yet. Snapshots are captured after each LLM step completes.
+            <div class="bg-surface border border-line rounded-lg mb-4">
+                <EmptyState IsCompact="true" Icon="📸" IconLabel="no state snapshots" Title="No state snapshots yet"
+                            Description="Snapshots are captured after each LLM step completes." />
             </div>
         }
         else
@@ -167,8 +168,9 @@ else
         var streamTokens = _run.TokenStream.ToList();
         @if (!streamTokens.Any())
         {
-            <div class="bg-surface border border-line rounded-lg p-6 text-muted text-sm mb-4">
-                No streaming output yet. Token stream appears here as each LLM step generates its response.
+            <div class="bg-surface border border-line rounded-lg mb-4">
+                <EmptyState IsCompact="true" Icon="📡" IconLabel="no streaming output" Title="No streaming output yet"
+                            Description="Token stream appears here as each LLM step generates its response." />
             </div>
         }
         else

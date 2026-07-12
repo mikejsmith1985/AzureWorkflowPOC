@@ -84,9 +84,8 @@
     }
     else if (_apps.Count == 0)
     {
-        <div class="text-center py-16 text-muted text-sm">
-            No apps yet. Register a repo to build, run, and monitor it.
-        </div>
+        <EmptyState Icon="📦" IconLabel="no apps" Title="No apps yet"
+                    Description="Register a repo to build, run, and monitor it." />
     }
     else
     {
