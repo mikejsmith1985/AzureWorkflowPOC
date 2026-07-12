@@ -10,6 +10,8 @@ description: "Task list for modernizing the agent stack onto Microsoft Agent Fra
 **Tests**: **INCLUDED** — Constitution Article V mandates TDD (Red→Green), and the spec requires the
 existing suite to pass with no test deleted (FR-015 / SC-001). The dominant test type here is
 **parity**: assert the migrated code produces the same observable result as the pre-migration build.
+Because a live LLM is non-deterministic, parity tests run against a **recorded/stubbed `IChatClient`**
+harness (T002a) so equivalence is falsifiable; live calls are reserved for the smoke path.
 
 **Organization**: Tasks are grouped by the six user stories. ⚠️ Unlike a greenfield feature, this is a
 **migration**: the stories are more sequential than independent — the shared `IChatClient` seam
@@ -29,6 +31,8 @@ still mark which story each task serves.
 - [ ] T001 [P] Add GA MAF/M.E.AI packages (`Microsoft.Agents.AI`, `Microsoft.Agents.AI.Workflows`, `Microsoft.Extensions.AI`) and the official `Anthropic` SDK to `src/DBAIAzure.Connectors`, `src/DBAIAzure.Processes`, `src/DBAIAzure.Storage`, `src/DBAIAzure.Web`, `src/DBAIAzure.Runner` `.csproj` files; pin versions per `research.md` (NO prerelease packages).
 - [ ] T002 [P] Capture the pre-migration **baseline fixtures** (sample intake/phase-handler/visual run outputs, step-history, and token/cost snapshots) under `tests/DBAIAzure.Tests/Parity/Baseline/` for the parity tests to assert against.
 - [ ] T003 [P] Add AI provider config records (`AiProviderConfig`, active-provider settings) and OpenTelemetry `SourceNames` constants in `src/DBAIAzure.Core/Models/Ai/`.
+- [ ] T002a [P] **[Parity harness]** Build a deterministic **record/replay (or stub) `IChatClient`** test harness in `tests/DBAIAzure.Tests/Parity/RecordedChatClient.cs` that returns fixed, recorded responses (incl. token `UsageDetails` and streaming updates), so every parity test asserts framework equivalence against a **pinned** model output rather than a live, non-deterministic model. All parity tests (T014–T016, T035, T036) consume this harness; live calls are reserved for the smoke path only. *(Resolves analysis finding U1.)*
+- [ ] T003a **[Governance — do early]** Amend `.specify/memory/constitution.md` **Article VII** to name Microsoft Agent Framework (Workflows / `RequestPort` / checkpointing / `IChatClient`) as the governing framework in place of the SK Process Framework (FR-017). Done **now**, before any pipeline work, so the governing rule matches the migration in progress. *(Resolves analysis finding C1 — was T053 in Polish.)*
 
 ---
 
@@ -46,8 +50,9 @@ still mark which story each task serves.
 - [ ] T011 Re-express `IStructuredCompletionService` atop `IChatClient` (`ChatResponseFormat.ForJsonSchema<T>()` + forced-tool via `ChatOptions.RawRepresentationFactory`) in `src/DBAIAzure.Connectors/Ai/ChatClientStructuredCompletionService.cs`.
 - [ ] T012 Compose the `IChatClient` pipeline in DI (`src/DBAIAzure.Web/Program.cs` and `src/DBAIAzure.Runner/Program.cs`): `provider → HotReload → CostCapturing → UseOpenTelemetry(SourceName) → UseFunctionInvocation`; register the provider registry; retire the SK `AnthropicChatCompletionService`/`HotReloadAnthropicService` registrations.
 - [ ] T013 Repoint observability: add `.UseOpenTelemetry(SourceName)` and replace `AddSource("Microsoft.SemanticKernel*")` with the MAF/M.E.AI source name(s) on **both** tracer and meter providers (`src/DBAIAzure.Web/Program.cs`, `src/DBAIAzure.Runner/Program.cs`); exporter unchanged.
+- [ ] T011a Re-target **all design-time LLM consumers** off SK `IChatCompletionService` onto `IChatClient` (and `IStructuredCompletionService` onto the T011 re-expression): `WorkflowDesignSkillService` (incl. its `[KernelFunction("AnalyseTopology")]` → an `AIFunction`/MAF tool — FR-014), `WorkflowCodeGenerator`, `LlmAvailabilityMonitor`, `WorkflowInputTranslator`, `WorkflowRealizationService` in `src/DBAIAzure.Web/Services/` and `src/DBAIAzure.Processes/`. Ensures **100%** of LLM paths use the modern client (SC-005), not just the pipeline steps. *(Resolves analysis finding G1/G2.)*
 
-**Checkpoint**: model calls flow through `IChatClient` with cost capture + OTel; SK pipelines still run (on the new client) — nothing user-visible changed yet.
+**Checkpoint**: **every** model call (pipeline steps + design-time services) flows through `IChatClient` with cost capture + OTel; SK pipelines still run (on the new client) — nothing user-visible changed yet.
 
 ---
 
@@ -56,11 +61,11 @@ still mark which story each task serves.
 **Goal**: all three pipelines execute on MAF Workflows with identical observable behavior.
 **Independent Test**: run intake, phase-handler, and a multi-node visual workflow against baseline inputs; same steps, routing, work items, and run history; suite passes.
 
-- [ ] T014 [P] [US1] Write FAILING parity test for the **intake** pipeline (step sequence + output vs. baseline) in `tests/DBAIAzure.Tests/Parity/IntakePipelineParityTests.cs`.
-- [ ] T015 [P] [US1] Write FAILING parity test for the **phase-handler** pipeline in `tests/DBAIAzure.Tests/Parity/PhaseHandlerParityTests.cs`.
-- [ ] T016 [P] [US1] Write FAILING parity test for the **visual workflow** (agentic/route/transform/notify/data nodes, incl. port routing) in `tests/DBAIAzure.Tests/Parity/WorkflowRuntimeParityTests.cs`.
+- [ ] T014 [P] [US1] Write FAILING parity test for the **intake** pipeline (step sequence + output vs. baseline), driven by the T002a recorded `IChatClient` harness, in `tests/DBAIAzure.Tests/Parity/IntakePipelineParityTests.cs`.
+- [ ] T015 [P] [US1] Write FAILING parity test for the **phase-handler** pipeline (T002a harness) in `tests/DBAIAzure.Tests/Parity/PhaseHandlerParityTests.cs`.
+- [ ] T016 [P] [US1] Write FAILING parity test for the **visual workflow** (agentic/route/transform/notify/data nodes, incl. port routing; T002a harness) in `tests/DBAIAzure.Tests/Parity/WorkflowRuntimeParityTests.cs`.
 - [ ] T017 [US1] Convert the stateless steps → MAF `Executor` (Intake, Validation, GapAnalysis, Estimation, Action, ReadArtifacts, PhaseValidation, CreateWorkItem) in `src/DBAIAzure.Processes/Executors/` per `contracts/workflow-executor-mapping.md`.
-- [ ] T018 [US1] Convert the stateful steps → `Executor<NodeRuntimeConfig>` (AgenticNode, FunctionRoute, FunctionTransform, FunctionNotify, FunctionData; AdoTelemetryPreflight) in `src/DBAIAzure.Processes/Executors/`, preserving the route **enum** for switch routing.
+- [ ] T018 [US1] Convert the stateful graph steps → `Executor<NodeRuntimeConfig>` (AgenticNode, FunctionRoute, FunctionTransform, FunctionNotify, FunctionData) in `src/DBAIAzure.Processes/Executors/`, preserving the route **enum** for switch routing. **Note (finding I1)**: `AdoTelemetryPreflightStep` is used **standalone/preflight**, not in a graph — verify first; if standalone, re-target its LLM/service use (T011a) but do **not** convert it to a workflow executor.
 - [ ] T019 [US1] Port `IntakePipelineBuilder` → `WorkflowBuilder` graph (edges + `AddSwitch`) in `src/DBAIAzure.Processes/IntakePipelineBuilder.cs`.
 - [ ] T020 [US1] Port `PhaseHandlerPipelineBuilder` → `WorkflowBuilder` graph in `src/DBAIAzure.Processes/PhaseHandlerPipelineBuilder.cs`.
 - [ ] T021 [US1] Port `WorkflowRuntimeBuilder` → build a `Workflow` at runtime from `WorkflowDefinition` (node→executor, edge→`AddEdge`/`AddSwitch`, `PortLabelsByNodeId` → switch cases) in `src/DBAIAzure.Processes/Pipeline/WorkflowRuntimeBuilder.cs`.
@@ -97,7 +102,7 @@ still mark which story each task serves.
 **Goal**: model access is through `IChatClient` and fully metered; structured output and streaming preserved. *(Core seam built in Foundational; this phase proves parity and re-expresses structured/streaming.)*
 **Independent Test**: token/cost equals baseline (0% delta), tagged by provider/model; RouteDecision/realization deserialize identically; Run Detail Stream tab streams tokens.
 
-- [ ] T035 [P] [US3] Write FAILING parity test: captured token counts + computed cost equal the baseline (0% delta) and carry provider+model tags in `tests/DBAIAzure.Tests/Parity/CostParityTests.cs`.
+- [ ] T035 [P] [US3] Write FAILING parity test: captured token counts + computed cost equal the baseline (0% delta) and carry provider+model tags, using the T002a recorded harness (fixed `UsageDetails`), in `tests/DBAIAzure.Tests/Parity/CostParityTests.cs`.
 - [ ] T036 [P] [US3] Write FAILING test: structured outputs (`RouteDecision`, node realization) deserialize to identical typed records in `tests/DBAIAzure.Tests/Ai/StructuredOutputParityTests.cs`.
 - [ ] T037 [P] [US3] Write FAILING bUnit/E2E test: Run Detail **Stream** tab shows live token streaming in `tests/DBAIAzure.E2ETests/Tests/RunDetailStreamTests.cs`.
 - [ ] T038 [US3] Ensure the streaming path (`GetStreamingResponseAsync` → `IAsyncEnumerable<ChatResponseUpdate>`) drives the Stream tab and captures usage from the final update in `src/DBAIAzure.Web/Pages/RunDetail.razor` + streaming service.
@@ -128,7 +133,7 @@ still mark which story each task serves.
 **Independent Test**: a workflow whose step delivers via MCP executes the tool call and delivers as before.
 
 - [ ] T045 [P] [US4] Write FAILING test: MCP-backed delivery works via the MAF tool model in `tests/DBAIAzure.Tests/Messaging/McpDeliveryParityTests.cs`.
-- [ ] T046 [US4] Re-express MCP tool delivery (`McpMessageGateway`) through the MAF agent/tool model / `IChatClient` tools in `src/DBAIAzure.Web/` (or `src/DBAIAzure.Connectors/`).
+- [ ] T046 [US4] Re-express MCP tool delivery (`McpMessageGateway`) through the MAF agent/tool model / `IChatClient` tools in `src/DBAIAzure.Web/Services/Messaging/` (the project that owns `McpMessageGateway` today). *(Resolves finding U2 — target project pinned.)*
 - [ ] T047 [US4] Make T045 pass.
 
 ---
@@ -148,7 +153,7 @@ still mark which story each task serves.
 - [ ] T050 Remove ALL `Microsoft.SemanticKernel*` package references and every `SKEXP0080` pragma across `src/`; add a grep gate proving zero matches (FR-003 / SC-002).
 - [ ] T051 Update `src/DBAIAzure.Runner/Program.cs` console host to build via `WorkflowBuilder` and drive the `RequestPort` console HITL loop.
 - [ ] T052 [P] Code-quality pass (Article IV) across the new executors/clients (self-documenting names, XML doc comments, guard clauses, <40-line methods).
-- [ ] T053 [P] Amend `.specify/memory/constitution.md` **Article VII** to name Microsoft Agent Framework (Workflows/`RequestPort`/checkpointing/`IChatClient`) as the governing framework in place of the SK Process Framework (FR-017).
+- [ ] T053 [P] Verify the **Article VII** amendment (done early in T003a) is in place and consistent with the shipped MAF stack; record the interim SK↔MAF **interop-shim inventory + removal conditions** (or assert none remain) in the CHANGELOG entry (FR-016 / SC-007). *(Resolves analysis finding G3; C1 amendment itself moved to T003a.)*
 - [ ] T054 [P] Update `CHANGELOG.md` `[Unreleased]` with the modernization entry (FR-017).
 - [ ] T055 Performance-budget check: end-to-end run latency + per-model-call overhead within **10%** of baseline on the same host/model (SC-010 / quickstart scenario 9); a larger regression blocks cutover.
 - [ ] T056 **Cutover gate**: `dotnet test` + `./scripts/run-e2e.ps1` fully green with no test deleted (SC-001), paused-run migration verified against representative records (SC-009), and the grep gate (T050) clean — authorizes the atomic release.
@@ -158,8 +163,10 @@ still mark which story each task serves.
 ## Dependencies & Execution Order
 
 ### Phase dependencies
-- **Setup (P1)** → no deps.
-- **Foundational (P2)** → after Setup; **blocks all stories** (the `IChatClient` seam).
+- **Setup (P1)** → no deps. Includes the **Article VII amendment (T003a, done early)** and the
+  **parity harness (T002a)**.
+- **Foundational (P2)** → after Setup; **blocks all stories** (the `IChatClient` seam, incl. the
+  design-time-consumer migration T011a).
 - **US1 (P1)** → after Foundational. The orchestration MVP.
 - **US2 (P1)** → after **US1** (needs migrated workflows to attach `RequestPort` + checkpoints).
 - **US3 (P2)** → after Foundational (parity of the seam); validation strongest after US1 runs exercise it.
@@ -192,6 +199,6 @@ the paused-run migration ships together; no dual-runtime in production.
 
 ## Notes
 - `[P]` = different files, no incomplete-task dependency.
-- Tests are mandatory (Article V) and **parity-first**: assert equivalence to the pre-migration baseline; write them failing first.
+- Tests are mandatory (Article V) and **parity-first**: assert equivalence to the pre-migration baseline via the deterministic T002a harness; write them failing first.
 - Zero prerelease packages in the execution path (research.md) — Claude via the official `Anthropic` SDK, not `Microsoft.Agents.AI.Anthropic`.
-- Article VII amendment (T053) is required because the governing framework changes SK → MAF.
+- Article VII amendment (**T003a, done early**) is required because the governing framework changes SK → MAF; T053 later verifies it and records interop-shim removal conditions.
