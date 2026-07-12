@@ -33,6 +33,20 @@ failure). Deferred to the "wire-live" slice (coupled with US1, which migrates th
 `ChatClientStructuredCompletionService` (T011), design-time-consumer migration (T011a), the DI pipeline
 composition + SK-registration retirement (T012), and the OTel repoint (T013).
 
+US1 (orchestration → MAF Workflows) begins **parity-tests-first**. Three failing parity tests
+(`Parity/{IntakePipeline,PhaseHandler,WorkflowRuntime}ParityTests`) drive the real GA runtime via a new
+`Parity/MafWorkflowRunner` harness (runs a `Workflow` through `InProcessExecution` and folds the event
+stream — step sequence from `ExecutorInvokedEvent`, final state from `WorkflowOutputEvent`, HITL from
+`RequestInfoEvent`), with model output pinned by the `RecordedChatClient`. They assert the migrated
+pipelines reproduce the SK step sequences exactly (intake ready/not-ready branches, phase-handler
+approval gate, visual route port-routing). The MAF seam is scaffolded under
+`Processes/Pipeline/Maf/` (`MafExecutorIds` + three workflow factories, currently throwing
+`NotImplementedException`); `Microsoft.Agents.AI.Workflows` 1.13.0 added to `DBAIAzure.Processes` and the
+test project. A reflection probe of the shipped 1.13.0 assembly corrected the design (research
+**D1-reality**): the GA API has **no `AddSwitch`** — port-label routing is a labelled **conditional edge**
+(`AddEdge(src, tgt, condition, label)`). The parity tests are tagged `[Trait("Category","US1Parity")]`
+so regression runs exclude the intentional Reds; the rest of the suite stays green (627 passing).
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly

@@ -40,6 +40,28 @@ Sources: [workflows/workflows](https://learn.microsoft.com/en-us/agent-framework
 [workflows/edges](https://learn.microsoft.com/en-us/agent-framework/workflows/edges),
 [NuGet Microsoft.Agents.AI.Workflows](https://www.nuget.org/packages/Microsoft.Agents.AI.Workflows/).
 
+### D1-reality — verified against `Microsoft.Agents.AI.Workflows` **1.13.0** (US1, 2026-07-12)
+
+Reflection probe of the shipped GA assembly (Article X — verify with evidence). Two corrections to the
+paraphrase above; the migration builds against the **real** surface:
+
+- **No `AddSwitch`/`AddCase`/`WithDefault` exists.** Port-label routing is expressed as a **labelled
+  conditional edge**: `WorkflowBuilder.AddEdge(sourceBinding, targetBinding, Func<object?,bool> condition,
+  string label, bool idempotent)`. Each route target is one conditional edge whose predicate matches the
+  chosen port label. (`AddFanOutEdge(..., Func targetSelector)` is the multi-target alternative.)
+- **Executors bind explicitly.** `ExecutorBindingExtensions.BindExecutor(Executor)` → `ExecutorBinding`;
+  `new WorkflowBuilder(startBinding).AddEdge(...).WithOutputFrom(...).Build(validateOrphans: true)`.
+- **Run + observe.** `await InProcessExecution.RunStreamingAsync(workflow, input, sessionId, ct)` →
+  `StreamingRun`; `await foreach (var e in run.WatchStreamAsync(ct))`. Step sequence =
+  `ExecutorInvokedEvent.ExecutorId` in order; final state = `WorkflowOutputEvent.Data` (declare emitters
+  via `WithOutputFrom`); HITL suspension = `RequestInfoEvent`; resume = `run.SendResponseAsync(ExternalResponse)`.
+- **Executor base.** `Executor<TInput>` (protected ctor takes `id`), override
+  `ValueTask HandleAsync(TInput, IWorkflowContext, CancellationToken)`; state via
+  `IWorkflowContext.ReadStateAsync` / `QueueStateUpdateAsync`. The model client is injected into each
+  executor's constructor as `IChatClient` (no provider type in the graph).
+- **HITL / checkpoint (US2).** `RequestPort.Create<TReq,TResp>(id)` bound via `BindAsExecutor(port,...)`;
+  `CheckpointManager` + `ICheckpointStore<T>` (there is a `JsonCheckpointStore` base to extend for EF).
+
 ---
 
 ## D2 — Human-in-the-loop: `RequestPort` + `RequestInfoEvent` replaces proxy-step + external channel
