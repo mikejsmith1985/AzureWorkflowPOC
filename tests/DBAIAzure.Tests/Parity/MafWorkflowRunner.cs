@@ -29,13 +29,27 @@ public static class MafWorkflowRunner
 {
     private const string ParitySessionId = "parity-test";
 
+    // A parity run must reach a terminal or suspended state quickly; if it does not, fail loudly rather
+    // than hang the whole suite. The recorded client makes runs deterministic, so this is a safety net.
+    private static readonly TimeSpan RunTimeout = TimeSpan.FromSeconds(20);
+
     /// <summary>Runs <paramref name="workflow"/> with <paramref name="input"/> and collects the outcome.</summary>
     public static async Task<MafRunObservation> RunAsync<TInput>(
         Workflow workflow, TInput input, CancellationToken cancellationToken = default)
         where TInput : notnull
     {
-        var run = await InProcessExecution.RunStreamingAsync(workflow, input, ParitySessionId, cancellationToken);
-        return await ObserveAsync(run, cancellationToken);
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(RunTimeout);
+        try
+        {
+            var run = await InProcessExecution.RunStreamingAsync(workflow, input, ParitySessionId, timeoutSource.Token);
+            return await ObserveAsync(run, timeoutSource.Token);
+        }
+        catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"The parity workflow did not reach a terminal or suspended state within {RunTimeout.TotalSeconds}s.");
+        }
     }
 
     /// <summary>

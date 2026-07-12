@@ -27,12 +27,12 @@ public sealed class IntakePipelineParityTests
     [Fact]
     public async Task ReadyTicket_RunsIntake_Validation_Estimation_Action()
     {
-        // Pinned model turns: normalise (intake), decide READY (validation), estimate points.
+        // Pinned model turns (the real JSON each executor parses): normalise, decide READY, estimate.
         var chatClient = new RecordedChatClient(new[]
         {
-            RecordedTurn.With("normalized ticket", inputTokens: 40, outputTokens: 12),
-            RecordedTurn.With("READY", inputTokens: 30, outputTokens: 2),
-            RecordedTurn.With("5", inputTokens: 25, outputTokens: 2),
+            RecordedTurn.With("{\"title\":\"Sample\",\"description\":\"Sample description.\"}", inputTokens: 40, outputTokens: 12),
+            RecordedTurn.With("{\"is_ready\":true,\"missing_fields\":[],\"reasoning\":\"clear\"}", inputTokens: 30, outputTokens: 8),
+            RecordedTurn.With("{\"points\":5,\"reasoning\":\"comparable to the CRUD anchor\"}", inputTokens: 25, outputTokens: 8),
         }, repeatLast: true);
 
         var workflow = MafIntakeWorkflowFactory.Build(chatClient);
@@ -53,12 +53,12 @@ public sealed class IntakePipelineParityTests
     [Fact]
     public async Task NotReadyTicket_RoutesToGapAnalysis_AndSuspendsForHuman()
     {
-        // Pinned model turns: normalise (intake), decide NOT_READY (validation), produce questions.
+        // Pinned model turns (real JSON): normalise, decide NOT ready, then a JSON array of questions.
         var chatClient = new RecordedChatClient(new[]
         {
-            RecordedTurn.With("normalized ticket", inputTokens: 40, outputTokens: 12),
-            RecordedTurn.With("NOT_READY", inputTokens: 30, outputTokens: 3),
-            RecordedTurn.With("What is the target environment?", inputTokens: 35, outputTokens: 8),
+            RecordedTurn.With("{\"title\":\"Sample\",\"description\":\"Sample description.\"}", inputTokens: 40, outputTokens: 12),
+            RecordedTurn.With("{\"is_ready\":false,\"missing_fields\":[\"target environment\"],\"reasoning\":\"missing env\"}", inputTokens: 30, outputTokens: 10),
+            RecordedTurn.With("[\"What is the target environment?\"]", inputTokens: 35, outputTokens: 8),
         }, repeatLast: true);
 
         var workflow = MafIntakeWorkflowFactory.Build(chatClient);

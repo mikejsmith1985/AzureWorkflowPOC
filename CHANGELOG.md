@@ -47,6 +47,18 @@ test project. A reflection probe of the shipped 1.13.0 assembly corrected the de
 (`AddEdge(src, tgt, condition, label)`). The parity tests are tagged `[Trait("Category","US1Parity")]`
 so regression runs exclude the intentional Reds; the rest of the suite stays green (627 passing).
 
+US1 first pipeline is **green**: the ticket-intake pipeline now runs on real MAF Workflows. Five executors
+(`Executors/{Intake,Validation,GapAnalysis,Estimation,Action}Executor` + a shared `ExecutorLlm`) each port
+their retired SK step's exact prompt and JSON parse (parity); the graph
+(`MafIntakeWorkflowFactory`) wires them with a ready/not-ready **conditional edge** on the ticket and a HITL
+`RequestPort`. The intake parity test passes both branches — ready path completes, not-ready path suspends
+at the request port (`RunStatus.PendingRequests`). Three more verified MAF mechanics drove the design:
+executors must declare `[SendsMessage]`/`[YieldsOutput]`; routing is broadcast + conditional edges (no
+`AddSwitch`); `WatchStreamAsync` completes on idle/pending/ended. Also landed the deferred **T011**
+`ChatClientStructuredCompletionService` (structured output atop `IChatClient` via
+`ChatResponseFormat.ForJsonSchema`), which the phase-handler validation executor will use. The parity
+harness gained a 20s run-timeout so a non-terminating workflow fails loudly instead of hanging the suite.
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly

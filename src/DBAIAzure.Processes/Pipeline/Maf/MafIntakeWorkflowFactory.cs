@@ -1,5 +1,7 @@
 // Builds the intake pipeline as a MAF Workflow (spec-019 T019) — the GA replacement for the SK
-// IntakePipelineBuilder. Stub for now: the parity test (T014) is written first and drives this to green.
+// IntakePipelineBuilder. Executors route by directed SendMessageAsync over the graph edges.
+using DBAIAzure.Core.Models;
+using DBAIAzure.Processes.Executors;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 
@@ -24,9 +26,34 @@ public static class MafIntakeWorkflowFactory
     /// <returns>A runnable <see cref="Workflow"/> whose start executor accepts the initial ticket.</returns>
     public static Workflow Build(IChatClient chatClient, IServiceProvider? services = null)
     {
-        // Implemented in US1 T017 (executors) + T019 (this graph). The parity test (T014) is authored
-        // first and asserts the Intake→Validation→{Estimation→Action | GapAnalysis→Hitl} sequence.
-        throw new NotImplementedException(
-            "MafIntakeWorkflowFactory.Build is pending US1 (spec-019 T017/T019). Parity test T014 defines the target.");
+        var reporter = services?.GetService(typeof(IProgressReporter)) as IProgressReporter;
+
+        var intake = new IntakeExecutor(chatClient, reporter).BindExecutor();
+        var validation = new ValidationExecutor(chatClient, reporter).BindExecutor();
+        var estimation = new EstimationExecutor(chatClient, reporter).BindExecutor();
+        var action = new ActionExecutor(reporter).BindExecutor();
+        var gapAnalysis = new GapAnalysisExecutor(chatClient, reporter).BindExecutor();
+
+        // The clarification gate: a request for the ticket, resolved by the PO's answer (a string). The
+        // run suspends here (RequestInfoEvent) until the host sends a response — full HITL bridge is US2.
+        var hitl = RequestPort.Create<TicketState, string>(MafExecutorIds.IntakeHitl).BindAsExecutor(allowWrappedRequests: false);
+
+        // Edges mirror the SK graph. Executors broadcast; the ready/not-ready branch is disambiguated by
+        // conditional edges on the emitted ticket: the ready path carries a ticket with no clarifying
+        // questions, the not-ready path carries the questions the validation executor attached.
+        return new WorkflowBuilder(intake)
+            .AddEdge(intake, validation)
+            .AddEdge(validation, estimation, (TicketState ticket) => IsReadyTicket(ticket))       // ready path (no questions)
+            .AddEdge(validation, gapAnalysis, (TicketState ticket) => IsNotReadyTicket(ticket))   // not-ready path (has questions)
+            .AddEdge(estimation, action)
+            .AddEdge(gapAnalysis, hitl)
+            .WithOutputFrom(action, validation) // Action (ready) + Validation (blocked) yield the final ticket
+            .Build(validateOrphans: true);
     }
+
+    /// <summary>Ready branch: the validation executor forwarded the ticket with no clarifying questions.</summary>
+    private static bool IsReadyTicket(TicketState ticket) => ticket.ClarifyingQuestions.Count == 0;
+
+    /// <summary>Not-ready branch: the validation executor attached clarifying questions before forwarding.</summary>
+    private static bool IsNotReadyTicket(TicketState ticket) => ticket.ClarifyingQuestions.Count > 0;
 }
