@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — MAF modernization: provider-neutral IChatClient seam (spec-019, Setup + Foundational)
+
+First increment of the Microsoft Agent Framework migration (spec-019). Additive and behavior-neutral —
+Semantic Kernel still runs the pipelines; this lays the provider-neutral model seam underneath. New
+`IChatClientProvider` + `IChatClientProviderRegistry` (Core) with the default `AnthropicChatClientProvider`
+reaching Claude through the official `Anthropic` SDK's `.AsIChatClient()` (GA package — not the prerelease
+`Microsoft.Agents.AI.Anthropic`), a `HotReloadChatClient` that re-resolves the active provider/model per
+call and rebuilds only on change, and a `ChatClientProviderRegistry` that fails loud (naming the provider)
+with no silent fallback — the groundwork for bring-your-own-AI. Constitution **Article VII** was amended to
+name MAF as the governing framework. Packages added: `Microsoft.Extensions.AI` 10.7.0, official `Anthropic`
+12.35.1. TDD: 7 new unit tests (green); full unit suite 624 passing.
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly

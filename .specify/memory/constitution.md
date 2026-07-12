@@ -56,22 +56,30 @@ changes behavior. Do not create auxiliary summary or status documents. The per-f
 `specs/<feature>/` tree produced by the Spec Kit pipeline is exempt — those are pipeline
 artifacts, not ad-hoc status docs.
 
-## Article VII — Framework-First Gate (Semantic Kernel Process Framework)
+## Article VII — Framework-First Gate (Microsoft Agent Framework)
 
 Before building any infrastructure, confirm the governing framework does not already provide it.
-This solution is built on the **Semantic Kernel Process Framework** — reach for its primitives
-before hand-rolling:
-- **Orchestration / state** → `KernelProcess`, `ProcessStepBuilder`, and typed **process events**;
-  do not build a bespoke state machine or event bus.
-- **Human-in-the-loop** → `IExternalKernelProcessMessageChannel` (suspend → await external signal
-  → resume); do not invent a custom pause/resume or polling loop.
-- **Structured LLM output** → request JSON via a response schema and bind to a typed record; do
-  not parse free-text model output by hand.
-- **Step wiring / DI** → the framework's step registration and kernel DI; do not build a parallel
-  registry.
+This solution is built on the **Microsoft Agent Framework (MAF)** — the generally-available successor
+to the Semantic Kernel Process Framework (see spec-019). Reach for MAF's primitives before hand-rolling:
+- **Orchestration / state** → MAF **Workflows** (`WorkflowBuilder`, `Executor`, typed message edges /
+  `AddSwitch` routing); do not build a bespoke state machine or event bus.
+- **Human-in-the-loop** → **`RequestPort`** + `RequestInfoEvent` + `SendResponseAsync` (suspend → await
+  external response → resume); do not invent a custom pause/resume or polling loop.
+- **Durable pause/resume** → MAF **checkpointing** (`CheckpointManager` + `ICheckpointStore`); do not
+  hand-roll snapshot persistence.
+- **Model access / structured output** → `Microsoft.Extensions.AI` **`IChatClient`** with
+  `ChatResponseFormat.ForJsonSchema` and tool calling; do not parse free-text model output by hand, and
+  do not depend on provider-specific client types in orchestration code.
+- **Cross-cutting capture / DI** → `IChatClient` middleware (`DelegatingChatClient` /
+  `ChatClientBuilder.Use`) and the framework's registration; do not build a parallel filter registry.
 
-Build custom only against a documented gap, and record the one-line justification at the custom
-component. This gate MUST pass before `/speckit-plan` finalizes a technical approach.
+Only **GA/stable** MAF packages belong in the execution path — no experimental/pre-release packages or
+opt-out pragmas (Prime Directive; spec-019 FR-003). Build custom only against a documented gap, and
+record the one-line justification at the custom component. This gate MUST pass before `/speckit-plan`
+finalizes a technical approach.
+
+> Migration note: the Semantic Kernel Process Framework was the prior governing framework; spec-019
+> supersedes it with MAF. Legacy specs (≤018) reference SK primitives — those remain valid history.
 
 ## Article VIII — Release Discipline
 

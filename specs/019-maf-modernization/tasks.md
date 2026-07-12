@@ -30,9 +30,9 @@ still mark which story each task serves.
 
 - [ ] T001 [P] Add GA MAF/M.E.AI packages (`Microsoft.Agents.AI`, `Microsoft.Agents.AI.Workflows`, `Microsoft.Extensions.AI`) and the official `Anthropic` SDK to `src/DBAIAzure.Connectors`, `src/DBAIAzure.Processes`, `src/DBAIAzure.Storage`, `src/DBAIAzure.Web`, `src/DBAIAzure.Runner` `.csproj` files; pin versions per `research.md` (NO prerelease packages).
 - [ ] T002 [P] Capture the pre-migration **baseline fixtures** (sample intake/phase-handler/visual run outputs, step-history, and token/cost snapshots) under `tests/DBAIAzure.Tests/Parity/Baseline/` for the parity tests to assert against.
-- [ ] T003 [P] Add AI provider config records (`AiProviderConfig`, active-provider settings) and OpenTelemetry `SourceNames` constants in `src/DBAIAzure.Core/Models/Ai/`.
+- [X] T003 [P] Add AI provider config records (`AiProviderConfig`, active-provider settings) and OpenTelemetry `SourceNames` constants in `src/DBAIAzure.Core/Models/Ai/`.
 - [ ] T002a [P] **[Parity harness]** Build a deterministic **record/replay (or stub) `IChatClient`** test harness in `tests/DBAIAzure.Tests/Parity/RecordedChatClient.cs` that returns fixed, recorded responses (incl. token `UsageDetails` and streaming updates), so every parity test asserts framework equivalence against a **pinned** model output rather than a live, non-deterministic model. All parity tests (T014–T016, T035, T036) consume this harness; live calls are reserved for the smoke path only. *(Resolves analysis finding U1.)*
-- [ ] T003a **[Governance — do early]** Amend `.specify/memory/constitution.md` **Article VII** to name Microsoft Agent Framework (Workflows / `RequestPort` / checkpointing / `IChatClient`) as the governing framework in place of the SK Process Framework (FR-017). Done **now**, before any pipeline work, so the governing rule matches the migration in progress. *(Resolves analysis finding C1 — was T053 in Polish.)*
+- [X] T003a **[Governance — do early]** Amend `.specify/memory/constitution.md` **Article VII** to name Microsoft Agent Framework (Workflows / `RequestPort` / checkpointing / `IChatClient`) as the governing framework in place of the SK Process Framework (FR-017). Done **now**, before any pipeline work, so the governing rule matches the migration in progress. *(Resolves analysis finding C1 — was T053 in Polish.)*
 
 ---
 
@@ -40,12 +40,12 @@ still mark which story each task serves.
 
 **Purpose**: the provider-neutral `IChatClient` seam every migrated pipeline and LLM call depends on. **⚠️ No user-story work begins until this phase is complete.**
 
-- [ ] T004 [P] Write FAILING unit tests for `AnthropicChatClientProvider` (default Claude → `IChatClient`; model/key from config) in `tests/DBAIAzure.Tests/Ai/AnthropicChatClientProviderTests.cs`.
-- [ ] T005 [P] Write FAILING unit tests for `HotReloadChatClient` (per-call re-resolve of active provider/model from configuration) in `tests/DBAIAzure.Tests/Ai/HotReloadChatClientTests.cs`.
+- [X] T004 [P] Write FAILING unit tests for `AnthropicChatClientProvider` (default Claude → `IChatClient`; model/key from config) in `tests/DBAIAzure.Tests/Ai/AnthropicChatClientProviderTests.cs`.
+- [X] T005 [P] Write FAILING unit tests for `HotReloadChatClient` (per-call re-resolve of active provider/model from configuration) in `tests/DBAIAzure.Tests/Ai/HotReloadChatClientTests.cs`.
 - [ ] T006 [P] Write FAILING unit tests for `CostCapturingChatClient` (reads `ChatResponse.Usage`; streaming `UsageContent`; hashes rendered messages; tags provider+model; writes the existing ledger) in `tests/DBAIAzure.Tests/Ai/CostCapturingChatClientTests.cs`.
-- [ ] T007 Define `IChatClientProvider` + `IChatClientProviderRegistry` in `src/DBAIAzure.Core/Interfaces/` per `contracts/ichatclient-provider.md`.
-- [ ] T008 Implement `AnthropicChatClientProvider` using the official `Anthropic` SDK `.AsIChatClient(model)` in `src/DBAIAzure.Connectors/Ai/AnthropicChatClientProvider.cs`; make T004 pass.
-- [ ] T009 Implement `HotReloadChatClient : DelegatingChatClient` in `src/DBAIAzure.Connectors/Ai/HotReloadChatClient.cs`; make T005 pass.
+- [X] T007 Define `IChatClientProvider` + `IChatClientProviderRegistry` in `src/DBAIAzure.Core/Interfaces/` per `contracts/ichatclient-provider.md`.
+- [X] T008 Implement `AnthropicChatClientProvider` using the official `Anthropic` SDK `.AsIChatClient(model)` in `src/DBAIAzure.Connectors/Ai/AnthropicChatClientProvider.cs`; make T004 pass.
+- [X] T009 Implement `HotReloadChatClient : DelegatingChatClient` in `src/DBAIAzure.Connectors/Ai/HotReloadChatClient.cs`; make T005 pass.
 - [ ] T010 Implement `CostCapturingChatClient : DelegatingChatClient` in `src/DBAIAzure.Web/Services/Ai/CostCapturingChatClient.cs`, reusing the existing cost ledger + binding key + ingest; make T006 pass.
 - [ ] T011 Re-express `IStructuredCompletionService` atop `IChatClient` (`ChatResponseFormat.ForJsonSchema<T>()` + forced-tool via `ChatOptions.RawRepresentationFactory`) in `src/DBAIAzure.Connectors/Ai/ChatClientStructuredCompletionService.cs`.
 - [ ] T012 Compose the `IChatClient` pipeline in DI (`src/DBAIAzure.Web/Program.cs` and `src/DBAIAzure.Runner/Program.cs`): `provider → HotReload → CostCapturing → UseOpenTelemetry(SourceName) → UseFunctionInvocation`; register the provider registry; retire the SK `AnthropicChatCompletionService`/`HotReloadAnthropicService` registrations.
