@@ -1,5 +1,6 @@
 using DBAIAzure.Core.Models;
 using DBAIAzure.Processes.Pipeline;
+using DBAIAzure.Tests.Parity;
 using Microsoft.SemanticKernel;
 using Xunit;
 
@@ -51,5 +52,42 @@ public class PipelineOrchestratorTests
             orchestrator.SubmitHitlAnswer("nonexistent", "answer"));
 
         Assert.Null(exception);
+    }
+
+    // spec-019 T022: with the MAF runtime flag on, a ready ticket runs the intake pipeline on MAF
+    // Workflows end-to-end and completes — behaviour-equivalent to the SK path, driven by a pinned client.
+    [Fact]
+    public async Task MafRuntime_ReadyTicket_RunsPipelineAndCompletes()
+    {
+        var chatClient = new RecordedChatClient(new[]
+        {
+            RecordedTurn.With("{\"title\":\"Sample\",\"description\":\"Sample description.\"}", 40, 12),
+            RecordedTurn.With("{\"is_ready\":true,\"missing_fields\":[],\"reasoning\":\"clear\"}", 30, 8),
+            RecordedTurn.With("{\"points\":5,\"reasoning\":\"comparable to the CRUD anchor\"}", 25, 8),
+        }, repeatLast: true);
+
+        var orchestrator = new PipelineOrchestrator(StubKernel, chatClient: chatClient, useMafRuntime: true);
+
+        var runId = orchestrator.StartRun(SampleTicket);
+        var run = await WaitForCompletionAsync(orchestrator, runId);
+
+        Assert.Equal(PipelineRunStatus.Complete, run.Status);
+        Assert.False(string.IsNullOrEmpty(run.CurrentTicket?.JiraIssueUrl)); // Action executor ran
+    }
+
+    /// <summary>Polls the fire-and-forget run until it leaves the Running state, or fails after a timeout.</summary>
+    private static async Task<PipelineRun> WaitForCompletionAsync(PipelineOrchestrator orchestrator, string runId)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            var run = orchestrator.GetRun(runId);
+            if (run is not null && run.Status != PipelineRunStatus.Running)
+            {
+                return run;
+            }
+            await Task.Delay(50);
+        }
+        throw new TimeoutException($"Run '{runId}' did not complete within the timeout.");
     }
 }

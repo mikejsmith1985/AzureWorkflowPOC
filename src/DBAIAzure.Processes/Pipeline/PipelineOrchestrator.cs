@@ -1,5 +1,8 @@
+using DBAIAzure.Core.Diagnostics;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Processes.Pipeline.Maf;
+using Microsoft.Extensions.AI;
 using Microsoft.SemanticKernel;
 using System.Collections.Concurrent;
 
@@ -23,6 +26,13 @@ public sealed class PipelineOrchestrator
     private readonly IHitlNotifier? _hitlNotifier;
     private readonly string _portalBaseUrl;
     private readonly IConnectorHealthChecker? _healthChecker;
+
+    // spec-019 T022: the provider-neutral model client and the flag that runs the pipeline on MAF
+    // Workflows instead of the SK Process Framework. Additive — the flag is off until the atomic cutover,
+    // so production behaviour is unchanged; HITL resume on the MAF path lands in US2.
+    private readonly IChatClient? _chatClient;
+    private readonly bool _useMafRuntime;
+
     private readonly ConcurrentDictionary<string, PipelineRun> _runs = new();
 
     /// <summary>Fired on a background thread whenever a run's state or events change.</summary>
@@ -33,13 +43,17 @@ public sealed class PipelineOrchestrator
         IRunRepository? repository = null,
         IHitlNotifier? hitlNotifier = null,
         string portalBaseUrl = "http://localhost:5000",
-        IConnectorHealthChecker? healthChecker = null)
+        IConnectorHealthChecker? healthChecker = null,
+        IChatClient? chatClient = null,
+        bool useMafRuntime = false)
     {
         _kernelFactory  = kernelFactory;
         _repository     = repository ?? NullRunRepository.Instance;
         _hitlNotifier   = hitlNotifier;
         _portalBaseUrl  = portalBaseUrl.TrimEnd('/');
         _healthChecker  = healthChecker;
+        _chatClient     = chatClient;
+        _useMafRuntime  = useMafRuntime && chatClient is not null;
     }
 
     // ── Public API ─────────────────────────────────────────────────────────────
@@ -138,6 +152,14 @@ public sealed class PipelineOrchestrator
                 }
             }
 
+            // spec-019 T022: when the MAF runtime is enabled, run the pipeline on MAF Workflows instead of
+            // the SK Process Framework. The SK loop below stays as the production default until cutover.
+            if (_useMafRuntime)
+            {
+                await ExecuteViaMafAsync(run, initialTicket);
+                return;
+            }
+
             var currentTicket = initialTicket;
 
             for (int clarificationRound = 0; clarificationRound <= MaxClarificationRounds; clarificationRound++)
@@ -206,6 +228,42 @@ public sealed class PipelineOrchestrator
             await _repository.UpsertRunAsync(run.RunId, run.CurrentTicket ?? run.InitialTicket, PipelineRunStatus.Failed);
             RunUpdated?.Invoke(run.RunId);
         }
+    }
+
+    /// <summary>
+    /// Runs the intake pipeline on MAF Workflows (spec-019 T022). The executors report their own progress
+    /// through the run-bound reporter; this method drives the run's lifecycle from the terminal output.
+    /// A ticket that fails the Definition of Ready suspends at the clarification gate — full resume is US2.
+    /// </summary>
+    private async Task ExecuteViaMafAsync(PipelineRun run, TicketState initialTicket)
+    {
+        void NotifyUpdated() => RunUpdated?.Invoke(run.RunId);
+
+        // Cost/telemetry capture keys on the ambient run id (read by CostCapturingChatClient).
+        LlmRunContext.CurrentRunId.Value = run.RunId;
+
+        var reporter = new BoundProgressReporter(run, NotifyUpdated, _repository);
+        var services = new MafExecutorServices().Add<IProgressReporter>(reporter);
+        var workflow = MafIntakeWorkflowFactory.Build(_chatClient!, services);
+
+        var outcome = await MafWorkflowExecution.RunAsync<TicketState, TicketState>(
+            workflow, initialTicket, run.RunId, CancellationToken.None);
+
+        if (outcome.Suspended)
+        {
+            // Not-ready path: parked at the clarification gate. Submitting the answer and resuming the
+            // run is US2 (RequestInfoEvent → SendResponseAsync); here the run is surfaced as awaiting input.
+            var pausedTicket = reporter.FinalTicket ?? initialTicket;
+            run.SetAwaitingHuman(pausedTicket);
+            await _repository.UpsertRunAsync(run.RunId, pausedTicket, PipelineRunStatus.AwaitingHuman);
+            NotifyUpdated();
+            return;
+        }
+
+        var finalTicket = outcome.Output ?? reporter.FinalTicket ?? initialTicket;
+        run.SetComplete(finalTicket);
+        await _repository.UpsertRunAsync(run.RunId, finalTicket, run.Status);
+        NotifyUpdated();
     }
 
     private static string FormatPreflightDiagnostic(PipelinePreflightFailure failure)

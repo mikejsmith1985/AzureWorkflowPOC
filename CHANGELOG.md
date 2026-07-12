@@ -70,6 +70,17 @@ an output port from schema-bound model output and **directs** the run to that po
 Full suite: **631 passing** (+4 parity), one pre-existing unrelated `ConnectorSettings` bUnit failure. Still
 additive — SK continues to run production; the orchestrator rewire (T022) and SK retirement (cutover) follow.
 
+Orchestrator rewire begins (US1 T022, intake). `PipelineOrchestrator` gains a **flag-gated** MAF execution
+path: when `Maf:Enabled` is set it builds the intake `Workflow` and runs it via `InProcessExecution`
+(`MafWorkflowExecution` folds the event stream to the terminal ticket / suspension; `MafExecutorServices`
+hands the run-bound progress reporter to the executors, which self-report). The flag is **off by default**,
+so production still runs on Semantic Kernel — no behaviour change until the atomic cutover; HITL resume on
+the MAF path is US2. `Program.cs` now registers the provider-neutral **`IChatClient`** pipeline
+(provider registry → `HotReloadChatClient`, which re-resolves the LLM key/model from the DB connector per
+call → `CostCapturingChatClient`, feeding the existing usage reporter). A new orchestrator test drives a
+ready ticket through the MAF path end-to-end and asserts completion; the SK-path tests are unchanged. Full
+suite green (+1), same pre-existing `ConnectorSettings` failure. Phase-handler and visual orchestrators follow.
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly

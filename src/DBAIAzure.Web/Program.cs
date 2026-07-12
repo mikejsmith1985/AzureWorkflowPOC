@@ -187,7 +187,11 @@ builder.Services.AddSingleton<PipelineOrchestrator>(sp =>
     var notifier      = sp.GetService<IHitlNotifier>();
     var healthChecker = sp.GetService<IConnectorHealthChecker>();
 
-    return new PipelineOrchestrator(kernelFactory, repo, notifier, portalBaseUrl, healthChecker);
+    // spec-019 T022: hand the orchestrator the MAF model client + runtime flag (default off until cutover).
+    var chatClient = sp.GetService<Microsoft.Extensions.AI.IChatClient>();
+    var runOnMaf   = builder.Configuration.GetValue<bool>("Maf:Enabled");
+
+    return new PipelineOrchestrator(kernelFactory, repo, notifier, portalBaseUrl, healthChecker, chatClient, runOnMaf);
 });
 
 // ── Spec Kit phase handler (parallel track — does not touch the ticket pipeline) ─
@@ -348,6 +352,57 @@ builder.Services.AddSingleton<IWorkflowObserver, AzureMonitorWorkflowObserver>()
 // (covers both runner and phase-handler paths; injected into the Anthropic connector below).
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.ILlmUsageReporter,
     DBAIAzure.Web.Services.LlmUsageReporter>();
+
+// ── MAF model layer (spec-019 T012/T022): provider-neutral IChatClient pipeline ──
+// provider registry → HotReloadChatClient (re-resolves the LLM key/model from the DB per call) →
+// CostCapturingChatClient (feeds the existing usage reporter, so the cost ledger is unchanged). Additive:
+// the SK chat services below still back the current pipelines until the atomic cutover (FR-003).
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IChatClientProvider,
+    DBAIAzure.Connectors.Ai.AnthropicChatClientProvider>();
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IChatClientProviderRegistry>(sp =>
+    new DBAIAzure.Connectors.Ai.ChatClientProviderRegistry(
+        sp.GetServices<DBAIAzure.Core.Interfaces.IChatClientProvider>()));
+builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
+{
+    var registry = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IChatClientProviderRegistry>();
+    var configRepo = sp.GetRequiredService<IConnectorConfigRepository>();
+    var usageReporter = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ILlmUsageReporter>();
+    var costLogger = sp.GetRequiredService<ILoggerFactory>().CreateLogger<DBAIAzure.Web.Services.Ai.CostCapturingChatClient>();
+
+    // Re-resolve the active provider config from the DB LLM connector on each call (config fallback),
+    // mirroring the per-run kernel factory so the single visitor-supplied key powers every model call.
+    DBAIAzure.Core.Models.Ai.AiProviderConfig ResolveActiveConfig()
+    {
+        var effectiveKey = anthropicKey;
+        var effectiveModel = anthropicModel;
+        try
+        {
+            var configResult = configRepo.GetAsync(ConnectorType.LLM).GetAwaiter().GetResult();
+            if (configResult?.NonSecretConfig is { } nsJson)
+            {
+                using var nsDoc = JsonDocument.Parse(nsJson);
+                if (nsDoc.RootElement.TryGetProperty("modelName", out var mProp) && !string.IsNullOrEmpty(mProp.GetString()))
+                    effectiveModel = mProp.GetString()!;
+            }
+            var secretsJson = configRepo.GetDecryptedSecretsAsync(ConnectorType.LLM).GetAwaiter().GetResult();
+            if (secretsJson is not null)
+            {
+                using var sDoc = JsonDocument.Parse(secretsJson);
+                if (sDoc.RootElement.TryGetProperty("apiKey", out var kProp) && !string.IsNullOrEmpty(kProp.GetString()))
+                    effectiveKey = kProp.GetString()!;
+            }
+        }
+        catch
+        {
+            // DB not available or no LLM config yet — fall back to IConfiguration values.
+        }
+        return new DBAIAzure.Core.Models.Ai.AiProviderConfig(
+            DBAIAzure.Core.Models.Ai.AiProviderConfig.DefaultProviderId, effectiveModel, effectiveKey);
+    }
+
+    var hotReload = new DBAIAzure.Connectors.Ai.HotReloadChatClient(registry, ResolveActiveConfig);
+    return new DBAIAzure.Web.Services.Ai.CostCapturingChatClient(hotReload, usageReporter, costLogger);
+});
 
 // ── SK kernel filters (FR-21.2 token tracing, Article IX prompt hashing) ──────
 builder.Services.AddSingleton<WorkflowFunctionInvocationFilter>();
