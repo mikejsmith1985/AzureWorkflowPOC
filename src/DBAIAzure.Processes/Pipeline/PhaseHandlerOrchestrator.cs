@@ -1,6 +1,8 @@
 // Singleton that owns phase-handler run lifecycles: start, pause for approval, resume, persist.
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Processes.Pipeline.Maf;
+using Microsoft.Extensions.AI;
 using Microsoft.SemanticKernel;
 using System.Collections.Concurrent;
 
@@ -31,6 +33,15 @@ public sealed class PhaseHandlerOrchestrator
     private readonly IPhaseApprovalNotifier? _approvalNotifier;
     private readonly string _portalBaseUrl;
     private readonly IConnectorHealthChecker? _healthChecker;
+
+    // spec-019 T022: the MAF model client + executor dependencies + the flag that runs the phase handler
+    // on MAF Workflows. Additive — off until cutover, so production still runs on SK; approval resume on
+    // the MAF path (create-on-decision) lands in US2.
+    private readonly IChatClient? _chatClient;
+    private readonly IArtifactReader? _artifactReader;
+    private readonly IBindingKeyMinter? _bindingKeyMinter;
+    private readonly bool _useMafRuntime;
+
     private readonly ConcurrentDictionary<string, PhaseHandlerRun> _runs = new();
 
     /// <summary>Fired on a background thread whenever a run's state changes (for live UI updates).</summary>
@@ -41,13 +52,22 @@ public sealed class PhaseHandlerOrchestrator
         IPhaseRunRepository? repository = null,
         IPhaseApprovalNotifier? approvalNotifier = null,
         string portalBaseUrl = "http://localhost:5000",
-        IConnectorHealthChecker? healthChecker = null)
+        IConnectorHealthChecker? healthChecker = null,
+        IChatClient? chatClient = null,
+        IArtifactReader? artifactReader = null,
+        IBindingKeyMinter? bindingKeyMinter = null,
+        bool useMafRuntime = false)
     {
         _kernelFactory    = kernelFactory;
         _repository       = repository ?? NullPhaseRunRepository.Instance;
         _approvalNotifier = approvalNotifier;
         _portalBaseUrl    = portalBaseUrl.TrimEnd('/');
         _healthChecker    = healthChecker;
+        _chatClient       = chatClient;
+        _artifactReader   = artifactReader;
+        _bindingKeyMinter = bindingKeyMinter;
+        // The MAF path needs both the model client and an artifact reader to run read→validate→approval.
+        _useMafRuntime    = useMafRuntime && chatClient is not null && artifactReader is not null;
     }
 
     // ── Public API ─────────────────────────────────────────────────────────────
@@ -134,6 +154,14 @@ public sealed class PhaseHandlerOrchestrator
                 }
             }
 
+            // spec-019 T022: when the MAF runtime is enabled, run read→validate→approval on MAF Workflows.
+            // The SK loop below stays as the production default until cutover.
+            if (_useMafRuntime)
+            {
+                await ExecuteViaMafAsync(run);
+                return;
+            }
+
             var sink = new RecordingSink(run, () => RunUpdated?.Invoke(run.RunId), _repository);
             var kernel = _kernelFactory(sink);
 
@@ -195,6 +223,48 @@ public sealed class PhaseHandlerOrchestrator
             await _repository.UpsertRunAsync(failed);
             RunUpdated?.Invoke(run.RunId);
         }
+    }
+
+    /// <summary>
+    /// Runs the phase handler on MAF Workflows (spec-019 T022): read → validate → the approval gate, where
+    /// the run suspends. Terminal failure paths (missing artifacts, validation/DoR failure) complete here;
+    /// applying the reviewer's decision and creating the work item on resume is US2.
+    /// </summary>
+    private async Task ExecuteViaMafAsync(PhaseHandlerRun run)
+    {
+        var sink = new RecordingSink(run, () => RunUpdated?.Invoke(run.RunId), _repository);
+
+        var services = new MafExecutorServices()
+            .Add<IArtifactReader>(_artifactReader!)
+            .Add<IPhaseProgressSink>(sink);
+        if (_bindingKeyMinter is not null)
+        {
+            services.Add<IBindingKeyMinter>(_bindingKeyMinter);
+        }
+
+        // Arm the approval gate before running, so a fast suspension cannot race it (matches the SK path)
+        // and the gate is ready for the US2 resume bridge.
+        run.BeginAwaitingApproval();
+
+        var workflow = MafPhaseHandlerWorkflowFactory.Build(_chatClient!, services);
+        var outcome = await MafWorkflowExecution.RunAsync<PhaseHandlerState, PhaseHandlerState>(
+            workflow, run.State, run.RunId, CancellationToken.None);
+
+        if (outcome.Suspended)
+        {
+            // Parked at the approval gate: persist AwaitingApproval and push the decision card. Applying the
+            // decision and resuming to the create step is US2 (RequestInfoEvent → SendResponseAsync).
+            var pausedState = (sink.LatestState ?? run.State) with { Status = PhaseRunStatus.AwaitingApproval };
+            run.UpdateState(pausedState);
+            run.MarkPaused();
+            await _repository.UpsertRunAsync(pausedState);
+            RunUpdated?.Invoke(run.RunId);
+            PushApprovalCard(run, pausedState);
+            return;
+        }
+
+        // No suspension → a terminal failure path (missing artifacts, validation/DoR failure).
+        await PersistAndNotifyAsync(run, outcome.Output ?? sink.LatestState ?? run.State);
     }
 
     /// <summary>Restarts the process from the decision, routing straight to the create step.</summary>

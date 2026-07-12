@@ -60,4 +60,23 @@ public sealed class PhaseHandlerParityTests
             observation.ExecutorSequence);
         Assert.NotNull(observation.PendingRequest); // parked at the reviewer approval gate
     }
+
+    // Regression guard: WatchStreamAsync does not reliably complete at RunStatus.PendingRequests on a
+    // background thread, so MafWorkflowExecution must break the stream when a run suspends. Running it via
+    // Task.Run (as the orchestrators do) must still return Suspended within a few seconds — not hang.
+    [Fact]
+    public async Task MafWorkflowExecution_OnBackgroundThread_ReturnsSuspended()
+    {
+        var chatClient = new RecordedChatClient(
+            RecordedTurn.With("{\"summary\":\"The spec is clear.\",\"gaps\":[]}", 50, 20));
+        var services = new MafExecutorServices().Add<IArtifactReader>(new FakeArtifactReader());
+        var workflow = MafPhaseHandlerWorkflowFactory.Build(chatClient, services);
+
+        var outcome = await Task.Run(() => MafWorkflowExecution.RunAsync<PhaseHandlerState, PhaseHandlerState>(
+            workflow, SampleState, "bg-run", default))
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.True(outcome.Suspended, $"Expected suspended; output status={outcome.Output?.Status.ToString() ?? "null"}");
+        Assert.NotNull(outcome.PendingRequest);
+    }
 }

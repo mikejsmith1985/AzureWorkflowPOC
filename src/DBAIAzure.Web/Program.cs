@@ -321,7 +321,13 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
     var notifier      = sp.GetService<IPhaseApprovalNotifier>();
     var healthChecker = sp.GetService<IConnectorHealthChecker>();
 
-    return new PhaseHandlerOrchestrator(kernelFactory, phaseRepo, notifier, portalBaseUrl, healthChecker);
+    // spec-019 T022: hand the orchestrator the MAF model client + executor deps + runtime flag.
+    var chatClient = sp.GetService<Microsoft.Extensions.AI.IChatClient>();
+    var runOnMaf   = builder.Configuration.GetValue<bool>("Maf:Enabled");
+
+    return new PhaseHandlerOrchestrator(
+        kernelFactory, phaseRepo, notifier, portalBaseUrl, healthChecker,
+        chatClient, artifactReader, bindingKeyMinter, runOnMaf);
 });
 
 // ── Connector health checker + per-connector testers (T020) ───────────────────

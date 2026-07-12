@@ -75,6 +75,26 @@ public class PipelineOrchestratorTests
         Assert.False(string.IsNullOrEmpty(run.CurrentTicket?.JiraIssueUrl)); // Action executor ran
     }
 
+    // spec-019 T022: a not-ready ticket runs intake→validation→gap-analysis on MAF and suspends at the
+    // clarification RequestPort. This exercises the suspend path (which hangs without the stream-break fix).
+    [Fact]
+    public async Task MafRuntime_NotReadyTicket_SuspendsForClarification()
+    {
+        var chatClient = new RecordedChatClient(new[]
+        {
+            RecordedTurn.With("{\"title\":\"Sample\",\"description\":\"Sample description.\"}", 40, 12),
+            RecordedTurn.With("{\"is_ready\":false,\"missing_fields\":[\"target environment\"],\"reasoning\":\"missing env\"}", 30, 10),
+            RecordedTurn.With("[\"What is the target environment?\"]", 35, 8),
+        }, repeatLast: true);
+
+        var orchestrator = new PipelineOrchestrator(StubKernel, chatClient: chatClient, useMafRuntime: true);
+
+        var runId = orchestrator.StartRun(SampleTicket);
+        var run = await WaitForCompletionAsync(orchestrator, runId);
+
+        Assert.Equal(PipelineRunStatus.AwaitingHuman, run.Status); // parked at the clarification gate
+    }
+
     /// <summary>Polls the fire-and-forget run until it leaves the Running state, or fails after a timeout.</summary>
     private static async Task<PipelineRun> WaitForCompletionAsync(PipelineOrchestrator orchestrator, string runId)
     {

@@ -79,7 +79,18 @@ the MAF path is US2. `Program.cs` now registers the provider-neutral **`IChatCli
 (provider registry → `HotReloadChatClient`, which re-resolves the LLM key/model from the DB connector per
 call → `CostCapturingChatClient`, feeding the existing usage reporter). A new orchestrator test drives a
 ready ticket through the MAF path end-to-end and asserts completion; the SK-path tests are unchanged. Full
-suite green (+1), same pre-existing `ConnectorSettings` failure. Phase-handler and visual orchestrators follow.
+suite green (+1), same pre-existing `ConnectorSettings` failure.
+
+The phase-handler orchestrator gains the same flag-gated MAF path (read → validate → suspend at the approval
+`RequestPort`; create-on-decision resume is US2), wiring the artifact reader + binding-key minter through
+`MafExecutorServices`. Building this surfaced a real MAF runtime issue: **`WatchStreamAsync` does not complete
+at `RunStatus.PendingRequests` when the run executes on a background thread** (as the orchestrators do via
+`Task.Run`) — the intake happy path completes on `Ended` and was fine, but every *suspending* path (intake
+not-ready, phase-handler approval) hung. `MafWorkflowExecution` now **breaks the event stream as soon as a
+`RequestInfoEvent` arrives** rather than waiting for the stream to end, surfaces `ExecutorFailedEvent`/
+`WorkflowErrorEvent` instead of masking them, and caps active execution at 3 minutes. New tests cover the
+intake not-ready suspend, the phase-handler approval suspend, and a background-thread regression guard.
+Visual orchestrator follows next.
 
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 

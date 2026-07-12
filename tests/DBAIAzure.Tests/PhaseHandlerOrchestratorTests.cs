@@ -201,4 +201,38 @@ public class PhaseHandlerOrchestratorTests
         Assert.Equal(PhaseHandlerOrchestrator.ApprovalResult.Applied, first);
         Assert.Equal(PhaseHandlerOrchestrator.ApprovalResult.NotAwaiting, second);
     }
+
+    // spec-019 T022: with the MAF runtime flag on, a phase signal runs read → validate on MAF Workflows
+    // and parks at the approval gate — behaviour-equivalent to the SK path, driven by a pinned client.
+    [Fact]
+    public async Task MafRuntime_PhaseSignal_RunsReadValidate_AndParksAtApproval()
+    {
+        var chatClient = new DBAIAzure.Tests.Parity.RecordedChatClient(
+            DBAIAzure.Tests.Parity.RecordedTurn.With("{\"summary\":\"The spec is clear.\",\"gaps\":[]}", 50, 20));
+        Func<IPhaseProgressSink, Kernel> stubKernel = _ => Kernel.CreateBuilder().Build();
+
+        var orchestrator = new PhaseHandlerOrchestrator(
+            stubKernel, chatClient: chatClient, artifactReader: ReaderWithArtifacts(), useMafRuntime: true);
+
+        var runId = orchestrator.StartRun(SampleState());
+
+        // Poll for a terminal-or-awaiting state (up to 30s — the first MAF run JITs on a background thread),
+        // surfacing a failure's reason instead of a bare timeout.
+        PhaseHandlerRun run = orchestrator.GetRun(runId)!;
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            run = orchestrator.GetRun(runId)!;
+            if (run.IsAwaitingApproval || run.State.Status is PhaseRunStatus.Failed or PhaseRunStatus.Completed)
+            {
+                break;
+            }
+            await Task.Delay(25);
+        }
+
+        Assert.True(run.IsAwaitingApproval,
+            $"Expected AwaitingApproval; status={run.State.Status}, reason={run.State.FailureReason}, validation={(run.State.Validation is null ? "null" : "set")}");
+        Assert.Equal(PhaseRunStatus.AwaitingApproval, run.State.Status);
+        Assert.NotNull(run.State.Validation); // the validation executor ran and bound its result
+    }
 }
