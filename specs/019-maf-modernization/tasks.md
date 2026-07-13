@@ -134,9 +134,9 @@ still mark which story each task serves.
 **Goal**: MCP-backed delivery keeps working through MAF's agent/tool model.
 **Independent Test**: a workflow whose step delivers via MCP executes the tool call and delivers as before.
 
-- [ ] T045 [P] [US4] Write FAILING test: MCP-backed delivery works via the MAF tool model in `tests/DBAIAzure.Tests/Messaging/McpDeliveryParityTests.cs`.
-- [ ] T046 [US4] Re-express MCP tool delivery (`McpMessageGateway`) through the MAF agent/tool model / `IChatClient` tools in `src/DBAIAzure.Web/Services/Messaging/` (the project that owns `McpMessageGateway` today). *(Resolves finding U2 — target project pinned.)*
-- [ ] T047 [US4] Make T045 pass.
+- [X] T045 [P] [US4] `McpDeliveryFromMafPipelineTests`: a MAF intake run suspends at the clarification gate and its HITL notification reaches the MCP send-message tool through the production chain (`MessagingHitlNotifier` → `MessageDelivery` → `IMcpMessageGateway`), recorded by the fake gateway — MCP delivery works from a MAF workflow.
+- [X] T046 [US4] **No re-expression needed** (resolves finding U2): `McpMessageGateway` + `MessageDelivery` live in `DBAIAzure.Connectors/Messaging` and are **already framework-neutral** — they call the MCP tool via the official MCP SDK (`ModelContextProtocol.Core`) + HTTP, with **zero** Semantic Kernel coupling. Delivery is a deterministic tool call (not LLM-driven), so there is nothing to move onto the MAF/IChatClient tool model; verification (T045) suffices.
+- [X] T047 [US4] T045 green.
 
 ---
 

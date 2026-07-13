@@ -170,6 +170,15 @@ by config id; an unknown provider throws the named `AiProviderException` with no
 the active provider runs the intake flow with an **identical executor sequence** — zero change to any pipeline
 or executor (SC-008). Claude remains the default, so nothing else is required to run out of the box.
 
+**US4 MCP tool delivery (T045–T047).** The finding here is that no migration was required: `McpMessageGateway`
+and `MessageDelivery` (in `DBAIAzure.Connectors/Messaging`) were **never** Semantic-Kernel-coupled — they call
+the MCP send-message tool via the official MCP SDK (`ModelContextProtocol.Core`) and fall back to a platform
+webhook, all framework-neutral. Delivery is a deterministic tool call, not an LLM-driven one, so there is
+nothing to re-express onto the MAF/IChatClient tool model. A new test verifies the end-to-end path from a MAF
+workflow: a MAF intake run suspends at its clarification gate and its human-in-the-loop notification reaches
+the MCP tool through the production chain (`MessagingHitlNotifier` → `MessageDelivery` → `IMcpMessageGateway`),
+recorded by the fake gateway — MCP-backed delivery works from a MAF pipeline exactly as before.
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly
