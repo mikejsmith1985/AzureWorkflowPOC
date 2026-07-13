@@ -366,8 +366,12 @@ builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.ILlmUsageReporter,
 // provider registry → HotReloadChatClient (re-resolves the LLM key/model from the DB per call) →
 // CostCapturingChatClient (feeds the existing usage reporter, so the cost ledger is unchanged). Additive:
 // the SK chat services below still back the current pipelines until the atomic cutover (FR-003).
+// Both built-in providers are registered; the active one is selected by AI:Provider (default anthropic) —
+// adding a provider is one registration, with no change to any pipeline or executor (spec-019 T042/T043).
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IChatClientProvider,
     DBAIAzure.Connectors.Ai.AnthropicChatClientProvider>();
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IChatClientProvider,
+    DBAIAzure.Connectors.Ai.OpenAiChatClientProvider>();
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IChatClientProviderRegistry>(sp =>
     new DBAIAzure.Connectors.Ai.ChatClientProviderRegistry(
         sp.GetServices<DBAIAzure.Core.Interfaces.IChatClientProvider>()));
@@ -378,10 +382,27 @@ builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
     var usageReporter = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ILlmUsageReporter>();
     var costLogger = sp.GetRequiredService<ILoggerFactory>().CreateLogger<DBAIAzure.Web.Services.Ai.CostCapturingChatClient>();
 
-    // Re-resolve the active provider config from the DB LLM connector on each call (config fallback),
-    // mirroring the per-run kernel factory so the single visitor-supplied key powers every model call.
+    // The active provider is chosen by AI:Provider (default anthropic, per-instance — spec-019 T042). A
+    // non-default provider reads its key/model/endpoint from AI:<Provider>:* configuration (secret by
+    // reference); the default keeps the DB-hot-reload path so the visitor-supplied Claude key powers everything.
+    var activeProviderId = (builder.Configuration["AI:Provider"] ?? DBAIAzure.Core.Models.Ai.AiProviderConfig.DefaultProviderId)
+        .Trim().ToLowerInvariant();
+
     DBAIAzure.Core.Models.Ai.AiProviderConfig ResolveActiveConfig()
     {
+        // Non-default providers are configured purely from AI:<Provider>:* (no legacy DB LLM row).
+        if (activeProviderId != DBAIAzure.Core.Models.Ai.AiProviderConfig.DefaultProviderId)
+        {
+            var section = builder.Configuration.GetSection($"AI:{activeProviderId}");
+            return new DBAIAzure.Core.Models.Ai.AiProviderConfig(
+                activeProviderId,
+                section["Model"] ?? string.Empty,
+                section["ApiKey"] ?? string.Empty,
+                Endpoint: section["Endpoint"]);
+        }
+
+        // Default (Claude): re-resolve key + model from the DB LLM connector on each call (config fallback),
+        // mirroring the per-run kernel factory so the single visitor-supplied key powers every model call.
         var effectiveKey = anthropicKey;
         var effectiveModel = anthropicModel;
         try

@@ -160,6 +160,16 @@ though SK still backs the pre-cutover production default. (Streaming *cost captu
 `UsageContent` update was already built and tested in `CostCapturingChatClient`; the Run Detail Stream tab UI
 (T037/T038) is the remaining US3 piece.)
 
+**US6 bring-your-own-AI (T040–T044).** The provider seam is now genuinely multi-provider. A second built-in
+provider — `OpenAiChatClientProvider` — reaches any OpenAI-compatible endpoint (OpenAI, Azure OpenAI, Ollama,
+LM Studio via `AiProviderConfig.Endpoint`) through the GA `Microsoft.Extensions.AI.OpenAI` package (a stable
+release, not prerelease — FR-003), exposed as an `IChatClient`. Both providers are registered; `Program.cs`
+selects the active one by `AI:Provider` (default `anthropic`, per instance), reading a non-default provider's
+key/model/endpoint from `AI:<Provider>:*` (secret by reference). Tests prove the seam: each provider resolves
+by config id; an unknown provider throws the named `AiProviderException` with no silent fallback; and swapping
+the active provider runs the intake flow with an **identical executor sequence** — zero change to any pipeline
+or executor (SC-008). Claude remains the default, so nothing else is required to run out of the box.
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly

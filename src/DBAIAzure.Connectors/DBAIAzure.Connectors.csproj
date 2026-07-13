@@ -12,6 +12,9 @@
          .AsIChatClient() (GA — deliberately NOT the prerelease Microsoft.Agents.AI.Anthropic). SK stays
          until the atomic cutover (spec-019 D5/D6). -->
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.7.0" />
+    <!-- spec-019 T043 (BYO-AI): the alternative OpenAI-compatible provider (GA, works with Azure OpenAI,
+         OpenAI, and any OpenAI-compatible endpoint). -->
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.7.0" />
     <PackageReference Include="Anthropic" Version="12.35.1" />
     <!-- IHttpClientFactory lives in Microsoft.Extensions.Http, included transitively by web projects
          but must be explicit here since DBAIAzure.Connectors uses Microsoft.NET.Sdk (not Web).

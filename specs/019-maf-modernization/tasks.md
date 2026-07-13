@@ -119,11 +119,11 @@ still mark which story each task serves.
 **Goal**: provider/model selectable by configuration, Claude default, per-instance, no orchestration change.
 **Independent Test**: only-Claude runs OOTB; switching config to a second adapter runs the same flow with zero pipeline/step change; unknown provider fails loud.
 
-- [ ] T040 [P] [US6] Write FAILING tests: active provider selected by config (default `anthropic`); unknown/misconfigured provider throws a provider-named error with no silent fallback in `tests/DBAIAzure.Tests/Ai/ProviderSelectionTests.cs`.
-- [ ] T041 [P] [US6] Write FAILING test: switching the active provider (to a second stub `IChatClientProvider`) runs an identical flow with **zero** pipeline/step code change in `tests/DBAIAzure.Tests/Ai/ProviderSwapParityTests.cs`.
-- [ ] T042 [US6] Generalize the registry for config-driven per-instance selection (`AI:Provider`/`AI:Model`), resolving each provider's secrets by reference (FR-009c) in `src/DBAIAzure.Connectors/Ai/ChatClientProviderRegistry.cs`.
-- [ ] T043 [US6] Implement fail-loud `NamedProviderException` and register a second sample `IChatClientProvider` (proving extensibility with no core change) in `src/DBAIAzure.Connectors/Ai/`.
-- [ ] T044 [US6] Make T040–T041 pass.
+- [X] T040 [P] [US6] `ProviderSelectionTests`: both built-in providers resolve by config id (default `anthropic`); unknown provider throws a provider-named `AiProviderException` with no silent fallback.
+- [X] T041 [P] [US6] `ProviderSwapParityTests`: swapping the active provider runs the intake flow with an **identical** executor sequence — zero pipeline/executor code change (SC-008).
+- [X] T042 [US6] Config-driven per-instance selection: `Program.cs` reads `AI:Provider` (default anthropic); a non-default provider reads key/model/endpoint from `AI:<Provider>:*` (secret by reference, FR-009c); default keeps the DB hot-reload. `AiProviderConfig` gained an optional `Endpoint`.
+- [X] T043 [US6] Second provider: `OpenAiChatClientProvider` (GA `Microsoft.Extensions.AI.OpenAI` — stable, not prerelease) reaches any OpenAI-compatible endpoint (OpenAI/Azure OpenAI/Ollama/LM Studio); registered alongside anthropic with **no** pipeline change. Fail-loud is the existing named `AiProviderException` (no separate `NamedProviderException` needed).
+- [X] T044 [US6] T040–T041 green.
 
 **Checkpoint**: BYO-AI works by configuration; no other AI subscription required.
 
