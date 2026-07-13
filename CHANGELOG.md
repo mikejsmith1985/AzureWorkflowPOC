@@ -234,6 +234,20 @@ pause→reject→complete. **With this, all three HITL surfaces (intake clarific
 visual approval) suspend and resume on MAF Workflows.** Remaining: phase-handler/visual rehydration across an
 app restart, and the polish/atomic-cutover tasks.
 
+**Phase-handler rehydration across restart (US2 T032).** A phase-handler run paused at the approval gate now
+survives an application restart on MAF. `PhaseHandlerOrchestrator.RehydratePausedRun(placeholder, checkpoint)`
+resumes the run from its checkpoint and drives it so a reviewer's decision submitted after the restart still
+writes the board; the fresh-start and rehydration paths share a single `DriveApprovalSessionAsync` that reads
+the paused state from the checkpoint's re-emitted request rather than local memory (which is empty after a
+restart). `IPhaseRunRepository.ListByStatusAsync` was added so the startup `PausedRunRehydrationService` can
+enumerate `AwaitingApproval` phase runs alongside the intake ones. Building this surfaced and fixed a real
+arming race: the rehydrated run was seeded at `AwaitingApproval`, so a reviewer callback could observe the
+status and submit *before* the resumed run armed its gate (`ProvideApproval` requires `_hasPaused`), dropping
+the decision — the run is now seeded at a non-awaiting status and only advertises `AwaitingApproval` after the
+gate is armed. Two tests prove it: `PhaseHandlerBootResumeTests` (orchestrator-level restart→approve→create)
+and `PausedRunRehydrationServiceTests.StartupService_RehydratesPausedPhaseRun_ThatCreatesOnApprove` (the full
+boot-service path). Remaining rehydration gap: the visual approval surface.
+
 **Polish — factory decomposition (T052).** `MafWorkflowRuntimeFactory.Build` (70 lines) was decomposed into
 `CreateBindings` / `DeclareTerminalOutputs` / `RecordRoutePortLabels` helpers so the orchestration method reads
 in ~20 lines (Article IV). Two other long methods were reviewed and intentionally left: the intake executors'

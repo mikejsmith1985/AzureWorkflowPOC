@@ -113,6 +113,17 @@ public sealed class SqlitePhaseRunRepository : IPhaseRunRepository
         return record is null ? null : ToView(record);
     }
 
+    public async Task<IReadOnlyList<PhaseRunRecordView>> ListByStatusAsync(
+        PhaseRunStatus status, CancellationToken cancellationToken = default)
+    {
+        await using var db = await _factory.CreateDbContextAsync(cancellationToken);
+        var statusName = status.ToString();
+        var records = await db.PhaseRuns.AsNoTracking()
+            .Where(r => r.Status == statusName)
+            .ToListAsync(cancellationToken);
+        return records.Select(ToView).ToList().AsReadOnly();
+    }
+
     public async Task<PhaseRunRecordView?> GetByFeaturePhaseAsync(
         string featureKey, SpecKitPhase phase, CancellationToken cancellationToken = default)
     {

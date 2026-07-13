@@ -164,6 +164,17 @@ public sealed class FakePhaseRunRepository : IPhaseRunRepository
             _byFeaturePhase.TryGetValue(KeyOf(featureKey, phase), out var state) ? ToView(state) : null);
     }
 
+    public Task<IReadOnlyList<PhaseRunRecordView>> ListByStatusAsync(
+        PhaseRunStatus status, CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<PhaseRunRecordView> matches = _byFeaturePhase.Values
+            .Where(s => s.Status == status)
+            .Select(ToView)
+            .ToList()
+            .AsReadOnly();
+        return Task.FromResult(matches);
+    }
+
     private static PhaseRunRecordView ToView(PhaseHandlerState state) => new()
     {
         RunId = state.RunId,
