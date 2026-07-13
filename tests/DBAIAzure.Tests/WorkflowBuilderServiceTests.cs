@@ -76,6 +76,9 @@ public class WorkflowBuilderServiceTests
         public Task<WorkflowDefinition?> GetAsync(Guid id, string ownerId, CancellationToken ct = default)
             => Task.FromResult<WorkflowDefinition?>(null);
 
+        public Task<WorkflowDefinition?> GetByIdAsync(Guid id, CancellationToken ct = default)
+            => Task.FromResult<WorkflowDefinition?>(null);
+
         public Task<IReadOnlyList<WorkflowDefinition>> ListByOwnerAsync(string ownerId, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<WorkflowDefinition>>(Array.Empty<WorkflowDefinition>());
 

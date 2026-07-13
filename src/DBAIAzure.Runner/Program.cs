@@ -29,13 +29,16 @@ if (string.IsNullOrWhiteSpace(anthropicKey) || anthropicKey.StartsWith("REPLACE"
         "Anthropic:ApiKey is required. Add it to appsettings.Development.json (gitignored).");
 
 // ── OpenTelemetry → Azure Monitor ─────────────────────────────────────────────
-// Every SK prompt (text, tokens, latency) auto-traces without manual spans.
-// Visible in Azure AI Foundry → Tracing view.
+// Model-call and orchestration spans auto-trace to Azure Monitor. spec-019 T013/T049: the modern
+// MAF/M.E.AI source is registered alongside the legacy SK source so traces keep flowing with no gap
+// during the migration; the SK source is removed at the atomic cutover. The exporter is unchanged.
 TracerProvider? tracerProvider = null;
 if (!string.IsNullOrWhiteSpace(azureMonitorCs) && !azureMonitorCs.StartsWith("REPLACE"))
 {
     tracerProvider = Sdk.CreateTracerProviderBuilder()
-        .AddSource("Microsoft.SemanticKernel*")
+        .AddSource(DBAIAzure.Core.Diagnostics.AiTelemetrySourceNames.ChatClient) // MAF/M.E.AI model-call spans
+        .AddSource(DBAIAzure.Core.Diagnostics.AiTelemetrySourceNames.Agents)     // MAF workflow/agent spans
+        .AddSource("Microsoft.SemanticKernel*")                                  // legacy — removed at cutover
         .AddAzureMonitorTraceExporter(o => o.ConnectionString = azureMonitorCs)
         .Build();
     AnsiConsole.MarkupLine("[dim]Azure Monitor tracing enabled.[/]");

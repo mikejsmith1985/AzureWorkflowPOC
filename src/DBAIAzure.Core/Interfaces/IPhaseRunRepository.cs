@@ -18,6 +18,13 @@ public interface IPhaseRunRepository
     Task<PhaseRunRecordView?> GetByRunIdAsync(string runId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Returns every persisted run currently in <paramref name="status"/> — used at startup to find runs left
+    /// <see cref="PhaseRunStatus.AwaitingApproval"/> before a restart so they can be rehydrated (spec-019 T032).
+    /// </summary>
+    Task<IReadOnlyList<PhaseRunRecordView>> ListByStatusAsync(
+        PhaseRunStatus status, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns the persisted run for a (FeatureKey, Phase) pair, or null. Used to find an
     /// already-created work item so a repeat signal upserts instead of duplicating (FR-013).
     /// </summary>
@@ -61,6 +68,10 @@ public sealed class NullPhaseRunRepository : IPhaseRunRepository
 
     public Task<PhaseRunRecordView?> GetByRunIdAsync(string runId, CancellationToken cancellationToken = default)
         => Task.FromResult<PhaseRunRecordView?>(null);
+
+    public Task<IReadOnlyList<PhaseRunRecordView>> ListByStatusAsync(
+        PhaseRunStatus status, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<PhaseRunRecordView>>([]);
 
     public Task<PhaseRunRecordView?> GetByFeaturePhaseAsync(
         string featureKey, SpecKitPhase phase, CancellationToken cancellationToken = default)

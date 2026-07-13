@@ -187,7 +187,13 @@ builder.Services.AddSingleton<PipelineOrchestrator>(sp =>
     var notifier      = sp.GetService<IHitlNotifier>();
     var healthChecker = sp.GetService<IConnectorHealthChecker>();
 
-    return new PipelineOrchestrator(kernelFactory, repo, notifier, portalBaseUrl, healthChecker);
+    // spec-019 T022/T032: hand the orchestrator the MAF model client, runtime flag, and checkpoint manager.
+    var chatClient = sp.GetService<Microsoft.Extensions.AI.IChatClient>();
+    var runOnMaf   = builder.Configuration.GetValue<bool>("Maf:Enabled");
+    var checkpointManager = sp.GetService<Microsoft.Agents.AI.Workflows.CheckpointManager>();
+
+    return new PipelineOrchestrator(
+        kernelFactory, repo, notifier, portalBaseUrl, healthChecker, chatClient, runOnMaf, checkpointManager);
 });
 
 // ── Spec Kit phase handler (parallel track — does not touch the ticket pipeline) ─
@@ -317,7 +323,14 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
     var notifier      = sp.GetService<IPhaseApprovalNotifier>();
     var healthChecker = sp.GetService<IConnectorHealthChecker>();
 
-    return new PhaseHandlerOrchestrator(kernelFactory, phaseRepo, notifier, portalBaseUrl, healthChecker);
+    // spec-019 T022/T032: hand the orchestrator the MAF model client + executor deps + flag + checkpoints.
+    var chatClient = sp.GetService<Microsoft.Extensions.AI.IChatClient>();
+    var runOnMaf   = builder.Configuration.GetValue<bool>("Maf:Enabled");
+    var checkpointManager = sp.GetService<Microsoft.Agents.AI.Workflows.CheckpointManager>();
+
+    return new PhaseHandlerOrchestrator(
+        kernelFactory, phaseRepo, notifier, portalBaseUrl, healthChecker,
+        chatClient, artifactReader, bindingKeyMinter, runOnMaf, checkpointManager);
 });
 
 // ── Connector health checker + per-connector testers (T020) ───────────────────
@@ -349,6 +362,93 @@ builder.Services.AddSingleton<IWorkflowObserver, AzureMonitorWorkflowObserver>()
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.ILlmUsageReporter,
     DBAIAzure.Web.Services.LlmUsageReporter>();
 
+// ── MAF model layer (spec-019 T012/T022): provider-neutral IChatClient pipeline ──
+// provider registry → HotReloadChatClient (re-resolves the LLM key/model from the DB per call) →
+// CostCapturingChatClient (feeds the existing usage reporter, so the cost ledger is unchanged). Additive:
+// the SK chat services below still back the current pipelines until the atomic cutover (FR-003).
+// Both built-in providers are registered; the active one is selected by AI:Provider (default anthropic) —
+// adding a provider is one registration, with no change to any pipeline or executor (spec-019 T042/T043).
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IChatClientProvider,
+    DBAIAzure.Connectors.Ai.AnthropicChatClientProvider>();
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IChatClientProvider,
+    DBAIAzure.Connectors.Ai.OpenAiChatClientProvider>();
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IChatClientProviderRegistry>(sp =>
+    new DBAIAzure.Connectors.Ai.ChatClientProviderRegistry(
+        sp.GetServices<DBAIAzure.Core.Interfaces.IChatClientProvider>()));
+builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
+{
+    var registry = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IChatClientProviderRegistry>();
+    var configRepo = sp.GetRequiredService<IConnectorConfigRepository>();
+    var usageReporter = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ILlmUsageReporter>();
+    var costLogger = sp.GetRequiredService<ILoggerFactory>().CreateLogger<DBAIAzure.Web.Services.Ai.CostCapturingChatClient>();
+
+    // The active provider is chosen by AI:Provider (default anthropic, per-instance — spec-019 T042). A
+    // non-default provider reads its key/model/endpoint from AI:<Provider>:* configuration (secret by
+    // reference); the default keeps the DB-hot-reload path so the visitor-supplied Claude key powers everything.
+    var activeProviderId = (builder.Configuration["AI:Provider"] ?? DBAIAzure.Core.Models.Ai.AiProviderConfig.DefaultProviderId)
+        .Trim().ToLowerInvariant();
+
+    DBAIAzure.Core.Models.Ai.AiProviderConfig ResolveActiveConfig()
+    {
+        // Non-default providers are configured purely from AI:<Provider>:* (no legacy DB LLM row).
+        if (activeProviderId != DBAIAzure.Core.Models.Ai.AiProviderConfig.DefaultProviderId)
+        {
+            var section = builder.Configuration.GetSection($"AI:{activeProviderId}");
+            return new DBAIAzure.Core.Models.Ai.AiProviderConfig(
+                activeProviderId,
+                section["Model"] ?? string.Empty,
+                section["ApiKey"] ?? string.Empty,
+                Endpoint: section["Endpoint"]);
+        }
+
+        // Default (Claude): re-resolve key + model from the DB LLM connector on each call (config fallback),
+        // mirroring the per-run kernel factory so the single visitor-supplied key powers every model call.
+        var effectiveKey = anthropicKey;
+        var effectiveModel = anthropicModel;
+        try
+        {
+            var configResult = configRepo.GetAsync(ConnectorType.LLM).GetAwaiter().GetResult();
+            if (configResult?.NonSecretConfig is { } nsJson)
+            {
+                using var nsDoc = JsonDocument.Parse(nsJson);
+                if (nsDoc.RootElement.TryGetProperty("modelName", out var mProp) && !string.IsNullOrEmpty(mProp.GetString()))
+                    effectiveModel = mProp.GetString()!;
+            }
+            var secretsJson = configRepo.GetDecryptedSecretsAsync(ConnectorType.LLM).GetAwaiter().GetResult();
+            if (secretsJson is not null)
+            {
+                using var sDoc = JsonDocument.Parse(secretsJson);
+                if (sDoc.RootElement.TryGetProperty("apiKey", out var kProp) && !string.IsNullOrEmpty(kProp.GetString()))
+                    effectiveKey = kProp.GetString()!;
+            }
+        }
+        catch
+        {
+            // DB not available or no LLM config yet — fall back to IConfiguration values.
+        }
+        return new DBAIAzure.Core.Models.Ai.AiProviderConfig(
+            DBAIAzure.Core.Models.Ai.AiProviderConfig.DefaultProviderId, effectiveModel, effectiveKey);
+    }
+
+    var hotReload = new DBAIAzure.Connectors.Ai.HotReloadChatClient(registry, ResolveActiveConfig);
+    var cost = new DBAIAzure.Web.Services.Ai.CostCapturingChatClient(hotReload, usageReporter, costLogger);
+
+    // spec-019 T013/T049: emit gen_ai model-call spans under the MAF/M.E.AI source so they reach Azure
+    // Monitor via the OTel exporter (replaces the SK telemetry filters as the model-call trace source).
+    var otelLogger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("Microsoft.Extensions.AI.OpenTelemetryChatClient");
+    return new Microsoft.Extensions.AI.OpenTelemetryChatClient(
+        cost, otelLogger, DBAIAzure.Core.Diagnostics.AiTelemetrySourceNames.ChatClient);
+});
+
+// ── Durable MAF checkpointing (spec-019 T030/T032) ────────────────────────────
+// The EF-backed checkpoint store + JSON manager let MAF runs paused at a HITL gate resume after a
+// restart. Passed to the orchestrators below so their runs are checkpointed when the MAF flag is on.
+builder.Services.AddSingleton<DBAIAzure.Storage.Checkpointing.EfCheckpointStore>();
+builder.Services.AddSingleton<Microsoft.Agents.AI.Workflows.CheckpointManager>(sp =>
+    Microsoft.Agents.AI.Workflows.CheckpointManager.CreateJson(
+        sp.GetRequiredService<DBAIAzure.Storage.Checkpointing.EfCheckpointStore>(),
+        new System.Text.Json.JsonSerializerOptions()));
+
 // ── SK kernel filters (FR-21.2 token tracing, Article IX prompt hashing) ──────
 builder.Services.AddSingleton<WorkflowFunctionInvocationFilter>();
 builder.Services.AddSingleton<WorkflowPromptRenderFilter>();
@@ -370,6 +470,10 @@ builder.Services.AddHostedService<WorkflowRunRetentionService>();
 
 // ── Startup rehydration of Paused runs (FR-18.5, T031) ───────────────────────
 builder.Services.AddHostedService<WorkflowRunRehydrationService>();
+
+// ── Startup rehydration of MAF-paused intake runs (spec-019 T032) ─────────────
+// Resumes intake runs left awaiting-human from their durable checkpoints after a restart (MAF flag only).
+builder.Services.AddHostedService<PausedRunRehydrationService>();
 
 // ── Application Insights (FR-21, US4) ─────────────────────────────────────────
 builder.Services.AddApplicationInsightsTelemetry(builder.Configuration);
@@ -431,7 +535,7 @@ builder.Services.AddScoped<IWorkflowReadinessService, WorkflowReadinessService>(
 
 // WorkflowExecutionOrchestrator: singleton that owns all visual-workflow run lifecycles.
 // Accepts a Func<Kernel> so it can re-read LLM credentials from the DB on each run (hot-reload).
-builder.Services.AddSingleton<IWorkflowExecutionOrchestrator>(sp =>
+builder.Services.AddSingleton<WorkflowExecutionOrchestrator>(sp =>
 {
     var configRepo = sp.GetRequiredService<IConnectorConfigRepository>();
 
@@ -485,8 +589,20 @@ builder.Services.AddSingleton<IWorkflowExecutionOrchestrator>(sp =>
     Func<string, string, Task> broadcastUpdate = (runId, statusText) =>
         hubContext.Clients.All.SendAsync("RunStatusChanged", runId, statusText);
 
-    return new WorkflowExecutionOrchestrator(kernelFactory, runRepo, approvalNotifier, observers, broadcastUpdate);
+    // spec-019 T022: hand the visual orchestrator the MAF model client + flag + executor deps + checkpoints.
+    var chatClient = sp.GetService<Microsoft.Extensions.AI.IChatClient>();
+    var runOnMaf   = builder.Configuration.GetValue<bool>("Maf:Enabled");
+    var checkpointManager = sp.GetService<Microsoft.Agents.AI.Workflows.CheckpointManager>();
+
+    return new WorkflowExecutionOrchestrator(
+        kernelFactory, runRepo, approvalNotifier, observers, broadcastUpdate,
+        chatClient, runOnMaf, configRepo, checkpointManager);
 });
+
+// Expose the same singleton through the interface (UI/Review Queue consume the interface; the boot-time
+// rehydration service needs the concrete type for the checkpoint-resume overload — spec-019 T032).
+builder.Services.AddSingleton<IWorkflowExecutionOrchestrator>(
+    sp => sp.GetRequiredService<WorkflowExecutionOrchestrator>());
 
 var app = builder.Build();
 

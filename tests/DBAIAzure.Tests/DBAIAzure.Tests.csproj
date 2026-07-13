@@ -17,6 +17,9 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <!-- MAF modernization (spec-019): parity tests drive real MAF workflows via InProcessExecution
+         and assert the ExecutorInvokedEvent sequence, so the test project needs the Workflows runtime. -->
+    <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.13.0" />
     <PackageReference Include="Microsoft.SemanticKernel" Version="1.77.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.11" />
     <!-- Azure DevOps client for the live Boards integration test (skipped without a PAT). -->

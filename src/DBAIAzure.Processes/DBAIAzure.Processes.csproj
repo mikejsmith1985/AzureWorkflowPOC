@@ -7,6 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- MAF modernization (spec-019): the GA Workflows runtime that replaces the SK Process Framework.
+         Executors + WorkflowBuilder graphs live here; IChatClient is the provider-neutral model seam. -->
+    <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.13.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.7.0" />
     <PackageReference Include="Microsoft.SemanticKernel" Version="1.77.0" />
     <PackageReference Include="Microsoft.SemanticKernel.Process.Core" Version="1.77.0-alpha" />
     <PackageReference Include="Microsoft.SemanticKernel.Process.LocalRuntime" Version="1.77.0-alpha" />

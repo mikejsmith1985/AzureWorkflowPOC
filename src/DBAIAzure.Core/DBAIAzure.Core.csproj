@@ -8,6 +8,8 @@
   <ItemGroup>
     <!-- DiffPlex: MIT-licensed line-level diff engine used by WorkflowCodeDiffService -->
     <PackageReference Include="DiffPlex" Version="1.7.2" />
+    <!-- spec-019: the provider-neutral model abstraction (IChatClient) the BYO-AI seam is built on. -->
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.7.0" />
   </ItemGroup>
 
   <ItemGroup>

@@ -6,6 +6,9 @@ using System.Collections.Concurrent;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
 using DBAIAzure.Core.Models.NodeConfig;
+using DBAIAzure.Processes.Pipeline.Maf;
+using Microsoft.Agents.AI.Workflows;
+using Microsoft.Extensions.AI;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 
@@ -46,6 +49,13 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
     // IHubContext<WorkflowRunHub>; null means no external broadcast (dev/test default).
     private readonly Func<string, string, Task>? _broadcastUpdate;
 
+    // spec-019 T022: the provider-neutral model client + flag that run the visual workflow on MAF Workflows
+    // (default off until cutover), plus deps the node executors and durable checkpointing need.
+    private readonly IChatClient? _chatClient;
+    private readonly bool _useMafRuntime;
+    private readonly IConnectorConfigRepository? _connectorRepository;
+    private readonly CheckpointManager? _checkpointManager;
+
     // ── Constructor ────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -66,7 +76,11 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
         IWorkflowRunRepository? runRepository = null,
         IWorkflowApprovalNotifier? approvalNotifier = null,
         IEnumerable<IWorkflowObserver>? observers = null,
-        Func<string, string, Task>? broadcastUpdate = null)
+        Func<string, string, Task>? broadcastUpdate = null,
+        IChatClient? chatClient = null,
+        bool useMafRuntime = false,
+        IConnectorConfigRepository? connectorRepository = null,
+        CheckpointManager? checkpointManager = null)
     {
         _kernelFactory    = kernelFactory;
         _runtimeBuilder   = new WorkflowRuntimeBuilder();
@@ -76,6 +90,10 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
         _observers        = observers is not null
             ? (IReadOnlyList<IWorkflowObserver>)observers.ToList().AsReadOnly()
             : Array.Empty<IWorkflowObserver>();
+        _chatClient          = chatClient;
+        _useMafRuntime       = useMafRuntime && chatClient is not null;
+        _connectorRepository = connectorRepository;
+        _checkpointManager   = checkpointManager;
     }
 
     // ── IWorkflowExecutionOrchestrator ─────────────────────────────────────────────
@@ -235,6 +253,85 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
     }
 
     /// <summary>
+    /// Rehydrates a visual run paused at a HumanApproval gate before an application restart, resuming its MAF
+    /// workflow from <paramref name="checkpoint"/> so a reviewer's decision submitted after the restart truly
+    /// drives the run to completion (spec-019 T032) — not just resolves an in-memory TCS. The paused run is
+    /// seeded at <see cref="WorkflowRunStatus.Running"/> (not Paused) so the drive loop, which arms the
+    /// approval gate before advertising Paused, is authoritative and a reviewer callback cannot race ahead of
+    /// the live session. No-op unless the MAF runtime is on.
+    /// </summary>
+    public void RehydratePausedRun(WorkflowRunRecord record, WorkflowDefinition definition, CheckpointInfo checkpoint)
+    {
+        if (!_useMafRuntime || _checkpointManager is null)
+        {
+            RehydratePausedRun(record); // fall back to reconstitute-only (approve/reject resolves the TCS)
+            return;
+        }
+
+        var run = new WorkflowExecutionRun(
+            RunId:         record.RunId,
+            WorkflowId:    record.WorkflowId,
+            Status:        WorkflowRunStatus.Running,
+            NodeStates:    Array.Empty<NodeExecutionState>(),
+            FailureReason: null,
+            StartedAt:     record.StartedAt,
+            CompletedAt:   null);
+
+        var runState = new WorkflowRunState
+        {
+            Run          = run,
+            WorkflowName = record.WorkflowName,
+            TriggeredBy  = record.TriggeredBy,
+            SuspendedAt  = record.SuspendedAt,
+            ApprovalTcs  = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+        };
+
+        _runs[record.RunId] = runState;
+        _ = Task.Run(() => RehydrateAndDriveVisualAsync(runState, definition, checkpoint));
+    }
+
+    private async Task RehydrateAndDriveVisualAsync(
+        WorkflowRunState runState, WorkflowDefinition definition, CheckpointInfo checkpoint)
+    {
+        var runId = runState.Run.RunId;
+        DBAIAzure.Core.Diagnostics.LlmRunContext.CurrentRunId.Value = runId;
+        try
+        {
+            var services = new MafExecutorServices();
+            if (_connectorRepository is not null)
+            {
+                services.Add<IConnectorConfigRepository>(_connectorRepository);
+            }
+            var mafWorkflow = new MafWorkflowRuntimeFactory().Build(definition, _chatClient!, services);
+
+            var session = await MafWorkflowSession<WorkflowStepData>.ResumeAsync(
+                mafWorkflow, checkpoint, _checkpointManager!, CancellationToken.None);
+
+            var segment = await session.DriveAsync(CancellationToken.None);
+            if (segment.Suspended)
+            {
+                await AwaitApprovalAndResumeAsync(runState, session, segment.PendingRequest!);
+            }
+            else
+            {
+                MarkRunCompleted(runState);
+            }
+        }
+        catch (Exception ex)
+        {
+            runState.Run = runState.Run with
+            {
+                Status = WorkflowRunStatus.Failed,
+                FailureReason = ex.Message,
+                CompletedAt = DateTimeOffset.UtcNow,
+            };
+            PersistRunState(runState);
+            BroadcastRunStatus(runId, WorkflowRunStatus.Failed);
+            FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+        }
+    }
+
+    /// <summary>
     /// Starts a background timer for a rehydrated paused run. If no human decision arrives
     /// within <see cref="DefaultApprovalTimeoutMinutes"/> of the run's suspension instant,
     /// the run is auto-rejected so stale approvals do not block the queue indefinitely (T041).
@@ -281,6 +378,146 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
     /// back to the run record. All exceptions are caught and converted to a Failed status
     /// so the background task never faults silently.
     /// </summary>
+    /// <summary>
+    /// Runs the visual workflow on MAF Workflows (spec-019 T022): builds the graph from the definition,
+    /// drives it to completion, and maps the outcome to the run's status. A HumanApproval node suspends the
+    /// run as <see cref="WorkflowRunStatus.Paused"/> for review (the approval-resume bridge is US2 for the
+    /// visual surface). Executors run under the provider-neutral <see cref="IChatClient"/>.
+    /// </summary>
+    private async Task ExecuteViaMafAsync(
+        WorkflowRunState runState, WorkflowDefinition workflow, string inputDescription)
+    {
+        var runId = runState.Run.RunId;
+
+        try
+        {
+            runState.Run = runState.Run with { Status = WorkflowRunStatus.Running };
+            PersistRunState(runState);
+            FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+            BroadcastRunStatus(runId, WorkflowRunStatus.Running);
+
+            // Seed the entry node (Nodes[0], typically the Trigger) with the run's input description.
+            var seed = new WorkflowStepData
+            {
+                RunId = runId,
+                NodeId = workflow.Nodes.Count > 0 ? workflow.Nodes[0].Id : string.Empty,
+                InputPayload = inputDescription,
+            };
+
+            var services = new MafExecutorServices();
+            if (_connectorRepository is not null)
+            {
+                services.Add<IConnectorConfigRepository>(_connectorRepository);
+            }
+            var mafWorkflow = new MafWorkflowRuntimeFactory().Build(workflow, _chatClient!, services);
+
+            var session = await MafWorkflowSession<WorkflowStepData>.StartAsync(
+                mafWorkflow, seed, runId, _checkpointManager, CancellationToken.None);
+            var segment = await session.DriveAsync(CancellationToken.None);
+
+            if (segment.Suspended)
+            {
+                // A HumanApproval node paused the run for review; await the decision and resume the workflow.
+                await AwaitApprovalAndResumeAsync(runState, session, segment.PendingRequest!);
+                return;
+            }
+
+            MarkRunCompleted(runState);
+        }
+        catch (Exception ex)
+        {
+            runState.Run = runState.Run with
+            {
+                Status = WorkflowRunStatus.Failed,
+                FailureReason = ex.Message,
+                CompletedAt = DateTimeOffset.UtcNow,
+            };
+            PersistRunState(runState);
+            BroadcastRunStatus(runId, WorkflowRunStatus.Failed);
+            FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+        }
+    }
+
+    /// <summary>
+    /// Suspends the run at a HumanApproval gate, awaits the reviewer's decision (via
+    /// <see cref="SubmitApproval"/> or the auto-reject watchdog), then resumes the MAF session by responding
+    /// to the approval <see cref="RequestPort"/> with the decided payload and drives the workflow to
+    /// completion (spec-019 T027, visual surface). Parity with the SK path: the workflow continues after the
+    /// gate carrying <see cref="WorkflowStepData.IsApproved"/>, whatever the decision. A second downstream gate
+    /// is handled by re-entering this method with a fresh approval gate.
+    /// </summary>
+    private async Task AwaitApprovalAndResumeAsync(
+        WorkflowRunState runState, MafWorkflowSession<WorkflowStepData> session, RequestInfoEvent pendingRequest)
+    {
+        var runId = runState.Run.RunId;
+
+        // Arm a fresh approval gate for this suspension so a downstream gate does not reuse a resolved one.
+        var suspendedAt = DateTimeOffset.UtcNow;
+        var approvalTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        runState.ApprovalTcs = approvalTcs;
+        runState.SuspendedAt = suspendedAt;
+        runState.Run = runState.Run with { Status = WorkflowRunStatus.Paused };
+        PersistRunState(runState);
+        FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+        BroadcastRunStatus(runId, WorkflowRunStatus.Paused);
+
+        // Auto-reject if no decision arrives within the approval timeout (parity with the SK watchdog; T029).
+        ScheduleEscalationTimeout(runId, approvalTcs, suspendedAt);
+
+        var approved = await approvalTcs.Task.ConfigureAwait(false);
+
+        // Resume: respond to the approval port with the decided payload; the workflow continues to completion.
+        runState.ResumedAt = DateTimeOffset.UtcNow;
+        runState.Run = runState.Run with { Status = WorkflowRunStatus.Running };
+        PersistRunState(runState);
+        FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+        BroadcastRunStatus(runId, WorkflowRunStatus.Running);
+
+        var pausedData = ExtractStepData(pendingRequest, runId);
+        await session.RespondAsync(pendingRequest.Request, pausedData with { IsApproved = approved }, CancellationToken.None);
+
+        var finalSegment = await session.DriveAsync(CancellationToken.None);
+        if (finalSegment.Suspended)
+        {
+            // Another approval gate downstream — handle it with a fresh gate.
+            await AwaitApprovalAndResumeAsync(runState, session, finalSegment.PendingRequest!);
+            return;
+        }
+
+        MarkRunCompleted(runState);
+    }
+
+    /// <summary>Reads the paused <see cref="WorkflowStepData"/> from the request, or a minimal fallback.</summary>
+    private static WorkflowStepData ExtractStepData(RequestInfoEvent pendingRequest, string runId) =>
+        pendingRequest.Request.TryGetDataAs<WorkflowStepData>(out var data) && data is not null
+            ? data
+            : new WorkflowStepData { RunId = runId, NodeId = string.Empty };
+
+    /// <summary>Marks every node Completed and the run Completed, then persists and notifies.</summary>
+    private void MarkRunCompleted(WorkflowRunState runState)
+    {
+        var completedAt = DateTimeOffset.UtcNow;
+        var completedNodeStates = runState.Run.NodeStates
+            .Select(nodeState => nodeState with
+            {
+                Status = NodeStatus.Completed,
+                StartedAt = nodeState.StartedAt ?? runState.Run.StartedAt,
+                CompletedAt = nodeState.CompletedAt ?? completedAt,
+            })
+            .ToList()
+            .AsReadOnly();
+
+        runState.Run = runState.Run with
+        {
+            Status = WorkflowRunStatus.Completed,
+            NodeStates = completedNodeStates,
+            CompletedAt = completedAt,
+        };
+        PersistRunState(runState);
+        BroadcastRunStatus(runState.Run.RunId, WorkflowRunStatus.Completed);
+        FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+    }
+
     private async Task ExecuteRunAsync(
         WorkflowRunState runState,
         WorkflowDefinition workflow,
@@ -290,6 +527,13 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
 
         // Make the run id ambient so the LLM connector's usage reporter tags this run's calls (FR-008).
         DBAIAzure.Core.Diagnostics.LlmRunContext.CurrentRunId.Value = runId;
+
+        // spec-019 T022: run the visual workflow on MAF Workflows when enabled (default off until cutover).
+        if (_useMafRuntime)
+        {
+            await ExecuteViaMafAsync(runState, workflow, inputDescription);
+            return;
+        }
 
         try
         {

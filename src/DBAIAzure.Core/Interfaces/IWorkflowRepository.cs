@@ -41,6 +41,13 @@ public interface IWorkflowRepository
     Task<WorkflowDefinition?> GetAsync(Guid id, string ownerId, CancellationToken ct = default);
 
     /// <summary>
+    /// Returns the workflow definition with the given id regardless of owner — a system-context lookup used
+    /// by startup rehydration, which reloads a paused run's definition from its persisted run record (which
+    /// carries no owner). Returns <see langword="null"/> when no workflow with that id exists (spec-019 T032).
+    /// </summary>
+    Task<WorkflowDefinition?> GetByIdAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
     /// Returns all workflow definitions that belong to the specified owner, ordered by name.
     /// Scoping the list to an owner prevents cross-tenant data leakage even when the underlying
     /// store is shared.

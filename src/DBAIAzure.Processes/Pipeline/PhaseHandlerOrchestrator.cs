@@ -1,6 +1,9 @@
 // Singleton that owns phase-handler run lifecycles: start, pause for approval, resume, persist.
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Processes.Pipeline.Maf;
+using Microsoft.Agents.AI.Workflows;
+using Microsoft.Extensions.AI;
 using Microsoft.SemanticKernel;
 using System.Collections.Concurrent;
 
@@ -31,6 +34,18 @@ public sealed class PhaseHandlerOrchestrator
     private readonly IPhaseApprovalNotifier? _approvalNotifier;
     private readonly string _portalBaseUrl;
     private readonly IConnectorHealthChecker? _healthChecker;
+
+    // spec-019 T022: the MAF model client + executor dependencies + the flag that runs the phase handler
+    // on MAF Workflows. Additive — off until cutover, so production still runs on SK; approval resume on
+    // the MAF path (create-on-decision) lands in US2.
+    private readonly IChatClient? _chatClient;
+    private readonly IArtifactReader? _artifactReader;
+    private readonly IBindingKeyMinter? _bindingKeyMinter;
+    private readonly bool _useMafRuntime;
+
+    // spec-019 T032: when set, MAF runs are checkpointed so a run paused at the approval gate survives a restart.
+    private readonly CheckpointManager? _checkpointManager;
+
     private readonly ConcurrentDictionary<string, PhaseHandlerRun> _runs = new();
 
     /// <summary>Fired on a background thread whenever a run's state changes (for live UI updates).</summary>
@@ -41,13 +56,24 @@ public sealed class PhaseHandlerOrchestrator
         IPhaseRunRepository? repository = null,
         IPhaseApprovalNotifier? approvalNotifier = null,
         string portalBaseUrl = "http://localhost:5000",
-        IConnectorHealthChecker? healthChecker = null)
+        IConnectorHealthChecker? healthChecker = null,
+        IChatClient? chatClient = null,
+        IArtifactReader? artifactReader = null,
+        IBindingKeyMinter? bindingKeyMinter = null,
+        bool useMafRuntime = false,
+        CheckpointManager? checkpointManager = null)
     {
-        _kernelFactory    = kernelFactory;
-        _repository       = repository ?? NullPhaseRunRepository.Instance;
-        _approvalNotifier = approvalNotifier;
-        _portalBaseUrl    = portalBaseUrl.TrimEnd('/');
-        _healthChecker    = healthChecker;
+        _kernelFactory     = kernelFactory;
+        _repository        = repository ?? NullPhaseRunRepository.Instance;
+        _approvalNotifier  = approvalNotifier;
+        _portalBaseUrl     = portalBaseUrl.TrimEnd('/');
+        _healthChecker     = healthChecker;
+        _chatClient        = chatClient;
+        _artifactReader    = artifactReader;
+        _bindingKeyMinter  = bindingKeyMinter;
+        // The MAF path needs both the model client and an artifact reader to run read→validate→approval.
+        _useMafRuntime     = useMafRuntime && chatClient is not null && artifactReader is not null;
+        _checkpointManager = checkpointManager;
     }
 
     // ── Public API ─────────────────────────────────────────────────────────────
@@ -134,6 +160,14 @@ public sealed class PhaseHandlerOrchestrator
                 }
             }
 
+            // spec-019 T022: when the MAF runtime is enabled, run read→validate→approval on MAF Workflows.
+            // The SK loop below stays as the production default until cutover.
+            if (_useMafRuntime)
+            {
+                await ExecuteViaMafAsync(run);
+                return;
+            }
+
             var sink = new RecordingSink(run, () => RunUpdated?.Invoke(run.RunId), _repository);
             var kernel = _kernelFactory(sink);
 
@@ -196,6 +230,166 @@ public sealed class PhaseHandlerOrchestrator
             RunUpdated?.Invoke(run.RunId);
         }
     }
+
+    /// <summary>
+    /// Runs the phase handler on MAF Workflows (spec-019 T022/T027): read → validate → the approval gate,
+    /// where the run suspends; on the reviewer's decision it resumes and the create executor writes the board
+    /// (only on approval — FR-006). Terminal failure paths (missing artifacts, validation/DoR failure)
+    /// complete without suspending. The board-write dependencies are sourced from the same DI container the
+    /// SK path uses (the kernel), so both frameworks write the board identically.
+    /// </summary>
+    private async Task ExecuteViaMafAsync(PhaseHandlerRun run)
+    {
+        var sink = new RecordingSink(run, () => RunUpdated?.Invoke(run.RunId), _repository);
+        var workflow = BuildMafWorkflow(sink);
+
+        // Arm the approval gate before driving, so a fast suspension cannot race the reviewer's callback.
+        run.BeginAwaitingApproval();
+
+        var session = await MafWorkflowSession<PhaseHandlerState>.StartAsync(
+            workflow, run.State, run.RunId, _checkpointManager, CancellationToken.None);
+
+        await DriveApprovalSessionAsync(run, session, sink);
+    }
+
+    /// <summary>
+    /// Rehydrates a phase-handler run paused at the approval gate before an application restart (spec-019
+    /// T032): rebuilds the run in memory, resumes its MAF workflow from <paramref name="checkpoint"/> (which
+    /// re-emits the outstanding approval request carrying the paused state), and drives it so a reviewer's
+    /// decision submitted after the restart still writes the board. No-op unless the MAF runtime is on.
+    /// </summary>
+    /// <param name="placeholderState">A minimal state (RunId/FeatureKey/Phase) — the full paused state is
+    /// recovered from the checkpoint's re-emitted request, so only the run identity is needed here.</param>
+    public void RehydratePausedRun(PhaseHandlerState placeholderState, CheckpointInfo checkpoint)
+    {
+        if (!_useMafRuntime || _checkpointManager is null)
+        {
+            return;
+        }
+
+        // Seed the run at a non-awaiting status (it is mid-resume): AwaitingApproval must be set only by the
+        // drive loop, AFTER it arms the gate (MarkPaused), so a reviewer callback cannot observe the status and
+        // submit before the gate is live — which would drop the decision (ProvideApproval requires _hasPaused).
+        var run = new PhaseHandlerRun(placeholderState with { Status = PhaseRunStatus.Validated });
+        _runs[placeholderState.RunId] = run;
+        _ = Task.Run(() => RehydrateAndDriveAsync(run, checkpoint));
+    }
+
+    private async Task RehydrateAndDriveAsync(PhaseHandlerRun run, CheckpointInfo checkpoint)
+    {
+        DBAIAzure.Core.Diagnostics.LlmRunContext.CurrentRunId.Value = run.RunId;
+        try
+        {
+            var sink = new RecordingSink(run, () => RunUpdated?.Invoke(run.RunId), _repository);
+            var workflow = BuildMafWorkflow(sink);
+
+            run.BeginAwaitingApproval();
+
+            var session = await MafWorkflowSession<PhaseHandlerState>.ResumeAsync(
+                workflow, checkpoint, _checkpointManager!, CancellationToken.None);
+
+            await DriveApprovalSessionAsync(run, session, sink);
+        }
+        catch (Exception ex)
+        {
+            var failed = run.State with { Status = PhaseRunStatus.Failed, FailureReason = ex.Message };
+            await PersistAndNotifyAsync(run, failed);
+        }
+    }
+
+    /// <summary>
+    /// Builds the phase-handler MAF workflow for a run. Reuses the SK kernel's service container as the MAF
+    /// executor dependency source: it already wires the work-tracker adapter, cost/telemetry services, and
+    /// repositories, so the create executor resolves the same instances the SK <c>CreateWorkItemStep</c>
+    /// would. The orchestrator's own per-run dependencies (this run's sink, the injected artifact reader /
+    /// binding minter) take precedence; the kernel supplies the board-write infrastructure as a fallback. The
+    /// MAF executors never touch the kernel's SK chat service, so the execution path stays SK-free (SC-005).
+    /// </summary>
+    private Microsoft.Agents.AI.Workflows.Workflow BuildMafWorkflow(RecordingSink sink)
+    {
+        var kernel = _kernelFactory(sink);
+
+        var explicitDeps = new MafExecutorServices()
+            .Add<IArtifactReader>(_artifactReader!)
+            .Add<IPhaseProgressSink>(sink);
+        if (_bindingKeyMinter is not null)
+        {
+            explicitDeps.Add<IBindingKeyMinter>(_bindingKeyMinter);
+        }
+        var services = new CompositeServiceProvider(explicitDeps, kernel.Services);
+
+        return MafPhaseHandlerWorkflowFactory.Build(_chatClient!, services);
+    }
+
+    /// <summary>
+    /// Drives a started or resumed MAF session: a terminal failure path completes immediately; a suspension at
+    /// the approval gate parks the run, awaits the reviewer's decision (bounded by the timeout), then responds
+    /// with the decided state and drives to completion. Shared by the fresh-start and restart-rehydration
+    /// paths so both resume identically — the paused state is read from the request (populated from the
+    /// checkpoint on resume), not from local memory.
+    /// </summary>
+    private async Task DriveApprovalSessionAsync(
+        PhaseHandlerRun run, MafWorkflowSession<PhaseHandlerState> session, RecordingSink sink)
+    {
+        var segment = await session.DriveAsync(CancellationToken.None);
+
+        if (!segment.Suspended)
+        {
+            // No suspension → a terminal failure path (missing artifacts, validation/DoR failure).
+            await PersistAndNotifyAsync(run, segment.Output ?? sink.LatestState ?? run.State);
+            return;
+        }
+
+        // Parked at the approval gate: the paused state rides the request (recovered from the checkpoint on a
+        // rehydrated run, where nothing has run locally to populate the sink). Arm the pause BEFORE advertising
+        // AwaitingApproval so a reviewer callback that observes the status cannot race ahead of the gate being
+        // live (ProvideApproval requires _hasPaused) and be dropped.
+        var pausedState = ExtractPausedState(segment.PendingRequest!, sink.LatestState ?? run.State)
+            with { Status = PhaseRunStatus.AwaitingApproval };
+        run.MarkPaused();
+        run.UpdateState(pausedState);
+        await _repository.UpsertRunAsync(pausedState);
+        RunUpdated?.Invoke(run.RunId);
+        PushApprovalCard(run, pausedState);
+
+        // Wait for the reviewer's decision (delivered via SubmitApproval → ProvideApproval), bounded by the
+        // configured timeout so the background task does not leak if approval never arrives.
+        ApprovalDecision decision;
+        using var approvalTimeoutCts = new CancellationTokenSource(TimeSpan.FromHours(ApprovalTimeoutHours));
+        try
+        {
+            decision = await run.WaitForApprovalAsync().WaitAsync(approvalTimeoutCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            var expired = pausedState with
+            {
+                Status = PhaseRunStatus.Failed,
+                FailureReason = $"No approval received within {ApprovalTimeoutHours} hours — run expired.",
+            };
+            await PersistAndNotifyAsync(run, expired);
+            return;
+        }
+
+        // Resume: respond to the approval port with the decided state; the create executor writes the board on
+        // an approved decision (or yields Rejected otherwise), then the run completes.
+        var decidedState = pausedState with
+        {
+            Decision = decision,
+            Status = decision.IsApproved ? PhaseRunStatus.WritingBoard : PhaseRunStatus.Rejected,
+        };
+        run.UpdateState(decidedState);
+        RunUpdated?.Invoke(run.RunId);
+
+        await session.RespondAsync(segment.PendingRequest!.Request, decidedState, CancellationToken.None);
+
+        var finalSegment = await session.DriveAsync(CancellationToken.None);
+        await PersistAndNotifyAsync(run, finalSegment.Output ?? sink.LatestState ?? decidedState);
+    }
+
+    /// <summary>Reads the paused state from the approval request, falling back to the last known state.</summary>
+    private static PhaseHandlerState ExtractPausedState(RequestInfoEvent request, PhaseHandlerState fallback)
+        => request.Request.TryGetDataAs<PhaseHandlerState>(out var state) && state is not null ? state : fallback;
 
     /// <summary>Restarts the process from the decision, routing straight to the create step.</summary>
     private async Task ResumeWithDecisionAsync(

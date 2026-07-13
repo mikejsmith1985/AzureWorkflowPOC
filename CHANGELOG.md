@@ -7,6 +7,296 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — MAF modernization: provider-neutral IChatClient seam (spec-019, Setup + Foundational)
+
+First increment of the Microsoft Agent Framework migration (spec-019). Additive and behavior-neutral —
+Semantic Kernel still runs the pipelines; this lays the provider-neutral model seam underneath. New
+`IChatClientProvider` + `IChatClientProviderRegistry` (Core) with the default `AnthropicChatClientProvider`
+reaching Claude through the official `Anthropic` SDK's `.AsIChatClient()` (GA package — not the prerelease
+`Microsoft.Agents.AI.Anthropic`), a `HotReloadChatClient` that re-resolves the active provider/model per
+call and rebuilds only on change, and a `ChatClientProviderRegistry` that fails loud (naming the provider)
+with no silent fallback — the groundwork for bring-your-own-AI. Constitution **Article VII** was amended to
+name MAF as the governing framework. Packages added: `Microsoft.Extensions.AI` 10.7.0, official `Anthropic`
+12.35.1.
+
+Second Foundational slice adds the metering seam and its test harness (still additive — not yet wired into
+DI, which lands with US1). `CostCapturingChatClient : DelegatingChatClient` re-homes the two retired
+Semantic Kernel cost filters (`IFunctionInvocationFilter` + `IPromptRenderFilter`) onto the model call
+itself — the correct seam under MAF/M.E.AI, where token usage rides `ChatResponse.Usage` (streaming: the
+final `UsageContent`) rather than a function hook. It maps `UsageDetails` onto the existing `LlmUsage` and
+reports through the existing `ILlmUsageReporter`, so the cost ledger, binding key, and ingest downstream are
+fed exactly as before (parity), and it logs only a prompt SHA-256 (never the text). A deterministic
+`RecordedChatClient` record/replay harness (fixed token `UsageDetails` + streaming updates) lets the coming
+parity tests assert framework equivalence against pinned model output instead of a live LLM. TDD: 3 new
+unit tests (green); full unit suite 627 passing (one pre-existing, unrelated `ConnectorSettings` bUnit
+failure). Deferred to the "wire-live" slice (coupled with US1, which migrates the SK pipeline steps):
+`ChatClientStructuredCompletionService` (T011), design-time-consumer migration (T011a), the DI pipeline
+composition + SK-registration retirement (T012), and the OTel repoint (T013).
+
+US1 (orchestration → MAF Workflows) begins **parity-tests-first**. Three failing parity tests
+(`Parity/{IntakePipeline,PhaseHandler,WorkflowRuntime}ParityTests`) drive the real GA runtime via a new
+`Parity/MafWorkflowRunner` harness (runs a `Workflow` through `InProcessExecution` and folds the event
+stream — step sequence from `ExecutorInvokedEvent`, final state from `WorkflowOutputEvent`, HITL from
+`RequestInfoEvent`), with model output pinned by the `RecordedChatClient`. They assert the migrated
+pipelines reproduce the SK step sequences exactly (intake ready/not-ready branches, phase-handler
+approval gate, visual route port-routing). The MAF seam is scaffolded under
+`Processes/Pipeline/Maf/` (`MafExecutorIds` + three workflow factories, currently throwing
+`NotImplementedException`); `Microsoft.Agents.AI.Workflows` 1.13.0 added to `DBAIAzure.Processes` and the
+test project. A reflection probe of the shipped 1.13.0 assembly corrected the design (research
+**D1-reality**): the GA API has **no `AddSwitch`** — port-label routing is a labelled **conditional edge**
+(`AddEdge(src, tgt, condition, label)`). The parity tests are tagged `[Trait("Category","US1Parity")]`
+so regression runs exclude the intentional Reds; the rest of the suite stays green (627 passing).
+
+US1 first pipeline is **green**: the ticket-intake pipeline now runs on real MAF Workflows. Five executors
+(`Executors/{Intake,Validation,GapAnalysis,Estimation,Action}Executor` + a shared `ExecutorLlm`) each port
+their retired SK step's exact prompt and JSON parse (parity); the graph
+(`MafIntakeWorkflowFactory`) wires them with a ready/not-ready **conditional edge** on the ticket and a HITL
+`RequestPort`. The intake parity test passes both branches — ready path completes, not-ready path suspends
+at the request port (`RunStatus.PendingRequests`). Three more verified MAF mechanics drove the design:
+executors must declare `[SendsMessage]`/`[YieldsOutput]`; routing is broadcast + conditional edges (no
+`AddSwitch`); `WatchStreamAsync` completes on idle/pending/ended. Also landed the deferred **T011**
+`ChatClientStructuredCompletionService` (structured output atop `IChatClient` via
+`ChatResponseFormat.ForJsonSchema`), which the phase-handler validation executor will use. The parity
+harness gained a 20s run-timeout so a non-terminating workflow fails loudly instead of hanging the suite.
+
+**All three pipelines now run on MAF Workflows with parity (US1 core, T014–T021 green).** The phase-handler
+(`ReadArtifacts`→`PhaseValidation`→approval `RequestPort`) and the visual runtime join intake. The visual
+`MafWorkflowRuntimeFactory` translates a `WorkflowDefinition` into a `Workflow` — one executor per node
+(id == node id), edges as `AddEdge`, terminal nodes via `WithOutputFrom` — and a `FunctionRoute` node picks
+an output port from schema-bound model output and **directs** the run to that port's target node
+(`SendMessageAsync(payload, targetNodeId)`), the GA analogue of the SK route step's port-label event (no
+`AddSwitch`). `FunctionRoute` and `FunctionNotify` node executors are ported; the remaining node types
+(`AgenticReason`, `FunctionTransform`, `FunctionData`, `HumanApproval`) throw a clear pending-T018 error.
+Full suite: **631 passing** (+4 parity), one pre-existing unrelated `ConnectorSettings` bUnit failure. Still
+additive — SK continues to run production; the orchestrator rewire (T022) and SK retirement (cutover) follow.
+
+Orchestrator rewire begins (US1 T022, intake). `PipelineOrchestrator` gains a **flag-gated** MAF execution
+path: when `Maf:Enabled` is set it builds the intake `Workflow` and runs it via `InProcessExecution`
+(`MafWorkflowExecution` folds the event stream to the terminal ticket / suspension; `MafExecutorServices`
+hands the run-bound progress reporter to the executors, which self-report). The flag is **off by default**,
+so production still runs on Semantic Kernel — no behaviour change until the atomic cutover; HITL resume on
+the MAF path is US2. `Program.cs` now registers the provider-neutral **`IChatClient`** pipeline
+(provider registry → `HotReloadChatClient`, which re-resolves the LLM key/model from the DB connector per
+call → `CostCapturingChatClient`, feeding the existing usage reporter). A new orchestrator test drives a
+ready ticket through the MAF path end-to-end and asserts completion; the SK-path tests are unchanged. Full
+suite green (+1), same pre-existing `ConnectorSettings` failure.
+
+The phase-handler orchestrator gains the same flag-gated MAF path (read → validate → suspend at the approval
+`RequestPort`; create-on-decision resume is US2), wiring the artifact reader + binding-key minter through
+`MafExecutorServices`. Building this surfaced a real MAF runtime issue: **`WatchStreamAsync` does not complete
+at `RunStatus.PendingRequests` when the run executes on a background thread** (as the orchestrators do via
+`Task.Run`) — the intake happy path completes on `Ended` and was fine, but every *suspending* path (intake
+not-ready, phase-handler approval) hung. `MafWorkflowExecution` now **breaks the event stream as soon as a
+`RequestInfoEvent` arrives** rather than waiting for the stream to end, surfaces `ExecutorFailedEvent`/
+`WorkflowErrorEvent` instead of masking them, and caps active execution at 3 minutes. New tests cover the
+intake not-ready suspend, the phase-handler approval suspend, and a background-thread regression guard.
+Visual orchestrator follows next.
+
+**US2 begins — durable HITL, intake resume (T024).** The intake clarification loop now works end-to-end on
+MAF: a not-ready ticket suspends at the HITL `RequestPort`, the PO's answer is applied to the ticket and
+sent back via `SendResponseAsync`, validation re-runs, and (once ready) the run completes. `MafWorkflowExecution`
+was refactored into a `MafWorkflowSession` that keeps the `StreamingRun` alive across suspensions so the
+orchestrator can drive segment→respond→segment; the intake port became `RequestPort<TicketState,TicketState>`
+with a `hitl→validation` loop edge (`ValidationExecutor`'s existing max-round rule ends the loop). A subtle
+routing bug — the ready/not-ready conditional edge keys on whether the ticket carries clarifying questions, so
+the answered ticket must clear them — was fixed. New test drives suspend→answer→complete. This is in-process
+resume; durable checkpoint/restore across restart (T030–T032) and the SK-paused-run migration (T033) follow.
+
+**Durable checkpointing (T030 + T025 core).** `EfCheckpointStore : JsonCheckpointStore` persists MAF
+workflow checkpoints to the pipeline database (new `WorkflowCheckpoints` table, keyed by session + id and
+parent-linked); the manager is built with `CheckpointManager.CreateJson(store, options)` and passed to
+`RunStreamingAsync`/`ResumeStreamingAsync`. Proven end-to-end: a phase-handler run paused at its approval
+gate is resumed from its checkpoint by a **brand-new store and workflow instance over the same database**,
+re-emitting the outstanding request — the restart-recovery mechanic (SC-003). Because the executors are
+stateless (state flows in messages), the framework's automatic checkpoint captures the run without custom
+`OnCheckpointingAsync`. Index ordering is done client-side (SQLite cannot `ORDER BY` a `DateTimeOffset`).
+Still off-production; the startup rehydration wiring (T032) and SK-paused-run migration (T033) follow.
+
+**Checkpointing wired live (T032).** `MafWorkflowSession` now threads a `CheckpointManager` — when one is
+supplied the run is checkpointed at every super-step — and exposes `ResumeAsync(workflow, checkpoint, manager)`
+as the restart-recovery entry point. Both migrated orchestrators accept and pass the manager, and `Program.cs`
+registers `EfCheckpointStore` + `CheckpointManager.CreateJson(...)`. A test drives a not-ready ticket through
+the intake orchestrator (with checkpointing) to its clarification suspension and asserts durable checkpoints
+were persisted for the run's session — so a paused run is now recoverable. The startup hosted-service that
+iterates paused runs and resumes them on boot is the remaining piece (the visual `WorkflowRunRehydrationService`
+waits on the visual-orchestrator migration). Still `Maf:Enabled`-gated / off-production.
+
+**SK-paused-run migration (T033, core).** `SkPausedRunMigration` idempotently converts a run paused under the
+retired SK framework into a durable MAF checkpoint so it resumes in place at cutover (FR-006a). Because MAF
+checkpoints are opaque, it reconstructs one by running a **resume-seed workflow** — `BuildResumeWorkflow` +
+`IntakeResumeSeedExecutor` forward the already-paused ticket straight to the HITL `RequestPort` (no
+re-normalising, re-validating, or re-asking — **no model call**), and running that with checkpointing writes a
+checkpoint at the same suspension. Re-running the migration skips already-converted runs. A test proves SC-009
+for the intake surface: convert → idempotent skip → resume from the checkpoint → recover the outstanding
+clarification request → answer → complete through the real validation loop. Remaining: the deploy-time startup
+hook that enumerates SK-paused records, and the phase-handler resume-seed (needs its create-on-approval downstream).
+
+**Boot-resume for intake (T032 complete).** `PipelineOrchestrator.RehydratePausedRun(pausedTicket, checkpoint)`
+rebuilds a run in memory, resumes its MAF workflow from the checkpoint (found via
+`EfCheckpointStore.GetLatestCheckpointAsync`, now ordered by a monotonic per-session `Sequence` column —
+`CreatedAt` ties were selecting the wrong checkpoint), and re-enters the clarification loop so a PO answer
+submitted *after* a restart drives it to completion. `BootResumeTests` proves it end-to-end: one orchestrator
+runs to the clarification gate and "crashes", a **fresh orchestrator with empty memory** rehydrates the run
+from its checkpoint over the same database and completes it on the answer. Fixed an arming race — pre-setting
+`AwaitingHuman` before the drive loop armed the HITL gate let an answer be lost.
+
+The **hosted startup service** now wires this for production: `PausedRunRehydrationService` (registered,
+`Maf:Enabled`-gated) runs once at boot, enumerates persisted awaiting-human intake runs, loads each run's
+ticket and latest checkpoint, and calls `RehydratePausedRun` — a run without a checkpoint is left to the
+one-time SK migration. A test drives the whole boot path: one orchestrator runs to the clarification gate and
+"crashes", then the service — over the same database with a fresh orchestrator — rehydrates the persisted run
+and completes it on the answer. (Tests use a shared-cache named in-memory SQLite database so the orchestrators'
+concurrent background tasks each open their own connection.) Phase-handler/visual rehydration remain.
+
+**US3 metering / structured-output parity (T035/T036/T039).** With the seam already built (T010/T011), this
+proves equivalence to the pre-migration build. Cost parity: `CostParityTests` pins a response's token usage
+and asserts `CostCapturingChatClient` captures the same input/output/cache tokens and model, so
+`ModelPricing.EstimateCostUsd` returns an identical estimate (0% delta, SC-004). Structured-output parity:
+`ChatClientStructuredCompletionService` binds `RouteDecision` and `PhaseValidationResult` to identical typed
+records off the SK forced-tool path (FR-011). SC-005 gate: `ExecutionPathSkFreeTests` reflects over the MAF
+executor / workflow-factory namespaces and asserts none takes a Semantic Kernel chat-completion dependency,
+while the model-using executors inject `IChatClient` — so the MAF execution path is provably SK-free even
+though SK still backs the pre-cutover production default. (Streaming *cost capture* from the final
+`UsageContent` update was already built and tested in `CostCapturingChatClient`; the Run Detail Stream tab UI
+(T037/T038) is the remaining US3 piece.)
+
+**US6 bring-your-own-AI (T040–T044).** The provider seam is now genuinely multi-provider. A second built-in
+provider — `OpenAiChatClientProvider` — reaches any OpenAI-compatible endpoint (OpenAI, Azure OpenAI, Ollama,
+LM Studio via `AiProviderConfig.Endpoint`) through the GA `Microsoft.Extensions.AI.OpenAI` package (a stable
+release, not prerelease — FR-003), exposed as an `IChatClient`. Both providers are registered; `Program.cs`
+selects the active one by `AI:Provider` (default `anthropic`, per instance), reading a non-default provider's
+key/model/endpoint from `AI:<Provider>:*` (secret by reference). Tests prove the seam: each provider resolves
+by config id; an unknown provider throws the named `AiProviderException` with no silent fallback; and swapping
+the active provider runs the intake flow with an **identical executor sequence** — zero change to any pipeline
+or executor (SC-008). Claude remains the default, so nothing else is required to run out of the box.
+
+**US4 MCP tool delivery (T045–T047).** The finding here is that no migration was required: `McpMessageGateway`
+and `MessageDelivery` (in `DBAIAzure.Connectors/Messaging`) were **never** Semantic-Kernel-coupled — they call
+the MCP send-message tool via the official MCP SDK (`ModelContextProtocol.Core`) and fall back to a platform
+webhook, all framework-neutral. Delivery is a deterministic tool call, not an LLM-driven one, so there is
+nothing to re-express onto the MAF/IChatClient tool model. A new test verifies the end-to-end path from a MAF
+workflow: a MAF intake run suspends at its clarification gate and its human-in-the-loop notification reaches
+the MCP tool through the production chain (`MessagingHitlNotifier` → `MessageDelivery` → `IMcpMessageGateway`),
+recorded by the fake gateway — MCP-backed delivery works from a MAF pipeline exactly as before.
+
+**US5 observability — traces to Azure Monitor (T013/T048/T049).** The Web `IChatClient` pipeline is now
+wrapped in `OpenTelemetryChatClient` under the `AiTelemetrySourceNames.ChatClient` source, so every model call
+emits gen_ai OpenTelemetry spans (tokens, latency, model) in place of the retired SK telemetry filters. The
+Runner's tracer provider registers the MAF/M.E.AI sources (`ChatClient` + `Agents`) **alongside** the legacy
+`Microsoft.SemanticKernel*` source — both flow to Azure Monitor during the migration so there is no trace gap;
+the SK source is removed at the atomic cutover, and the Azure Monitor exporter is unchanged. A validation test
+uses an `ActivityListener` to confirm a model call emits an `Activity` from the registered source.
+
+**Visual orchestrator on MAF (T022 complete).** The third and last pipeline — the visual workflow builder's
+`WorkflowExecutionOrchestrator` — now runs on MAF Workflows behind `Maf:Enabled`. A persisted
+`WorkflowDefinition` is translated to a live MAF `Workflow` (`MafWorkflowRuntimeFactory`: Trigger →
+pass-through transform, Agentic/Route/Transform/Notify/Data → executors, HumanApproval → `RequestPort`) and
+driven to completion via `MafWorkflowSession`, with suspension mapped to `Paused`. The model client, flag,
+connector repository, and checkpoint manager are wired through DI in `Program.cs`. A test runs a
+Trigger→Agentic→Notify workflow end-to-end on MAF to `Completed`. **All three pipelines (intake,
+phase-handler, visual) now execute on MAF**; SK stays the default until atomic cutover.
+
+**US3 streaming UI — Run Detail Stream tab (T037/T038).** The MAF intake LLM executors now stream their model
+output. `ExecutorLlm.CompleteStreamingAsync` calls `IChatClient.GetStreamingResponseAsync` and forwards each
+text chunk to the run-bound `IProgressReporter.ReportToken`, which feeds `PipelineRun.TokenStream` — the exact
+source the Run Detail **Stream** tab already renders. The four steps that streamed under SK
+(Intake/Validation/GapAnalysis/Estimation) stream on MAF; Route/Agentic stay non-streaming (the SK steps did
+not report tokens to the UI). Cost capture is unaffected — `CostCapturingChatClient.GetStreamingResponseAsync`
+still reads usage from the final `UsageContent` update (0% delta preserved under streaming). Two tests cover
+it: an orchestrator-level proof that a MAF run enqueues streamed tokens via the streaming request path, and a
+`RunDetailStreamTabTests` bUnit render asserting the Stream tab shows the tokens grouped by step. This closes
+US3.
+
+**Phase-handler approval resume on MAF (US2 T024/T027 core).** The phase-handler pipeline now completes a run
+end-to-end on MAF: read → validate → suspend at the approval `RequestPort` → resume on the reviewer's decision
+→ write the board. To make the reviewer-decided state (not just the bare decision) reach the create step, the
+approval port is now `RequestPort<PhaseHandlerState, PhaseHandlerState>` (mirroring the intake HITL port) with
+an `approval → createWorkItem` edge. The 340-line board-write logic was extracted verbatim from the SK
+`CreateWorkItemStep` into a framework-neutral `PhaseWorkItemWriter` (dependencies passed as an explicit
+`PhaseWorkItemWriterDeps` struct instead of `kernel.Services`), and both the SK step and the new MAF
+`CreateWorkItemExecutor` now delegate to it — so both frameworks produce identical board state (FR-015). The
+orchestrator's MAF path drives a `MafWorkflowSession<PhaseHandlerState>` across the suspension, reusing the
+run's existing approval gate (`WaitForApprovalAsync`/`SubmitApproval`) and the 72-hour timeout, and sources the
+create executor's board-write dependencies from the same SK kernel container the SK path uses (single DI source
+of truth; the MAF executors never touch the kernel's SK chat service, so the path stays SK-free). No board
+write occurs before an approved decision (FR-006). `PhaseHandlerMafResumeTests` proves approve→create-Epic and
+reject→no-write; the 5 existing SK `CreateWorkItemStepTests` still pass unchanged, confirming the extraction
+preserved behaviour. Remaining: the visual approval resume and phase-handler rehydration on restart.
+
+**Visual approval resume on MAF (US2 T024/T027).** The visual workflow builder's HumanApproval gate now
+suspends and resumes on MAF: `WorkflowExecutionOrchestrator.AwaitApprovalAndResumeAsync` parks the run as
+`Paused` at the approval `RequestPort`, arms the run's existing `ApprovalTcs` and the 24-hour auto-reject
+watchdog, and on `SubmitApproval` responds to the port with the decided `WorkflowStepData` (`IsApproved` set)
+and drives the session to `Completed` — recursing if a second approval gate lies downstream. Parity with the
+SK gate, which continues past the gate carrying the decision whatever it is (the port, like the SK builder's
+edge, forwards unconditionally). `VisualOrchestratorApprovalResumeTests` proves pause→approve→complete and
+pause→reject→complete. **With this, all three HITL surfaces (intake clarification, phase-handler approval,
+visual approval) suspend and resume on MAF Workflows.** Remaining: phase-handler/visual rehydration across an
+app restart, and the polish/atomic-cutover tasks.
+
+**Phase-handler rehydration across restart (US2 T032).** A phase-handler run paused at the approval gate now
+survives an application restart on MAF. `PhaseHandlerOrchestrator.RehydratePausedRun(placeholder, checkpoint)`
+resumes the run from its checkpoint and drives it so a reviewer's decision submitted after the restart still
+writes the board; the fresh-start and rehydration paths share a single `DriveApprovalSessionAsync` that reads
+the paused state from the checkpoint's re-emitted request rather than local memory (which is empty after a
+restart). `IPhaseRunRepository.ListByStatusAsync` was added so the startup `PausedRunRehydrationService` can
+enumerate `AwaitingApproval` phase runs alongside the intake ones. Building this surfaced and fixed a real
+arming race: the rehydrated run was seeded at `AwaitingApproval`, so a reviewer callback could observe the
+status and submit *before* the resumed run armed its gate (`ProvideApproval` requires `_hasPaused`), dropping
+the decision — the run is now seeded at a non-awaiting status and only advertises `AwaitingApproval` after the
+gate is armed. Two tests prove it: `PhaseHandlerBootResumeTests` (orchestrator-level restart→approve→create)
+and `PausedRunRehydrationServiceTests.StartupService_RehydratesPausedPhaseRun_ThatCreatesOnApprove` (the full
+boot-service path).
+
+**Visual rehydration across restart (US2 T032).** The visual builder's HumanApproval gate now survives a
+restart too. `WorkflowExecutionOrchestrator.RehydratePausedRun(record, definition, checkpoint)` truly resumes
+the MAF session from its checkpoint (`ResumeAsync` → the shared `AwaitApprovalAndResumeAsync`) so approving a
+rehydrated run drives the workflow to completion — previously it only reconstituted the in-memory approval
+TCS with no live session, so an approval after restart did nothing. A new owner-less
+`IWorkflowRepository.GetByIdAsync` lets the boot-time `WorkflowRunRehydrationService` reload a paused run's
+definition (the run record carries no owner) and its latest checkpoint and call the resume overload (falling
+back to reconstitute-only when either is missing). The visual orchestrator is now registered as a concrete
+singleton (forwarded to the interface) so the service can reach the checkpoint-resume overload. The rehydrated
+run is seeded `Running` (not `Paused`) so the drive loop — which arms the gate before advertising `Paused` — is
+authoritative. `VisualBootResumeTests` proves restart → rehydrate → approve → complete. **With this, all three
+HITL surfaces (intake clarification, phase-handler approval, visual approval) suspend, resume, and rehydrate
+across an application restart on MAF Workflows.**
+
+**Performance-budget check (T055 / SC-010).** `FrameworkPerfBaselineTests` drives the intake pipeline through
+both the SK Process Framework and MAF Workflows with an identical instant scripted model on both paths — so
+the measured delta is pure framework/orchestration overhead, the model's own latency (identical on both)
+factored out — over 40 interleaved timed runs after warmup, each framework driven directly to completion (no
+fire-and-forget polling artifact). Result: **MAF median 1.94 ms/run vs SK 10.48 ms/run — a −81.4% change
+(~5.4× faster), far inside the ≤10% budget**; per-model-call overhead 0.65 ms (MAF) vs 3.49 ms (SK). MAF
+Workflows is materially lighter than the SK Process Framework, so the performance gate does not block the
+atomic cutover. (Real end-to-end latency is dominated by the live model call, which is unchanged; this
+isolates the framework layer. Tagged `[Perf]`.)
+
+**Polish — factory decomposition (T052).** `MafWorkflowRuntimeFactory.Build` (70 lines) was decomposed into
+`CreateBindings` / `DeclareTerminalOutputs` / `RecordRoutePortLabels` helpers so the orchestration method reads
+in ~20 lines (Article IV). Two other long methods were reviewed and intentionally left: the intake executors'
+`HandleAsync` length is dominated by the model-prompt *string literal* (data, not branching), and
+`CostCapturingChatClient.GetStreamingResponseAsync` needs the manual-enumerator pattern (a `yield` cannot sit
+inside the try/catch that meters a mid-stream failure) — decomposing either would reduce, not improve,
+readability. Parity/visual tests stay green.
+
+**Interop-shim inventory + cutover conditions (T053 / FR-016 / SC-007).** The migration is deliberately
+additive: SK still runs production behind `Maf:Enabled` (default **off**). The temporary SK↔MAF shims and the
+condition that retires each at the **atomic cutover** (T050/T056):
+
+| Shim | Where | Removal condition |
+|---|---|---|
+| `Maf:Enabled` flag-gated dual path | all three orchestrators (`PipelineOrchestrator`, `PhaseHandlerOrchestrator`, `WorkflowExecutionOrchestrator`) | Flip the default to on, validate, then delete the SK branch in each orchestrator. |
+| SK `Kernel` built to source board-write deps | `PhaseHandlerOrchestrator.ExecuteViaMafAsync` (via `CompositeServiceProvider` over `kernel.Services`) | Register the work-tracker/cost/telemetry deps in a MAF-native service bag (or app DI) and drop the `_kernelFactory` build on the MAF path. |
+| Dual OTel sources | `DBAIAzure.Runner/Program.cs` registers `Microsoft.SemanticKernel*` **and** MAF/M.E.AI sources | Remove the `Microsoft.SemanticKernel*` source once no SK code emits spans. |
+| SK Steps / `*Builder` / SK orchestrator branches retained | `src/DBAIAzure.Processes/Steps/*`, `*PipelineBuilder`, `WorkflowRuntimeBuilder` | T050 deletes them (and all `Microsoft.SemanticKernel*` packages + `SKEXP0080` pragmas) once MAF is the default and green. |
+
+Not a shim (permanent): `PhaseWorkItemWriter` is the framework-neutral home for the board write; the SK
+`CreateWorkItemStep` delegates to it today and is simply deleted at cutover while the writer stays. The MAF
+execution path is already provably SK-free (`ExecutionPathSkFreeTests`, SC-005). **Cutover gates still open:**
+phase-handler/visual rehydration across restart, the performance-budget baseline (T055, ≤10%), the T050 grep
+gate (zero `Microsoft.SemanticKernel*` / `SKEXP0080`), and a fully green `dotnet test` + E2E (T056).
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly

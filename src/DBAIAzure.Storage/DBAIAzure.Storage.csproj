@@ -9,6 +9,8 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.11" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.11" PrivateAssets="all" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.11" />
+    <!-- MAF checkpointing (spec-019 T030): EfCheckpointStore extends JsonCheckpointStore. -->
+    <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.13.0" />
   </ItemGroup>
 
   <ItemGroup>
