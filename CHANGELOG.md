@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [2.0.0] - 2026-07-13
+
+> **BREAKING CHANGE — Semantic Kernel removed.** The agent stack was modernized onto the **Microsoft
+> Agent Framework (MAF) Workflows** (GA) and the experimental Semantic Kernel Process Framework
+> (`1.77.0-alpha`, `SKEXP0080`) was deleted entirely (spec-019). MAF is now the only runtime — the
+> `Maf:Enabled` flag is gone, the model layer moved from SK `IChatCompletionService` to the
+> provider-neutral `Microsoft.Extensions.AI.IChatClient`, and the three orchestrators' constructors
+> changed (no kernel factory). All `Microsoft.SemanticKernel*` packages are removed. Behaviour is
+> preserved end-to-end (every pipeline and HITL surface runs, resumes, and rehydrates on MAF), but any
+> code or configuration that depended on the SK types, the `Maf:Enabled` flag, or the old orchestrator
+> constructors must be updated. Also ships: two-dimensional AI cost tracking (spec-017), the
+> ADO/Jira work-tracker adapter (spec-018), accurate AI-usage telemetry (spec-016), and the console
+> empty-state treatment (spec-014).
+
 ### Changed — MAF modernization: atomic cutover, Semantic Kernel removed (spec-019, T050/T051/T056)
 
 The Semantic Kernel Process Framework is **gone**. This is the atomic cutover: MAF Workflows is now the only
@@ -472,6 +488,12 @@ entry, integers into Story Points).
   errors, and cache-hit rate have no capture source yet and are omitted (never fabricated). Fields are
   applied per the configured work item types (UserStory/Task); Epic/Bug have no configured telemetry
   fields until the config is extended.
+
+## [1.6.0] - 2026-06-29
+
+> The entries below shipped in **v1.6.0 or earlier** (tags `v1.2.x`–`v1.6.0`) but were never split out
+> of `[Unreleased]` at release time. They are grouped here for accuracy; the git tags hold the precise
+> per-release boundaries.
 
 ### Changed — Apps E2E test cleans up after itself
 
