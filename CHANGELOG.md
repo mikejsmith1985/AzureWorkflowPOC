@@ -138,8 +138,15 @@ rebuilds a run in memory, resumes its MAF workflow from the checkpoint (found vi
 submitted *after* a restart drives it to completion. `BootResumeTests` proves it end-to-end: one orchestrator
 runs to the clarification gate and "crashes", a **fresh orchestrator with empty memory** rehydrates the run
 from its checkpoint over the same database and completes it on the answer. Fixed an arming race — pre-setting
-`AwaitingHuman` before the drive loop armed the HITL gate let an answer be lost. The hosted startup service
-that enumerates paused records and the phase-handler/visual rehydration remain.
+`AwaitingHuman` before the drive loop armed the HITL gate let an answer be lost.
+
+The **hosted startup service** now wires this for production: `PausedRunRehydrationService` (registered,
+`Maf:Enabled`-gated) runs once at boot, enumerates persisted awaiting-human intake runs, loads each run's
+ticket and latest checkpoint, and calls `RehydratePausedRun` — a run without a checkpoint is left to the
+one-time SK migration. A test drives the whole boot path: one orchestrator runs to the clarification gate and
+"crashes", then the service — over the same database with a fresh orchestrator — rehydrates the persisted run
+and completes it on the answer. (Tests use a shared-cache named in-memory SQLite database so the orchestrators'
+concurrent background tasks each open their own connection.) Phase-handler/visual rehydration remain.
 
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 

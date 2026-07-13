@@ -444,6 +444,10 @@ builder.Services.AddHostedService<WorkflowRunRetentionService>();
 // ── Startup rehydration of Paused runs (FR-18.5, T031) ───────────────────────
 builder.Services.AddHostedService<WorkflowRunRehydrationService>();
 
+// ── Startup rehydration of MAF-paused intake runs (spec-019 T032) ─────────────
+// Resumes intake runs left awaiting-human from their durable checkpoints after a restart (MAF flag only).
+builder.Services.AddHostedService<PausedRunRehydrationService>();
+
 // ── Application Insights (FR-21, US4) ─────────────────────────────────────────
 builder.Services.AddApplicationInsightsTelemetry(builder.Configuration);
 
