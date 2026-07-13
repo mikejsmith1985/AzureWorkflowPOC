@@ -95,6 +95,51 @@ public class PipelineOrchestratorTests
         Assert.Equal(PipelineRunStatus.AwaitingHuman, run.Status); // parked at the clarification gate
     }
 
+    // spec-019 US2: a not-ready ticket suspends for clarification; the PO's answer resumes the run through
+    // the HITL RequestPort, validation re-runs with the answer, and (now ready) the run completes.
+    [Fact]
+    public async Task MafRuntime_NotReadyThenAnswered_CompletesAfterClarification()
+    {
+        var chatClient = new RecordedChatClient(new[]
+        {
+            RecordedTurn.With("{\"title\":\"Sample\",\"description\":\"Sample description.\"}", 40, 12),      // intake
+            RecordedTurn.With("{\"is_ready\":false,\"missing_fields\":[\"target environment\"],\"reasoning\":\"missing env\"}", 30, 10), // validate r0
+            RecordedTurn.With("[\"What is the target environment?\"]", 35, 8),                                // gap analysis
+            RecordedTurn.With("{\"is_ready\":true,\"missing_fields\":[],\"reasoning\":\"now clear\"}", 30, 8), // validate r1 (after answer)
+            RecordedTurn.With("{\"points\":5,\"reasoning\":\"comparable to the CRUD anchor\"}", 25, 8),        // estimation
+        }, repeatLast: true);
+
+        var orchestrator = new PipelineOrchestrator(StubKernel, chatClient: chatClient, useMafRuntime: true);
+        var runId = orchestrator.StartRun(SampleTicket);
+
+        var paused = await WaitForStatusAsync(orchestrator, runId, PipelineRunStatus.AwaitingHuman);
+        Assert.Equal(PipelineRunStatus.AwaitingHuman, paused.Status);
+        Assert.NotEmpty(paused.CurrentTicket!.ClarifyingQuestions); // the questions are surfaced
+
+        orchestrator.SubmitHitlAnswer(runId, "Azure production");
+
+        var completed = await WaitForStatusAsync(orchestrator, runId, PipelineRunStatus.Complete);
+        Assert.Equal(PipelineRunStatus.Complete, completed.Status);
+        Assert.False(string.IsNullOrEmpty(completed.CurrentTicket?.JiraIssueUrl)); // ran through to Action
+    }
+
+    /// <summary>Polls the fire-and-forget run until it reaches the target status, or fails after a timeout.</summary>
+    private static async Task<PipelineRun> WaitForStatusAsync(
+        PipelineOrchestrator orchestrator, string runId, PipelineRunStatus target)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            var run = orchestrator.GetRun(runId);
+            if (run is not null && run.Status == target)
+            {
+                return run;
+            }
+            await Task.Delay(25);
+        }
+        throw new TimeoutException($"Run '{runId}' did not reach {target} in time.");
+    }
+
     /// <summary>Polls the fire-and-forget run until it leaves the Running state, or fails after a timeout.</summary>
     private static async Task<PipelineRun> WaitForCompletionAsync(PipelineOrchestrator orchestrator, string runId)
     {

@@ -83,7 +83,7 @@ still mark which story each task serves.
 **Goal**: every human-in-the-loop gate suspends and resumes, including across restart, on MAF.
 **Independent Test**: trigger each of the three HITL surfaces; one resumes after an app restart; pre-cutover paused runs auto-migrate.
 
-- [ ] T024 [P] [US2] Write FAILING tests: `RequestPort` HITL suspends and resumes for each surface (intake prompt, phase-handler approval, visual approval) in `tests/DBAIAzure.Tests/Hitl/RequestPortHitlTests.cs`.
+- [~] T024 [P] [US2] `RequestPort` HITL suspend **and resume** tests. **Intake DONE**: in-process suspend→answer→`SendResponseAsync`→re-validate→complete (clarification loop). `MafWorkflowSession` keeps the run alive across the suspension; the intake port is now `RequestPort<TicketState,TicketState>` with a `hitl→validation` loop edge; the orchestrator applies the PO answer (clearing answered questions) and resumes. Test in `PipelineOrchestratorTests`. **Pending:** phase-handler approval resume, visual approval resume.
 - [ ] T025 [P] [US2] Write FAILING test: a paused run resumes in place **across an application restart** (checkpoint rehydration) in `tests/DBAIAzure.Tests/Hitl/CheckpointRestartTests.cs`.
 - [ ] T026 [P] [US2] Write FAILING test: the one-time **SK-paused-run → checkpoint migration** converts and resumes a representative record in `tests/DBAIAzure.Tests/Hitl/PausedRunMigrationTests.cs`.
 - [ ] T027 [US2] Replace `HumanApprovalStep`/`ApprovalPauseStep`/`HitlPauseStep` + `HitlExternalChannel`/`ApprovalExternalChannel` with `RequestPort` nodes in the three builders per `contracts/hitl-request-response.md`; delete the SK channels/proxy steps.

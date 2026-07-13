@@ -1,48 +1,64 @@
-// Runs a MAF workflow to completion (or first human-in-the-loop suspension) and reports the outcome the
-// orchestrators need to drive a run's lifecycle (spec-019 T022). Progress events are emitted by the
-// executors themselves (via their injected progress sink); this helper only captures the final result.
+// Runs a MAF workflow for the orchestrators, driving it segment-by-segment across human-in-the-loop
+// suspensions (spec-019 T022/US2). Progress events are emitted by the executors themselves (via their
+// injected progress sink); this helper captures the terminal result and the pending human request.
 using Microsoft.Agents.AI.Workflows;
 
 namespace DBAIAzure.Processes.Pipeline.Maf;
 
 /// <summary>
-/// The observable result of one MAF workflow run for an orchestrator: the terminal output (when the run
-/// completed) and whether it suspended awaiting a human response.
+/// The result of driving a workflow up to its next stop: the terminal output (when the run completed) and
+/// the pending human request (when it suspended at a <see cref="RequestPort"/>).
 /// </summary>
 /// <typeparam name="TOutput">The state type a terminal executor yields (e.g. the final ticket).</typeparam>
 /// <param name="Output">The terminal output, or null when the run suspended or produced none.</param>
-/// <param name="Suspended">True when the run paused on a human-in-the-loop <see cref="RequestInfoEvent"/>.</param>
-/// <param name="PendingRequest">The pending request when suspended (carries the paused state) — used by US2 resume.</param>
-public sealed record MafExecutionOutcome<TOutput>(TOutput? Output, bool Suspended, RequestInfoEvent? PendingRequest);
-
-/// <summary>Runs MAF workflows for the orchestrators and folds the event stream into a lifecycle outcome.</summary>
-public static class MafWorkflowExecution
+/// <param name="PendingRequest">The pending request when suspended (carries the paused state), else null.</param>
+public sealed record MafSegmentOutcome<TOutput>(TOutput? Output, RequestInfoEvent? PendingRequest)
 {
-    // Active execution must reach a terminal or suspended state within this bound; the human wait at a
-    // suspension happens AFTER the stream completes at PendingRequests, so this caps only live execution.
-    private static readonly TimeSpan ActiveExecutionTimeout = TimeSpan.FromMinutes(3);
+    /// <summary>True when the run paused awaiting a human response.</summary>
+    public bool Suspended => PendingRequest is not null;
+}
 
-    /// <summary>
-    /// Runs <paramref name="workflow"/> with <paramref name="input"/> under the run's id (used as the
-    /// session id so US2 checkpoint/resume can key on it), returning the terminal output or the pending
-    /// human request. The workflow's executors report their own progress as they run.
-    /// </summary>
-    public static async Task<MafExecutionOutcome<TOutput>> RunAsync<TInput, TOutput>(
+/// <summary>
+/// A live MAF workflow run an orchestrator drives across human-in-the-loop suspensions: start it, drive to
+/// the next suspension or completion, respond to the pending request, and drive again. The session keeps
+/// the underlying <see cref="StreamingRun"/> alive between segments (in-process resume; durable
+/// checkpoint/restore is layered on top in US2 T030–T032).
+/// </summary>
+public sealed class MafWorkflowSession<TOutput>
+{
+    // Active execution between stops must reach a terminal or suspended state within this bound; the human
+    // wait happens between segments, not inside DriveAsync, so this caps only live execution.
+    private static readonly TimeSpan SegmentTimeout = TimeSpan.FromMinutes(3);
+
+    private readonly StreamingRun _run;
+
+    private MafWorkflowSession(StreamingRun run) => _run = run;
+
+    /// <summary>Starts the workflow under the run's id (the session id, so US2 resume can key on it).</summary>
+    public static async Task<MafWorkflowSession<TOutput>> StartAsync<TInput>(
         Workflow workflow, TInput input, string runId, CancellationToken cancellationToken)
         where TInput : notnull
     {
-        // Watch the stream under a real, linked token bounded by the active-execution timeout. The stream
-        // completes on its own at PendingRequests/Idle/Ended; the bound is a safety net against a stuck run.
-        using var executionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        executionCts.CancelAfter(ActiveExecutionTimeout);
-        var executionToken = executionCts.Token;
+        var run = await InProcessExecution.RunStreamingAsync(workflow, input, runId, cancellationToken);
+        return new MafWorkflowSession<TOutput>(run);
+    }
 
-        var run = await InProcessExecution.RunStreamingAsync(workflow, input, runId, executionToken);
+    /// <summary>
+    /// Drives the run until it completes or suspends at a human-in-the-loop gate, returning the terminal
+    /// output or the pending request. Breaks on <see cref="RequestInfoEvent"/> because
+    /// <c>WatchStreamAsync</c> does not reliably complete at <see cref="RunStatus.PendingRequests"/> on a
+    /// background thread (as the orchestrators run via <c>Task.Run</c>); the completed path ends on its own.
+    /// </summary>
+    public async Task<MafSegmentOutcome<TOutput>> DriveAsync(CancellationToken cancellationToken)
+    {
+        using var segmentCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        segmentCts.CancelAfter(SegmentTimeout);
+        var segmentToken = segmentCts.Token;
 
         TOutput? output = default;
         RequestInfoEvent? pendingRequest = null;
 
-        await foreach (var workflowEvent in run.WatchStreamAsync(executionToken))
+        await foreach (var workflowEvent in _run.WatchStreamAsync(segmentToken))
         {
             switch (workflowEvent)
             {
@@ -54,21 +70,36 @@ public static class MafWorkflowExecution
                     break;
                 case ExecutorFailedEvent failure:
                     // Surface an executor failure rather than masking it as a silent, output-less run.
-                    throw new InvalidOperationException(
-                        $"Executor '{failure.ExecutorId}' failed: {failure.Data}");
+                    throw new InvalidOperationException($"Executor '{failure.ExecutorId}' failed: {failure.Data}");
                 case WorkflowErrorEvent error:
                     throw new InvalidOperationException($"Workflow error: {error.Data}");
             }
 
-            // Stop as soon as the run suspends: WatchStreamAsync does not reliably complete at
-            // RunStatus.PendingRequests on a background thread, so breaking here avoids a hang (the
-            // completed path ends the stream on its own). The pending request is captured for US2 resume.
             if (pendingRequest is not null)
             {
                 break;
             }
         }
 
-        return new MafExecutionOutcome<TOutput>(output, pendingRequest is not null, pendingRequest);
+        return new MafSegmentOutcome<TOutput>(output, pendingRequest);
+    }
+
+    /// <summary>Resolves a pending request with the host's response, unblocking the run for the next segment.</summary>
+    public async Task RespondAsync(ExternalRequest request, object responseData, CancellationToken cancellationToken)
+    {
+        await _run.SendResponseAsync(request.CreateResponse(responseData));
+    }
+}
+
+/// <summary>Convenience for a single drive (used where resume is not yet wired) — starts and drives once.</summary>
+public static class MafWorkflowExecution
+{
+    /// <summary>Starts <paramref name="workflow"/> and drives it to its first completion or suspension.</summary>
+    public static async Task<MafSegmentOutcome<TOutput>> RunAsync<TInput, TOutput>(
+        Workflow workflow, TInput input, string runId, CancellationToken cancellationToken)
+        where TInput : notnull
+    {
+        var session = await MafWorkflowSession<TOutput>.StartAsync(workflow, input, runId, cancellationToken);
+        return await session.DriveAsync(cancellationToken);
     }
 }

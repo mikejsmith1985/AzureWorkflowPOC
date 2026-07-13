@@ -34,9 +34,11 @@ public static class MafIntakeWorkflowFactory
         var action = new ActionExecutor(reporter).BindExecutor();
         var gapAnalysis = new GapAnalysisExecutor(chatClient, reporter).BindExecutor();
 
-        // The clarification gate: a request for the ticket, resolved by the PO's answer (a string). The
-        // run suspends here (RequestInfoEvent) until the host sends a response — full HITL bridge is US2.
-        var hitl = RequestPort.Create<TicketState, string>(MafExecutorIds.IntakeHitl).BindAsExecutor(allowWrappedRequests: false);
+        // The clarification gate: a request carrying the ticket (with questions), resolved by the host with
+        // the answered ticket (HumanAnswer set, clarification round incremented). The run suspends here
+        // (RequestInfoEvent) until the host responds; the answered ticket then re-enters validation, forming
+        // the clarification loop (ValidationExecutor blocks after the max round, ending the loop).
+        var hitl = RequestPort.Create<TicketState, TicketState>(MafExecutorIds.IntakeHitl).BindAsExecutor(allowWrappedRequests: false);
 
         // Edges mirror the SK graph. Executors broadcast; the ready/not-ready branch is disambiguated by
         // conditional edges on the emitted ticket: the ready path carries a ticket with no clarifying
@@ -47,6 +49,7 @@ public static class MafIntakeWorkflowFactory
             .AddEdge(validation, gapAnalysis, (TicketState ticket) => IsNotReadyTicket(ticket))   // not-ready path (has questions)
             .AddEdge(estimation, action)
             .AddEdge(gapAnalysis, hitl)
+            .AddEdge(hitl, validation)          // resume: the answered ticket re-enters validation (loop)
             .WithOutputFrom(action, validation) // Action (ready) + Validation (blocked) yield the final ticket
             .Build(validateOrphans: true);
     }

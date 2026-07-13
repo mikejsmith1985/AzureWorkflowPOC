@@ -2,6 +2,7 @@ using DBAIAzure.Core.Diagnostics;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
 using DBAIAzure.Processes.Pipeline.Maf;
+using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using Microsoft.SemanticKernel;
 using System.Collections.Concurrent;
@@ -231,9 +232,10 @@ public sealed class PipelineOrchestrator
     }
 
     /// <summary>
-    /// Runs the intake pipeline on MAF Workflows (spec-019 T022). The executors report their own progress
-    /// through the run-bound reporter; this method drives the run's lifecycle from the terminal output.
-    /// A ticket that fails the Definition of Ready suspends at the clarification gate — full resume is US2.
+    /// Runs the intake pipeline on MAF Workflows (spec-019 T022/US2), driving the clarification loop: when
+    /// a ticket fails the Definition of Ready the run suspends at the HITL <see cref="RequestPort"/>; the PO's
+    /// answer is applied to the ticket and sent back so validation re-runs, until the ticket is ready or the
+    /// max clarification round is reached. Executors report their own progress via the run-bound reporter.
     /// </summary>
     private async Task ExecuteViaMafAsync(PipelineRun run, TicketState initialTicket)
     {
@@ -246,24 +248,68 @@ public sealed class PipelineOrchestrator
         var services = new MafExecutorServices().Add<IProgressReporter>(reporter);
         var workflow = MafIntakeWorkflowFactory.Build(_chatClient!, services);
 
-        var outcome = await MafWorkflowExecution.RunAsync<TicketState, TicketState>(
+        var session = await MafWorkflowSession<TicketState>.StartAsync(
             workflow, initialTicket, run.RunId, CancellationToken.None);
 
-        if (outcome.Suspended)
+        while (true)
         {
-            // Not-ready path: parked at the clarification gate. Submitting the answer and resuming the
-            // run is US2 (RequestInfoEvent → SendResponseAsync); here the run is surfaced as awaiting input.
-            var pausedTicket = reporter.FinalTicket ?? initialTicket;
+            var segment = await session.DriveAsync(CancellationToken.None);
+
+            if (!segment.Suspended)
+            {
+                var finalTicket = segment.Output ?? reporter.FinalTicket ?? initialTicket;
+                run.SetComplete(finalTicket);
+                await _repository.UpsertRunAsync(run.RunId, finalTicket, run.Status);
+                NotifyUpdated();
+                return;
+            }
+
+            // Suspended at the clarification gate: surface the paused ticket (with its questions), notify,
+            // and await the PO's answer.
+            var pausedTicket = ExtractPausedTicket(segment.PendingRequest!, reporter.FinalTicket ?? initialTicket);
             run.SetAwaitingHuman(pausedTicket);
             await _repository.UpsertRunAsync(run.RunId, pausedTicket, PipelineRunStatus.AwaitingHuman);
             NotifyUpdated();
+            NotifyHitl(run, pausedTicket);
+
+            var answer = await run.WaitForHitlInputAsync();
+
+            // Apply the answer and resume: the answered ticket re-enters validation via the port response.
+            // Clear the now-answered questions so validation's ready/not-ready routing (keyed on whether the
+            // ticket carries clarifying questions) evaluates the re-validation cleanly.
+            var answeredTicket = pausedTicket with
+            {
+                HumanAnswer = answer,
+                ClarificationRound = pausedTicket.ClarificationRound + 1,
+                ClarifyingQuestions = [],
+            };
+            run.SetRunning();
+            run.AddEvent(new PipelineEvent(
+                "HitlResume",
+                $"PO answered (round {answeredTicket.ClarificationRound}) — re-validating",
+                ReportLevel.Info,
+                DateTimeOffset.UtcNow));
+            await _repository.UpsertRunAsync(run.RunId, answeredTicket, PipelineRunStatus.Running);
+            NotifyUpdated();
+
+            await session.RespondAsync(segment.PendingRequest!.Request, answeredTicket, CancellationToken.None);
+        }
+    }
+
+    /// <summary>Reads the paused ticket from the pending request, falling back to the last known ticket.</summary>
+    private static TicketState ExtractPausedTicket(RequestInfoEvent request, TicketState fallback)
+        => request.Request.TryGetDataAs<TicketState>(out var ticket) && ticket is not null ? ticket : fallback;
+
+    /// <summary>Fires the Teams / external HITL notification for a paused run (non-blocking), if configured.</summary>
+    private void NotifyHitl(PipelineRun run, TicketState pausedTicket)
+    {
+        if (_hitlNotifier is null)
+        {
             return;
         }
-
-        var finalTicket = outcome.Output ?? reporter.FinalTicket ?? initialTicket;
-        run.SetComplete(finalTicket);
-        await _repository.UpsertRunAsync(run.RunId, finalTicket, run.Status);
-        NotifyUpdated();
+        var portalUrl = $"{_portalBaseUrl}/run/{run.RunId}";
+        _ = _hitlNotifier.NotifyAsync(
+            run.RunId, pausedTicket.TicketId, pausedTicket.Title, pausedTicket.ClarifyingQuestions, portalUrl);
     }
 
     private static string FormatPreflightDiagnostic(PipelinePreflightFailure failure)

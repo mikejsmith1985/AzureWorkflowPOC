@@ -92,6 +92,16 @@ not-ready, phase-handler approval) hung. `MafWorkflowExecution` now **breaks the
 intake not-ready suspend, the phase-handler approval suspend, and a background-thread regression guard.
 Visual orchestrator follows next.
 
+**US2 begins — durable HITL, intake resume (T024).** The intake clarification loop now works end-to-end on
+MAF: a not-ready ticket suspends at the HITL `RequestPort`, the PO's answer is applied to the ticket and
+sent back via `SendResponseAsync`, validation re-runs, and (once ready) the run completes. `MafWorkflowExecution`
+was refactored into a `MafWorkflowSession` that keeps the `StreamingRun` alive across suspensions so the
+orchestrator can drive segment→respond→segment; the intake port became `RequestPort<TicketState,TicketState>`
+with a `hitl→validation` loop edge (`ValidationExecutor`'s existing max-round rule ends the loop). A subtle
+routing bug — the ready/not-ready conditional edge keys on whether the ticket carries clarifying questions, so
+the answered ticket must clear them — was fixed. New test drives suspend→answer→complete. This is in-process
+resume; durable checkpoint/restore across restart (T030–T032) and the SK-paused-run migration (T033) follow.
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly
