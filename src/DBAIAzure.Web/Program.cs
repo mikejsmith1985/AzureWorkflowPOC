@@ -187,11 +187,13 @@ builder.Services.AddSingleton<PipelineOrchestrator>(sp =>
     var notifier      = sp.GetService<IHitlNotifier>();
     var healthChecker = sp.GetService<IConnectorHealthChecker>();
 
-    // spec-019 T022: hand the orchestrator the MAF model client + runtime flag (default off until cutover).
+    // spec-019 T022/T032: hand the orchestrator the MAF model client, runtime flag, and checkpoint manager.
     var chatClient = sp.GetService<Microsoft.Extensions.AI.IChatClient>();
     var runOnMaf   = builder.Configuration.GetValue<bool>("Maf:Enabled");
+    var checkpointManager = sp.GetService<Microsoft.Agents.AI.Workflows.CheckpointManager>();
 
-    return new PipelineOrchestrator(kernelFactory, repo, notifier, portalBaseUrl, healthChecker, chatClient, runOnMaf);
+    return new PipelineOrchestrator(
+        kernelFactory, repo, notifier, portalBaseUrl, healthChecker, chatClient, runOnMaf, checkpointManager);
 });
 
 // ── Spec Kit phase handler (parallel track — does not touch the ticket pipeline) ─
@@ -321,13 +323,14 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
     var notifier      = sp.GetService<IPhaseApprovalNotifier>();
     var healthChecker = sp.GetService<IConnectorHealthChecker>();
 
-    // spec-019 T022: hand the orchestrator the MAF model client + executor deps + runtime flag.
+    // spec-019 T022/T032: hand the orchestrator the MAF model client + executor deps + flag + checkpoints.
     var chatClient = sp.GetService<Microsoft.Extensions.AI.IChatClient>();
     var runOnMaf   = builder.Configuration.GetValue<bool>("Maf:Enabled");
+    var checkpointManager = sp.GetService<Microsoft.Agents.AI.Workflows.CheckpointManager>();
 
     return new PhaseHandlerOrchestrator(
         kernelFactory, phaseRepo, notifier, portalBaseUrl, healthChecker,
-        chatClient, artifactReader, bindingKeyMinter, runOnMaf);
+        chatClient, artifactReader, bindingKeyMinter, runOnMaf, checkpointManager);
 });
 
 // ── Connector health checker + per-connector testers (T020) ───────────────────
@@ -409,6 +412,15 @@ builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
     var hotReload = new DBAIAzure.Connectors.Ai.HotReloadChatClient(registry, ResolveActiveConfig);
     return new DBAIAzure.Web.Services.Ai.CostCapturingChatClient(hotReload, usageReporter, costLogger);
 });
+
+// ── Durable MAF checkpointing (spec-019 T030/T032) ────────────────────────────
+// The EF-backed checkpoint store + JSON manager let MAF runs paused at a HITL gate resume after a
+// restart. Passed to the orchestrators below so their runs are checkpointed when the MAF flag is on.
+builder.Services.AddSingleton<DBAIAzure.Storage.Checkpointing.EfCheckpointStore>();
+builder.Services.AddSingleton<Microsoft.Agents.AI.Workflows.CheckpointManager>(sp =>
+    Microsoft.Agents.AI.Workflows.CheckpointManager.CreateJson(
+        sp.GetRequiredService<DBAIAzure.Storage.Checkpointing.EfCheckpointStore>(),
+        new System.Text.Json.JsonSerializerOptions()));
 
 // ── SK kernel filters (FR-21.2 token tracing, Article IX prompt hashing) ──────
 builder.Services.AddSingleton<WorkflowFunctionInvocationFilter>();

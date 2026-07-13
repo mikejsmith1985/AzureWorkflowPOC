@@ -34,6 +34,10 @@ public sealed class PipelineOrchestrator
     private readonly IChatClient? _chatClient;
     private readonly bool _useMafRuntime;
 
+    // spec-019 T032: when set, MAF runs are checkpointed so a run paused at the clarification gate can be
+    // resumed after a restart. Null → in-process resume only.
+    private readonly CheckpointManager? _checkpointManager;
+
     private readonly ConcurrentDictionary<string, PipelineRun> _runs = new();
 
     /// <summary>Fired on a background thread whenever a run's state or events change.</summary>
@@ -46,15 +50,17 @@ public sealed class PipelineOrchestrator
         string portalBaseUrl = "http://localhost:5000",
         IConnectorHealthChecker? healthChecker = null,
         IChatClient? chatClient = null,
-        bool useMafRuntime = false)
+        bool useMafRuntime = false,
+        CheckpointManager? checkpointManager = null)
     {
-        _kernelFactory  = kernelFactory;
-        _repository     = repository ?? NullRunRepository.Instance;
-        _hitlNotifier   = hitlNotifier;
-        _portalBaseUrl  = portalBaseUrl.TrimEnd('/');
-        _healthChecker  = healthChecker;
-        _chatClient     = chatClient;
-        _useMafRuntime  = useMafRuntime && chatClient is not null;
+        _kernelFactory     = kernelFactory;
+        _repository        = repository ?? NullRunRepository.Instance;
+        _hitlNotifier      = hitlNotifier;
+        _portalBaseUrl     = portalBaseUrl.TrimEnd('/');
+        _healthChecker     = healthChecker;
+        _chatClient        = chatClient;
+        _useMafRuntime     = useMafRuntime && chatClient is not null;
+        _checkpointManager = checkpointManager;
     }
 
     // ── Public API ─────────────────────────────────────────────────────────────
@@ -249,7 +255,7 @@ public sealed class PipelineOrchestrator
         var workflow = MafIntakeWorkflowFactory.Build(_chatClient!, services);
 
         var session = await MafWorkflowSession<TicketState>.StartAsync(
-            workflow, initialTicket, run.RunId, CancellationToken.None);
+            workflow, initialTicket, run.RunId, _checkpointManager, CancellationToken.None);
 
         while (true)
         {

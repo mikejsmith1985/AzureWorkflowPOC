@@ -2,6 +2,7 @@
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
 using DBAIAzure.Processes.Pipeline.Maf;
+using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using Microsoft.SemanticKernel;
 using System.Collections.Concurrent;
@@ -42,6 +43,9 @@ public sealed class PhaseHandlerOrchestrator
     private readonly IBindingKeyMinter? _bindingKeyMinter;
     private readonly bool _useMafRuntime;
 
+    // spec-019 T032: when set, MAF runs are checkpointed so a run paused at the approval gate survives a restart.
+    private readonly CheckpointManager? _checkpointManager;
+
     private readonly ConcurrentDictionary<string, PhaseHandlerRun> _runs = new();
 
     /// <summary>Fired on a background thread whenever a run's state changes (for live UI updates).</summary>
@@ -56,18 +60,20 @@ public sealed class PhaseHandlerOrchestrator
         IChatClient? chatClient = null,
         IArtifactReader? artifactReader = null,
         IBindingKeyMinter? bindingKeyMinter = null,
-        bool useMafRuntime = false)
+        bool useMafRuntime = false,
+        CheckpointManager? checkpointManager = null)
     {
-        _kernelFactory    = kernelFactory;
-        _repository       = repository ?? NullPhaseRunRepository.Instance;
-        _approvalNotifier = approvalNotifier;
-        _portalBaseUrl    = portalBaseUrl.TrimEnd('/');
-        _healthChecker    = healthChecker;
-        _chatClient       = chatClient;
-        _artifactReader   = artifactReader;
-        _bindingKeyMinter = bindingKeyMinter;
+        _kernelFactory     = kernelFactory;
+        _repository        = repository ?? NullPhaseRunRepository.Instance;
+        _approvalNotifier  = approvalNotifier;
+        _portalBaseUrl     = portalBaseUrl.TrimEnd('/');
+        _healthChecker     = healthChecker;
+        _chatClient        = chatClient;
+        _artifactReader    = artifactReader;
+        _bindingKeyMinter  = bindingKeyMinter;
         // The MAF path needs both the model client and an artifact reader to run read→validate→approval.
-        _useMafRuntime    = useMafRuntime && chatClient is not null && artifactReader is not null;
+        _useMafRuntime     = useMafRuntime && chatClient is not null && artifactReader is not null;
+        _checkpointManager = checkpointManager;
     }
 
     // ── Public API ─────────────────────────────────────────────────────────────
@@ -248,7 +254,7 @@ public sealed class PhaseHandlerOrchestrator
 
         var workflow = MafPhaseHandlerWorkflowFactory.Build(_chatClient!, services);
         var outcome = await MafWorkflowExecution.RunAsync<PhaseHandlerState, PhaseHandlerState>(
-            workflow, run.State, run.RunId, CancellationToken.None);
+            workflow, run.State, run.RunId, CancellationToken.None, _checkpointManager);
 
         if (outcome.Suspended)
         {

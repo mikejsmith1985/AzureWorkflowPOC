@@ -112,6 +112,15 @@ stateless (state flows in messages), the framework's automatic checkpoint captur
 `OnCheckpointingAsync`. Index ordering is done client-side (SQLite cannot `ORDER BY` a `DateTimeOffset`).
 Still off-production; the startup rehydration wiring (T032) and SK-paused-run migration (T033) follow.
 
+**Checkpointing wired live (T032).** `MafWorkflowSession` now threads a `CheckpointManager` — when one is
+supplied the run is checkpointed at every super-step — and exposes `ResumeAsync(workflow, checkpoint, manager)`
+as the restart-recovery entry point. Both migrated orchestrators accept and pass the manager, and `Program.cs`
+registers `EfCheckpointStore` + `CheckpointManager.CreateJson(...)`. A test drives a not-ready ticket through
+the intake orchestrator (with checkpointing) to its clarification suspension and asserts durable checkpoints
+were persisted for the run's session — so a paused run is now recoverable. The startup hosted-service that
+iterates paused runs and resumes them on boot is the remaining piece (the visual `WorkflowRunRehydrationService`
+waits on the visual-orchestrator migration). Still `Maf:Enabled`-gated / off-production.
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly

@@ -34,12 +34,33 @@ public sealed class MafWorkflowSession<TOutput>
 
     private MafWorkflowSession(StreamingRun run) => _run = run;
 
-    /// <summary>Starts the workflow under the run's id (the session id, so US2 resume can key on it).</summary>
+    /// <summary>The most recent checkpoint written for this run, or null when checkpointing is disabled.</summary>
+    public CheckpointInfo? LastCheckpoint => _run.IsCheckpointingEnabled ? _run.LastCheckpoint : null;
+
+    /// <summary>
+    /// Starts the workflow under the run's id (the session id, so resume/checkpoints key on it). When a
+    /// <paramref name="checkpointManager"/> is supplied, the run is checkpointed at every super-step so it
+    /// can be resumed after a restart (spec-019 T030–T032); without one it runs in-process only.
+    /// </summary>
     public static async Task<MafWorkflowSession<TOutput>> StartAsync<TInput>(
-        Workflow workflow, TInput input, string runId, CancellationToken cancellationToken)
+        Workflow workflow, TInput input, string runId, CheckpointManager? checkpointManager, CancellationToken cancellationToken)
         where TInput : notnull
     {
-        var run = await InProcessExecution.RunStreamingAsync(workflow, input, runId, cancellationToken);
+        var run = checkpointManager is null
+            ? await InProcessExecution.RunStreamingAsync(workflow, input, runId, cancellationToken)
+            : await InProcessExecution.RunStreamingAsync(workflow, input, checkpointManager, runId, cancellationToken);
+        return new MafWorkflowSession<TOutput>(run);
+    }
+
+    /// <summary>
+    /// Resumes a checkpointed run from <paramref name="checkpoint"/> using a fresh <paramref name="workflow"/>
+    /// instance — the restart-recovery entry point (spec-019 T032). The resumed run re-emits any outstanding
+    /// human request, which the orchestrator then drives as usual.
+    /// </summary>
+    public static async Task<MafWorkflowSession<TOutput>> ResumeAsync(
+        Workflow workflow, CheckpointInfo checkpoint, CheckpointManager checkpointManager, CancellationToken cancellationToken)
+    {
+        var run = await InProcessExecution.ResumeStreamingAsync(workflow, checkpoint, checkpointManager, cancellationToken);
         return new MafWorkflowSession<TOutput>(run);
     }
 
@@ -96,10 +117,11 @@ public static class MafWorkflowExecution
 {
     /// <summary>Starts <paramref name="workflow"/> and drives it to its first completion or suspension.</summary>
     public static async Task<MafSegmentOutcome<TOutput>> RunAsync<TInput, TOutput>(
-        Workflow workflow, TInput input, string runId, CancellationToken cancellationToken)
+        Workflow workflow, TInput input, string runId, CancellationToken cancellationToken,
+        CheckpointManager? checkpointManager = null)
         where TInput : notnull
     {
-        var session = await MafWorkflowSession<TOutput>.StartAsync(workflow, input, runId, cancellationToken);
+        var session = await MafWorkflowSession<TOutput>.StartAsync(workflow, input, runId, checkpointManager, cancellationToken);
         return await session.DriveAsync(cancellationToken);
     }
 }
