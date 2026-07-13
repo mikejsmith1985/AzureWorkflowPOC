@@ -41,24 +41,30 @@ public sealed class MafWorkflowRuntimeFactory
         var nodesWithOutgoingEdges = workflow.Edges.Select(edge => edge.SourceNodeId).ToHashSet(StringComparer.Ordinal);
         bool IsTerminal(string nodeId) => !nodesWithOutgoingEdges.Contains(nodeId);
 
-        // One executor per node, keyed by node id so the edge pass can look sources/targets up directly.
+        // One executor per node, keyed by node id so the edge pass can look sources/targets up directly. A
+        // HumanApproval node maps to a RequestPort (it suspends for review); the rest map to executors.
         var bindingByNodeId = new Dictionary<string, ExecutorBinding>(workflow.Nodes.Count, StringComparer.Ordinal);
         foreach (var node in workflow.Nodes)
         {
             var config = BuildNodeConfig(node);
-            Executor executor = node.NodeType switch
+            bindingByNodeId[node.Id] = node.NodeType switch
             {
+                WorkflowNodeType.AgenticReason => new AgenticNodeExecutor(
+                    node.Id, chatClient, config, IsTerminal(node.Id)).BindExecutor(),
                 WorkflowNodeType.FunctionRoute => new FunctionRouteExecutor(
-                    node.Id, chatClient, config.OutputPortLabels, BuildRouteTargets(node, workflow)),
+                    node.Id, chatClient, config.OutputPortLabels, BuildRouteTargets(node, workflow)).BindExecutor(),
+                WorkflowNodeType.FunctionTransform => new FunctionTransformExecutor(
+                    node.Id, config, IsTerminal(node.Id)).BindExecutor(),
                 WorkflowNodeType.FunctionNotify => new FunctionNotifyExecutor(
-                    node.Id, config, IsTerminal(node.Id), connectorRepository),
+                    node.Id, config, IsTerminal(node.Id), connectorRepository).BindExecutor(),
+                WorkflowNodeType.FunctionData => new FunctionDataExecutor(
+                    node.Id, config, IsTerminal(node.Id), connectorRepository).BindExecutor(),
+                WorkflowNodeType.HumanApproval => RequestPort
+                    .Create<WorkflowStepData, WorkflowStepData>(node.Id).BindAsExecutor(allowWrappedRequests: false),
 
-                // Remaining node executors (AgenticReason, FunctionTransform, FunctionData, HumanApproval)
-                // are the rest of T018; the route/notify pair is what the T016 parity test exercises.
-                _ => throw new NotImplementedException(
-                    $"Executor for node type '{node.NodeType}' is pending spec-019 T018."),
+                _ => throw new InvalidOperationException(
+                    $"Node '{node.Id}' has unsupported NodeType '{node.NodeType}' for the MAF runtime."),
             };
-            bindingByNodeId[node.Id] = executor.BindExecutor();
         }
 
         // The first node is the entry point (parity with the SK builder).
@@ -69,9 +75,10 @@ public sealed class MafWorkflowRuntimeFactory
             builder.AddEdge(bindingByNodeId[edge.SourceNodeId], bindingByNodeId[edge.TargetNodeId]);
         }
 
-        // Terminal nodes yield the workflow output.
+        // Terminal executor nodes yield the workflow output. A terminal HumanApproval node is a RequestPort
+        // (it suspends rather than yielding), so it is not declared as an output.
         var terminalBindings = workflow.Nodes
-            .Where(node => IsTerminal(node.Id))
+            .Where(node => IsTerminal(node.Id) && node.NodeType != WorkflowNodeType.HumanApproval)
             .Select(node => bindingByNodeId[node.Id])
             .ToArray();
         if (terminalBindings.Length > 0)

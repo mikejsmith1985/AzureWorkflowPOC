@@ -67,4 +67,45 @@ public sealed class WorkflowRuntimeParityTests
         // The route node's port labels are captured for decision validation (parity with the SK builder).
         Assert.Equal(new[] { "approve", "reject" }, factory.PortLabelsByNodeId[router.Id]);
     }
+
+    // spec-019 T018: a chain of the remaining node types (Agentic → Transform → Data → Notify) runs to
+    // completion on MAF — one executor per node, the terminal node yielding the run's output.
+    [Fact]
+    public async Task NodeChain_AgenticTransformDataNotify_RunsToCompletion()
+    {
+        var agentic = WorkflowNode.CreateNew(WorkflowNodeType.AgenticReason, "Reason") with { GoalPrompt = "Summarise.", IsConfigured = true };
+        var transform = WorkflowNode.CreateNew(WorkflowNodeType.FunctionTransform, "Reshape") with { IsConfigured = true };
+        var data = WorkflowNode.CreateNew(WorkflowNodeType.FunctionData, "Store") with { IsConfigured = true };
+        var notify = WorkflowNode.CreateNew(WorkflowNodeType.FunctionNotify, "Notify") with { IsConfigured = true };
+
+        var edges = new[]
+        {
+            WorkflowEdge.CreateNew(agentic.Id, "out", transform.Id, "in", "e1"),
+            WorkflowEdge.CreateNew(transform.Id, "out", data.Id, "in", "e2"),
+            WorkflowEdge.CreateNew(data.Id, "out", notify.Id, "in", "e3"),
+        };
+
+        var definition = new WorkflowDefinition
+        {
+            Id = Guid.NewGuid(),
+            Name = "Node Chain",
+            OwnerId = "owner1",
+            Nodes = new[] { agentic, transform, data, notify }.ToList().AsReadOnly(),
+            Edges = edges.ToList().AsReadOnly(),
+            Settings = new WorkflowSettings(),
+            ChatHistory = Array.Empty<WorkflowChatMessage>(),
+            CreatedAt = DateTimeOffset.UtcNow,
+            LastModifiedAt = DateTimeOffset.UtcNow,
+        };
+
+        // The single model call is the agentic node; the other nodes are deterministic pass-throughs.
+        var chatClient = new RecordedChatClient(RecordedTurn.With("a concise summary", inputTokens: 20, outputTokens: 6));
+        var seed = new WorkflowStepData { RunId = "run-2", NodeId = agentic.Id, InputPayload = "raw input" };
+
+        var workflow = new MafWorkflowRuntimeFactory().Build(definition, chatClient);
+        var observation = await MafWorkflowRunner.RunAsync(workflow, seed);
+
+        Assert.Equal(new[] { agentic.Id, transform.Id, data.Id, notify.Id }, observation.ExecutorSequence);
+        Assert.Single(observation.Outputs); // the terminal notify node yielded the run output
+    }
 }
