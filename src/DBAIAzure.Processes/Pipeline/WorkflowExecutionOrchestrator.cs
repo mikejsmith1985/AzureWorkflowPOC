@@ -338,34 +338,12 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
 
             if (segment.Suspended)
             {
-                // A HumanApproval node paused the run for review; approval-resume is US2 (visual surface).
-                runState.Run = runState.Run with { Status = WorkflowRunStatus.Paused };
-                PersistRunState(runState);
-                FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
-                BroadcastRunStatus(runId, WorkflowRunStatus.Paused);
+                // A HumanApproval node paused the run for review; await the decision and resume the workflow.
+                await AwaitApprovalAndResumeAsync(runState, session, segment.PendingRequest!);
                 return;
             }
 
-            var completedAt = DateTimeOffset.UtcNow;
-            var completedNodeStates = runState.Run.NodeStates
-                .Select(nodeState => nodeState with
-                {
-                    Status = NodeStatus.Completed,
-                    StartedAt = nodeState.StartedAt ?? runState.Run.StartedAt,
-                    CompletedAt = nodeState.CompletedAt ?? completedAt,
-                })
-                .ToList()
-                .AsReadOnly();
-
-            runState.Run = runState.Run with
-            {
-                Status = WorkflowRunStatus.Completed,
-                NodeStates = completedNodeStates,
-                CompletedAt = completedAt,
-            };
-            PersistRunState(runState);
-            BroadcastRunStatus(runId, WorkflowRunStatus.Completed);
-            FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+            MarkRunCompleted(runState);
         }
         catch (Exception ex)
         {
@@ -379,6 +357,86 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
             BroadcastRunStatus(runId, WorkflowRunStatus.Failed);
             FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
         }
+    }
+
+    /// <summary>
+    /// Suspends the run at a HumanApproval gate, awaits the reviewer's decision (via
+    /// <see cref="SubmitApproval"/> or the auto-reject watchdog), then resumes the MAF session by responding
+    /// to the approval <see cref="RequestPort"/> with the decided payload and drives the workflow to
+    /// completion (spec-019 T027, visual surface). Parity with the SK path: the workflow continues after the
+    /// gate carrying <see cref="WorkflowStepData.IsApproved"/>, whatever the decision. A second downstream gate
+    /// is handled by re-entering this method with a fresh approval gate.
+    /// </summary>
+    private async Task AwaitApprovalAndResumeAsync(
+        WorkflowRunState runState, MafWorkflowSession<WorkflowStepData> session, RequestInfoEvent pendingRequest)
+    {
+        var runId = runState.Run.RunId;
+
+        // Arm a fresh approval gate for this suspension so a downstream gate does not reuse a resolved one.
+        var suspendedAt = DateTimeOffset.UtcNow;
+        var approvalTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        runState.ApprovalTcs = approvalTcs;
+        runState.SuspendedAt = suspendedAt;
+        runState.Run = runState.Run with { Status = WorkflowRunStatus.Paused };
+        PersistRunState(runState);
+        FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+        BroadcastRunStatus(runId, WorkflowRunStatus.Paused);
+
+        // Auto-reject if no decision arrives within the approval timeout (parity with the SK watchdog; T029).
+        ScheduleEscalationTimeout(runId, approvalTcs, suspendedAt);
+
+        var approved = await approvalTcs.Task.ConfigureAwait(false);
+
+        // Resume: respond to the approval port with the decided payload; the workflow continues to completion.
+        runState.ResumedAt = DateTimeOffset.UtcNow;
+        runState.Run = runState.Run with { Status = WorkflowRunStatus.Running };
+        PersistRunState(runState);
+        FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+        BroadcastRunStatus(runId, WorkflowRunStatus.Running);
+
+        var pausedData = ExtractStepData(pendingRequest, runId);
+        await session.RespondAsync(pendingRequest.Request, pausedData with { IsApproved = approved }, CancellationToken.None);
+
+        var finalSegment = await session.DriveAsync(CancellationToken.None);
+        if (finalSegment.Suspended)
+        {
+            // Another approval gate downstream — handle it with a fresh gate.
+            await AwaitApprovalAndResumeAsync(runState, session, finalSegment.PendingRequest!);
+            return;
+        }
+
+        MarkRunCompleted(runState);
+    }
+
+    /// <summary>Reads the paused <see cref="WorkflowStepData"/> from the request, or a minimal fallback.</summary>
+    private static WorkflowStepData ExtractStepData(RequestInfoEvent pendingRequest, string runId) =>
+        pendingRequest.Request.TryGetDataAs<WorkflowStepData>(out var data) && data is not null
+            ? data
+            : new WorkflowStepData { RunId = runId, NodeId = string.Empty };
+
+    /// <summary>Marks every node Completed and the run Completed, then persists and notifies.</summary>
+    private void MarkRunCompleted(WorkflowRunState runState)
+    {
+        var completedAt = DateTimeOffset.UtcNow;
+        var completedNodeStates = runState.Run.NodeStates
+            .Select(nodeState => nodeState with
+            {
+                Status = NodeStatus.Completed,
+                StartedAt = nodeState.StartedAt ?? runState.Run.StartedAt,
+                CompletedAt = nodeState.CompletedAt ?? completedAt,
+            })
+            .ToList()
+            .AsReadOnly();
+
+        runState.Run = runState.Run with
+        {
+            Status = WorkflowRunStatus.Completed,
+            NodeStates = completedNodeStates,
+            CompletedAt = completedAt,
+        };
+        PersistRunState(runState);
+        BroadcastRunStatus(runState.Run.RunId, WorkflowRunStatus.Completed);
+        FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
     }
 
     private async Task ExecuteRunAsync(

@@ -223,6 +223,17 @@ write occurs before an approved decision (FR-006). `PhaseHandlerMafResumeTests` 
 reject→no-write; the 5 existing SK `CreateWorkItemStepTests` still pass unchanged, confirming the extraction
 preserved behaviour. Remaining: the visual approval resume and phase-handler rehydration on restart.
 
+**Visual approval resume on MAF (US2 T024/T027).** The visual workflow builder's HumanApproval gate now
+suspends and resumes on MAF: `WorkflowExecutionOrchestrator.AwaitApprovalAndResumeAsync` parks the run as
+`Paused` at the approval `RequestPort`, arms the run's existing `ApprovalTcs` and the 24-hour auto-reject
+watchdog, and on `SubmitApproval` responds to the port with the decided `WorkflowStepData` (`IsApproved` set)
+and drives the session to `Completed` — recursing if a second approval gate lies downstream. Parity with the
+SK gate, which continues past the gate carrying the decision whatever it is (the port, like the SK builder's
+edge, forwards unconditionally). `VisualOrchestratorApprovalResumeTests` proves pause→approve→complete and
+pause→reject→complete. **With this, all three HITL surfaces (intake clarification, phase-handler approval,
+visual approval) suspend and resume on MAF Workflows.** Remaining: phase-handler/visual rehydration across an
+app restart, and the polish/atomic-cutover tasks.
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly
