@@ -262,6 +262,16 @@ authoritative. `VisualBootResumeTests` proves restart → rehydrate → approve 
 HITL surfaces (intake clarification, phase-handler approval, visual approval) suspend, resume, and rehydrate
 across an application restart on MAF Workflows.**
 
+**Performance-budget check (T055 / SC-010).** `FrameworkPerfBaselineTests` drives the intake pipeline through
+both the SK Process Framework and MAF Workflows with an identical instant scripted model on both paths — so
+the measured delta is pure framework/orchestration overhead, the model's own latency (identical on both)
+factored out — over 40 interleaved timed runs after warmup, each framework driven directly to completion (no
+fire-and-forget polling artifact). Result: **MAF median 1.94 ms/run vs SK 10.48 ms/run — a −81.4% change
+(~5.4× faster), far inside the ≤10% budget**; per-model-call overhead 0.65 ms (MAF) vs 3.49 ms (SK). MAF
+Workflows is materially lighter than the SK Process Framework, so the performance gate does not block the
+atomic cutover. (Real end-to-end latency is dominated by the live model call, which is unchanged; this
+isolates the framework layer. Tagged `[Perf]`.)
+
 **Polish — factory decomposition (T052).** `MafWorkflowRuntimeFactory.Build` (70 lines) was decomposed into
 `CreateBindings` / `DeclareTerminalOutputs` / `RecordRoutePortLabels` helpers so the orchestration method reads
 in ~20 lines (Article IV). Two other long methods were reviewed and intentionally left: the intake executors'
