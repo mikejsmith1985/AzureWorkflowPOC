@@ -31,11 +31,19 @@ public sealed class EfCheckpointStore : JsonCheckpointStore
         var checkpointId = Guid.NewGuid().ToString("N");
 
         await using var db = await _contextFactory.CreateDbContextAsync();
+
+        // Assign the next per-session sequence so the latest checkpoint is unambiguous (runs are sequential
+        // per session, so a plain max+1 is safe).
+        var nextSequence = (await db.WorkflowCheckpoints
+            .Where(c => c.SessionId == sessionId)
+            .MaxAsync(c => (long?)c.Sequence) ?? 0) + 1;
+
         db.WorkflowCheckpoints.Add(new WorkflowCheckpointEntity
         {
             SessionId = sessionId,
             CheckpointId = checkpointId,
             ParentCheckpointId = parent?.CheckpointId,
+            Sequence = nextSequence,
             Payload = value.GetRawText(),
             CreatedAt = DateTimeOffset.UtcNow,
         });
@@ -59,6 +67,24 @@ public sealed class EfCheckpointStore : JsonCheckpointStore
         return document.RootElement.Clone();
     }
 
+    /// <summary>
+    /// Returns the most recently written checkpoint for a session (its resume point), or null when the
+    /// session has none. Used by the startup rehydration service to resume a paused run after a restart.
+    /// </summary>
+    public async Task<CheckpointInfo?> GetLatestCheckpointAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var latest = await db.WorkflowCheckpoints
+            .AsNoTracking()
+            .Where(c => c.SessionId == sessionId)
+            .OrderByDescending(c => c.Sequence)
+            .Select(c => c.CheckpointId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return latest is null ? null : new CheckpointInfo(sessionId, latest);
+    }
+
     /// <inheritdoc />
     public override async ValueTask<IEnumerable<CheckpointInfo>> RetrieveIndexAsync(
         string sessionId, CheckpointInfo? withParent = null)
@@ -70,12 +96,11 @@ public sealed class EfCheckpointStore : JsonCheckpointStore
             ? query.Where(c => c.ParentCheckpointId == null)
             : query.Where(c => c.ParentCheckpointId == withParent.CheckpointId);
 
-        // Order client-side: SQLite cannot ORDER BY a DateTimeOffset, and the row count per parent is small.
-        var rows = await query.Select(c => new { c.CheckpointId, c.CreatedAt }).ToListAsync();
+        var checkpointIds = await query
+            .OrderBy(c => c.Sequence)
+            .Select(c => c.CheckpointId)
+            .ToListAsync();
 
-        return rows
-            .OrderBy(row => row.CreatedAt)
-            .Select(row => new CheckpointInfo(sessionId, row.CheckpointId))
-            .ToList();
+        return checkpointIds.Select(id => new CheckpointInfo(sessionId, id)).ToList();
     }
 }

@@ -131,6 +131,16 @@ for the intake surface: convert → idempotent skip → resume from the checkpoi
 clarification request → answer → complete through the real validation loop. Remaining: the deploy-time startup
 hook that enumerates SK-paused records, and the phase-handler resume-seed (needs its create-on-approval downstream).
 
+**Boot-resume for intake (T032 complete).** `PipelineOrchestrator.RehydratePausedRun(pausedTicket, checkpoint)`
+rebuilds a run in memory, resumes its MAF workflow from the checkpoint (found via
+`EfCheckpointStore.GetLatestCheckpointAsync`, now ordered by a monotonic per-session `Sequence` column —
+`CreatedAt` ties were selecting the wrong checkpoint), and re-enters the clarification loop so a PO answer
+submitted *after* a restart drives it to completion. `BootResumeTests` proves it end-to-end: one orchestrator
+runs to the clarification gate and "crashes", a **fresh orchestrator with empty memory** rehydrates the run
+from its checkpoint over the same database and completes it on the answer. Fixed an arming race — pre-setting
+`AwaitingHuman` before the drive loop armed the HITL gate let an answer be lost. The hosted startup service
+that enumerates paused records and the phase-handler/visual rehydration remain.
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly

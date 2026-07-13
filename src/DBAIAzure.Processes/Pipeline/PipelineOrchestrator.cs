@@ -245,17 +245,74 @@ public sealed class PipelineOrchestrator
     /// </summary>
     private async Task ExecuteViaMafAsync(PipelineRun run, TicketState initialTicket)
     {
-        void NotifyUpdated() => RunUpdated?.Invoke(run.RunId);
-
         // Cost/telemetry capture keys on the ambient run id (read by CostCapturingChatClient).
         LlmRunContext.CurrentRunId.Value = run.RunId;
 
-        var reporter = new BoundProgressReporter(run, NotifyUpdated, _repository);
+        var reporter = new BoundProgressReporter(run, () => RunUpdated?.Invoke(run.RunId), _repository);
         var services = new MafExecutorServices().Add<IProgressReporter>(reporter);
         var workflow = MafIntakeWorkflowFactory.Build(_chatClient!, services);
 
         var session = await MafWorkflowSession<TicketState>.StartAsync(
             workflow, initialTicket, run.RunId, _checkpointManager, CancellationToken.None);
+
+        await DriveMafSessionAsync(run, session, initialTicket, reporter);
+    }
+
+    /// <summary>
+    /// Rehydrates a run paused before an application restart (spec-019 T032): rebuilds the run in memory,
+    /// resumes its MAF workflow from <paramref name="checkpoint"/>, and re-enters the clarification loop so a
+    /// PO answer submitted after the restart drives it to completion. No-op unless the MAF runtime is on.
+    /// </summary>
+    public void RehydratePausedRun(TicketState pausedTicket, CheckpointInfo checkpoint)
+    {
+        if (!_useMafRuntime || _checkpointManager is null)
+        {
+            return;
+        }
+
+        var runId = checkpoint.SessionId;
+        var run = new PipelineRun(runId, pausedTicket);
+        run.SetRunning();
+        _runs[runId] = run;
+
+        // The drive loop sets AwaitingHuman and arms the HITL gate once the resumed run re-emits its request,
+        // so a caller must observe AwaitingHuman (set there) before submitting an answer — the same timing as
+        // a fresh run. Pre-setting it here would let an answer race in before the gate is armed and be lost.
+        _ = Task.Run(() => RehydrateAndDriveAsync(run, pausedTicket, checkpoint));
+    }
+
+    private async Task RehydrateAndDriveAsync(PipelineRun run, TicketState pausedTicket, CheckpointInfo checkpoint)
+    {
+        try
+        {
+            LlmRunContext.CurrentRunId.Value = run.RunId;
+
+            var reporter = new BoundProgressReporter(run, () => RunUpdated?.Invoke(run.RunId), _repository);
+            var services = new MafExecutorServices().Add<IProgressReporter>(reporter);
+
+            // A live paused run was checkpointed with the normal Build graph — resume with the same graph.
+            var workflow = MafIntakeWorkflowFactory.Build(_chatClient!, services);
+            var session = await MafWorkflowSession<TicketState>.ResumeAsync(
+                workflow, checkpoint, _checkpointManager!, CancellationToken.None);
+
+            await DriveMafSessionAsync(run, session, pausedTicket, reporter);
+        }
+        catch (Exception ex)
+        {
+            run.SetFailed(ex.Message);
+            await _repository.UpsertRunAsync(run.RunId, run.CurrentTicket ?? pausedTicket, PipelineRunStatus.Failed);
+            RunUpdated?.Invoke(run.RunId);
+        }
+    }
+
+    /// <summary>
+    /// Drives a started/resumed MAF session's clarification loop: on each suspension surface the paused
+    /// ticket and await the PO's answer, apply it, and resume validation until the run completes.
+    /// </summary>
+    private async Task DriveMafSessionAsync(
+        PipelineRun run, MafWorkflowSession<TicketState> session, TicketState fallbackTicket, BoundProgressReporter reporter)
+    {
+        void NotifyUpdated() => RunUpdated?.Invoke(run.RunId);
 
         while (true)
         {
@@ -263,7 +320,7 @@ public sealed class PipelineOrchestrator
 
             if (!segment.Suspended)
             {
-                var finalTicket = segment.Output ?? reporter.FinalTicket ?? initialTicket;
+                var finalTicket = segment.Output ?? reporter.FinalTicket ?? fallbackTicket;
                 run.SetComplete(finalTicket);
                 await _repository.UpsertRunAsync(run.RunId, finalTicket, run.Status);
                 NotifyUpdated();
@@ -272,7 +329,7 @@ public sealed class PipelineOrchestrator
 
             // Suspended at the clarification gate: surface the paused ticket (with its questions), notify,
             // and await the PO's answer.
-            var pausedTicket = ExtractPausedTicket(segment.PendingRequest!, reporter.FinalTicket ?? initialTicket);
+            var pausedTicket = ExtractPausedTicket(segment.PendingRequest!, reporter.FinalTicket ?? fallbackTicket);
             run.SetAwaitingHuman(pausedTicket);
             await _repository.UpsertRunAsync(run.RunId, pausedTicket, PipelineRunStatus.AwaitingHuman);
             NotifyUpdated();

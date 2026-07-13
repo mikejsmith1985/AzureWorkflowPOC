@@ -18,6 +18,10 @@ public sealed class WorkflowCheckpointEntity
     /// <summary>The parent checkpoint's id, or null for a root checkpoint.</summary>
     public string? ParentCheckpointId { get; set; }
 
+    /// <summary>Monotonic per-session creation order — reliably identifies the latest (resume) checkpoint
+    /// even when several are written within the same clock tick (unlike <see cref="CreatedAt"/>).</summary>
+    public long Sequence { get; set; }
+
     /// <summary>The framework's opaque JSON snapshot (a serialized <c>JsonElement</c>).</summary>
     public string Payload { get; set; } = string.Empty;
 

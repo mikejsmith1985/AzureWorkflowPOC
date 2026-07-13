@@ -171,8 +171,9 @@ public class PipelineDbContext : DbContext
             entity.ToTable("WorkflowCheckpoints");
             // A checkpoint is uniquely identified by its session + id within the checkpoint tree.
             entity.HasKey(e => new { e.SessionId, e.CheckpointId });
-            // The index query fetches a session's checkpoints filtered by parent, in write order.
+            // Indexes: fetch a session's checkpoints filtered by parent, and find the latest by sequence.
             entity.HasIndex(e => new { e.SessionId, e.ParentCheckpointId });
+            entity.HasIndex(e => new { e.SessionId, e.Sequence });
         });
     }
 }
