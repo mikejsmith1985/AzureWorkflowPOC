@@ -43,7 +43,7 @@ public sealed class IntakeExecutor : Executor<TicketState>
             Original description: {{ticket.Description}}
             """;
 
-        var resultText = await ExecutorLlm.CompleteAsync(_chatClient, prompt, cancellationToken);
+        var resultText = await ExecutorLlm.CompleteStreamingAsync(_chatClient, prompt, "Intake", _reporter, cancellationToken);
         var json = ExecutorLlm.StripCodeFences(resultText);
 
         NormalizedTicket? normalized = null;

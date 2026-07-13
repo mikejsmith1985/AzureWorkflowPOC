@@ -64,7 +64,7 @@ public sealed class EstimationExecutor : Executor<TicketState>
             Ticket description: {{ticket.Description}}{{clarification}}
             """;
 
-        var resultText = await ExecutorLlm.CompleteAsync(_chatClient, prompt, cancellationToken);
+        var resultText = await ExecutorLlm.CompleteStreamingAsync(_chatClient, prompt, "Estimation", _reporter, cancellationToken);
         var json = ExecutorLlm.StripCodeFences(resultText);
 
         var result = JsonSerializer.Deserialize<EstimationResult>(json, JsonOptions)

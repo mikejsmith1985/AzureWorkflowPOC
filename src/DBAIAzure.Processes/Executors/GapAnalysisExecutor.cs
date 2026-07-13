@@ -46,7 +46,7 @@ public sealed class GapAnalysisExecutor : Executor<TicketState>
             Ticket description: {ticket.Description}
             """;
 
-        var resultText = await ExecutorLlm.CompleteAsync(_chatClient, prompt, cancellationToken);
+        var resultText = await ExecutorLlm.CompleteStreamingAsync(_chatClient, prompt, "GapAnalysis", _reporter, cancellationToken);
         var json = ExecutorLlm.StripCodeFences(resultText);
 
         var questions = JsonSerializer.Deserialize<List<string>>(json) ?? [];

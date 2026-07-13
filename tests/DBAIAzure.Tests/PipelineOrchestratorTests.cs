@@ -123,6 +123,37 @@ public class PipelineOrchestratorTests
         Assert.False(string.IsNullOrEmpty(completed.CurrentTicket?.JiraIssueUrl)); // ran through to Action
     }
 
+    // spec-019 T037/T038: the MAF LLM executors stream their model output token-by-token through the
+    // run-bound reporter, so the Run Detail Stream tab (which renders PipelineRun.TokenStream) shows live
+    // tokens — parity with the SK steps that streamed via GetStreamingChatMessageContentsAsync.
+    [Fact]
+    public async Task MafRuntime_ReadyTicket_StreamsTokensToRunTokenStream()
+    {
+        var chatClient = new RecordedChatClient(new[]
+        {
+            RecordedTurn.With("{\"title\":\"Sample\",\"description\":\"Sample description.\"}", 40, 12),
+            RecordedTurn.With("{\"is_ready\":true,\"missing_fields\":[],\"reasoning\":\"clear\"}", 30, 8),
+            RecordedTurn.With("{\"points\":5,\"reasoning\":\"comparable to the CRUD anchor\"}", 25, 8),
+        }, repeatLast: true);
+
+        var orchestrator = new PipelineOrchestrator(StubKernel, chatClient: chatClient, useMafRuntime: true);
+        var runId = orchestrator.StartRun(SampleTicket);
+        var run = await WaitForCompletionAsync(orchestrator, runId);
+
+        Assert.Equal(PipelineRunStatus.Complete, run.Status);
+
+        var tokens = run.TokenStream.ToList();
+        Assert.NotEmpty(tokens);                                // the Stream tab has content to render
+        Assert.Contains(tokens, token => token.StepName == "Intake"); // the intake executor streamed
+
+        // The streamed chunks for a step reconstruct that step's model text (token-level parity).
+        var intakeText = string.Concat(tokens.Where(token => token.StepName == "Intake").Select(token => token.Token));
+        Assert.Contains("Sample", intakeText);
+
+        // The executors used the streaming request path, not a single-shot completion.
+        Assert.Contains(chatClient.Requests, request => request.IsStreaming);
+    }
+
     /// <summary>Polls the fire-and-forget run until it reaches the target status, or fails after a timeout.</summary>
     private static async Task<PipelineRun> WaitForStatusAsync(
         PipelineOrchestrator orchestrator, string runId, PipelineRunStatus target)

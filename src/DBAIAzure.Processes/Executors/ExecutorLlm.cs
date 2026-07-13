@@ -1,5 +1,7 @@
 // Shared LLM helpers for the MAF executors (spec-019 US1): a single-turn completion through the
 // provider-neutral IChatClient and the code-fence stripping the pipeline has always applied to model JSON.
+using System.Text;
+using DBAIAzure.Core.Models;
 using Microsoft.Extensions.AI;
 
 namespace DBAIAzure.Processes.Executors;
@@ -18,8 +20,40 @@ internal static class ExecutorLlm
     public static async Task<string> CompleteAsync(IChatClient chatClient, string prompt, CancellationToken cancellationToken)
     {
         var response = await chatClient.GetResponseAsync(
-            new[] { new ChatMessage(ChatRole.User, prompt) }, options: null, cancellationToken);
+            new[] { new ChatMessage(Microsoft.Extensions.AI.ChatRole.User, prompt) }, options: null, cancellationToken);
         return (response.Text ?? string.Empty).Trim();
+    }
+
+    /// <summary>
+    /// Streams a single user-turn prompt, forwarding each text chunk to <paramref name="reporter"/> as it
+    /// arrives, and returns the trimmed full assistant text. This is the token-level streaming parity for the
+    /// intake steps that streamed via SK's <c>GetStreamingChatMessageContentsAsync</c> (spec-019 T038): the
+    /// run-bound reporter feeds <c>PipelineRun.TokenStream</c>, which the Run Detail Stream tab renders live.
+    /// The final usage-only update carries no text and is skipped; cost capture still reads it in the
+    /// delegating client. Falls back to no per-token reporting when <paramref name="reporter"/> is null.
+    /// </summary>
+    public static async Task<string> CompleteStreamingAsync(
+        IChatClient chatClient,
+        string prompt,
+        string stepName,
+        IProgressReporter? reporter,
+        CancellationToken cancellationToken)
+    {
+        var accumulated = new StringBuilder();
+        await foreach (var update in chatClient.GetStreamingResponseAsync(
+            new[] { new ChatMessage(Microsoft.Extensions.AI.ChatRole.User, prompt) }, options: null, cancellationToken))
+        {
+            var chunk = update.Text;
+            if (string.IsNullOrEmpty(chunk))
+            {
+                continue;
+            }
+
+            accumulated.Append(chunk);
+            reporter?.ReportToken(stepName, chunk);
+        }
+
+        return accumulated.ToString().Trim();
     }
 
     /// <summary>

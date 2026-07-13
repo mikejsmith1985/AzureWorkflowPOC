@@ -106,9 +106,9 @@ still mark which story each task serves.
 
 - [X] T035 [P] [US3] Cost/metering parity: `CostParityTests` pins a response's token usage and asserts `CostCapturingChatClient` captures the same input/output/cache tokens + model, so `ModelPricing.EstimateCostUsd` yields an identical cost (0% delta).
 - [X] T036 [P] [US3] Structured-output parity: `StructuredOutputParityTests` — `ChatClientStructuredCompletionService` binds `RouteDecision` and `PhaseValidationResult` to identical typed records.
-- [ ] T037 [P] [US3] FAILING bUnit/E2E test: Run Detail **Stream** tab shows live token streaming. *(UI/E2E — remaining US3 piece.)*
-- [~] T038 [US3] Streaming: `CostCapturingChatClient.GetStreamingResponseAsync` already captures usage from the final `UsageContent` update (built+tested in T010). **Pending:** driving the Run Detail Stream tab from the streaming path in `RunDetail.razor` + streaming service.
-- [X] T039 [US3] SC-005 gate: `ExecutionPathSkFreeTests` (reflection) asserts no MAF executor/factory depends on SK `IChatCompletionService` and the model executors inject `IChatClient`. *(T035/T036 green; T037 streaming-UI remains.)*
+- [X] T037 [P] [US3] `RunDetailStreamTabTests` (bUnit): a MAF intake run streams tokens into `PipelineRun.TokenStream`; rendering `RunDetail` and selecting the **Stream** tab shows the streamed tokens grouped by step. Paired with `PipelineOrchestratorTests.MafRuntime_ReadyTicket_StreamsTokensToRunTokenStream` (data-path proof, streaming request + token reconstruction).
+- [X] T038 [US3] Streaming: added `ExecutorLlm.CompleteStreamingAsync` (streams via `IChatClient.GetStreamingResponseAsync`, forwards each chunk to the run-bound `IProgressReporter.ReportToken` → `PipelineRun.TokenStream` → Run Detail Stream tab). The four intake LLM executors (Intake/Validation/GapAnalysis/Estimation) stream — parity with the SK steps that streamed via `GetStreamingChatMessageContentsAsync`; Route/Agentic stayed non-streaming (the SK steps did not report tokens). `CostCapturingChatClient.GetStreamingResponseAsync` still captures usage from the final `UsageContent` (T010) — cost parity holds under streaming.
+- [X] T039 [US3] SC-005 gate: `ExecutionPathSkFreeTests` (reflection) asserts no MAF executor/factory depends on SK `IChatCompletionService` and the model executors inject `IChatClient`.
 
 **Checkpoint**: metering is identical and provider-tagged; structured output + streaming preserved.
 

@@ -59,7 +59,7 @@ public sealed class ValidationExecutor : Executor<TicketState>
             Ticket description: {{ticket.Description}}{{clarification}}
             """;
 
-        var resultText = await ExecutorLlm.CompleteAsync(_chatClient, prompt, cancellationToken);
+        var resultText = await ExecutorLlm.CompleteStreamingAsync(_chatClient, prompt, "Validation", _reporter, cancellationToken);
         var json = ExecutorLlm.StripCodeFences(resultText);
 
         var verdict = JsonSerializer.Deserialize<DorVerdict>(json, JsonOptions)

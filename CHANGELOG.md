@@ -187,6 +187,26 @@ Runner's tracer provider registers the MAF/M.E.AI sources (`ChatClient` + `Agent
 the SK source is removed at the atomic cutover, and the Azure Monitor exporter is unchanged. A validation test
 uses an `ActivityListener` to confirm a model call emits an `Activity` from the registered source.
 
+**Visual orchestrator on MAF (T022 complete).** The third and last pipeline — the visual workflow builder's
+`WorkflowExecutionOrchestrator` — now runs on MAF Workflows behind `Maf:Enabled`. A persisted
+`WorkflowDefinition` is translated to a live MAF `Workflow` (`MafWorkflowRuntimeFactory`: Trigger →
+pass-through transform, Agentic/Route/Transform/Notify/Data → executors, HumanApproval → `RequestPort`) and
+driven to completion via `MafWorkflowSession`, with suspension mapped to `Paused`. The model client, flag,
+connector repository, and checkpoint manager are wired through DI in `Program.cs`. A test runs a
+Trigger→Agentic→Notify workflow end-to-end on MAF to `Completed`. **All three pipelines (intake,
+phase-handler, visual) now execute on MAF**; SK stays the default until atomic cutover.
+
+**US3 streaming UI — Run Detail Stream tab (T037/T038).** The MAF intake LLM executors now stream their model
+output. `ExecutorLlm.CompleteStreamingAsync` calls `IChatClient.GetStreamingResponseAsync` and forwards each
+text chunk to the run-bound `IProgressReporter.ReportToken`, which feeds `PipelineRun.TokenStream` — the exact
+source the Run Detail **Stream** tab already renders. The four steps that streamed under SK
+(Intake/Validation/GapAnalysis/Estimation) stream on MAF; Route/Agentic stay non-streaming (the SK steps did
+not report tokens to the UI). Cost capture is unaffected — `CostCapturingChatClient.GetStreamingResponseAsync`
+still reads usage from the final `UsageContent` update (0% delta preserved under streaming). Two tests cover
+it: an orchestrator-level proof that a MAF run enqueues streamed tokens via the streaming request path, and a
+`RunDetailStreamTabTests` bUnit render asserting the Stream tab shows the tokens grouped by step. This closes
+US3.
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly
