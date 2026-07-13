@@ -1,10 +1,32 @@
 // Hand-rolled fakes shared across the phase-handler unit tests (no I/O, no network).
+using System.Collections.Concurrent;
+using System.Linq;
+using System.Text.Json;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
 using DBAIAzure.Core.Models.WorkTracker;
-using System.Collections.Concurrent;
+using DBAIAzure.Tests.Parity;
 
 namespace DBAIAzure.Tests.Fakes;
+
+/// <summary>
+/// Builds a deterministic <see cref="RecordedChatClient"/> that replays a phase-validation result as the
+/// JSON the MAF <c>PhaseValidationExecutor</c> parses — the IChatClient-era replacement for handing the
+/// orchestrator a <c>FakeStructuredCompletionService</c>.
+/// </summary>
+public static class PhaseValidationChat
+{
+    /// <summary>A chat client whose every response is <paramref name="validation"/> serialised to JSON.</summary>
+    public static RecordedChatClient Returning(PhaseValidationResult validation)
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            summary = validation.Summary,
+            gaps = validation.Gaps.Select(gap => new { label = gap.Label, description = gap.Description }),
+        });
+        return new RecordedChatClient(new[] { RecordedTurn.With(json, inputTokens: 50, outputTokens: 20) }, repeatLast: true);
+    }
+}
 
 /// <summary>In-memory <see cref="IArtifactReader"/> returning canned artifacts per directory.</summary>
 public sealed class FakeArtifactReader : IArtifactReader

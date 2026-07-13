@@ -1,6 +1,5 @@
 // Defines the port model used to represent connection points on workflow nodes.
 
-#pragma warning disable SKEXP0080
 
 namespace DBAIAzure.Core.Models;
 

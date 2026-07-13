@@ -43,11 +43,9 @@ public sealed class PhaseHandlerParityTests
         var chatClient = new RecordedChatClient(
             RecordedTurn.With("{\"summary\":\"The spec is clear.\",\"gaps\":[]}", inputTokens: 50, outputTokens: 20));
 
-        var services = new ServiceCollection()
-            .AddSingleton<IArtifactReader>(new FakeArtifactReader())
-            .BuildServiceProvider();
-
-        var workflow = MafPhaseHandlerWorkflowFactory.Build(chatClient, services);
+        // Drives only to the approval suspension, so no board-write deps are needed (writerDeps: default).
+        var workflow = MafPhaseHandlerWorkflowFactory.Build(
+            chatClient, new FakeArtifactReader(), progressSink: null, bindingKeyMinter: null, default);
         var observation = await MafWorkflowRunner.RunAsync(workflow, SampleState);
 
         Assert.Equal(
@@ -69,8 +67,8 @@ public sealed class PhaseHandlerParityTests
     {
         var chatClient = new RecordedChatClient(
             RecordedTurn.With("{\"summary\":\"The spec is clear.\",\"gaps\":[]}", 50, 20));
-        var services = new MafExecutorServices().Add<IArtifactReader>(new FakeArtifactReader());
-        var workflow = MafPhaseHandlerWorkflowFactory.Build(chatClient, services);
+        var workflow = MafPhaseHandlerWorkflowFactory.Build(
+            chatClient, new FakeArtifactReader(), progressSink: null, bindingKeyMinter: null, default);
 
         var outcome = await Task.Run(() => MafWorkflowExecution.RunAsync<PhaseHandlerState, PhaseHandlerState>(
             workflow, SampleState, "bg-run", default))

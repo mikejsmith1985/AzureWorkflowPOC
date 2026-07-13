@@ -13,7 +13,6 @@ using Microsoft.Agents.AI.Workflows;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests.Checkpointing;
@@ -57,25 +56,13 @@ public sealed class PhaseHandlerBootResumeTests : IDisposable
     private PhaseHandlerOrchestrator NewOrchestrator(FakeBoardsClient boards, FakePhaseRunRepository repository)
     {
         var artifacts = new[] { new PhaseArtifact { FileName = "spec.md", Content = "x" } };
-        Func<IPhaseProgressSink, Kernel> kernelFactory = sink =>
-        {
-            var builder = Kernel.CreateBuilder();
-            builder.Services.AddSingleton<IArtifactReader>(new FakeArtifactReader(artifacts));
-            builder.Services.AddSingleton<IWorkTrackerAdapter>(WorkTrackerAdapters.AdoAdapterFor(boards));
-            builder.Services.AddSingleton<IPhaseRunRepository>(repository);
-            builder.Services.AddSingleton(sink);
-            return builder.Build();
-        };
-
         var chatClient = new RecordedChatClient(new[] { RecordedTurn.With(ValidationJson, 50, 20) }, repeatLast: true);
+        var writerDeps = new PhaseWorkItemWriterDeps(
+            Tracker: WorkTrackerAdapters.AdoAdapterFor(boards), Repository: repository);
 
         return new PhaseHandlerOrchestrator(
-            kernelFactory,
-            repository,
-            chatClient: chatClient,
-            artifactReader: new FakeArtifactReader(artifacts),
-            useMafRuntime: true,
-            checkpointManager: _checkpointManager);
+            chatClient, new FakeArtifactReader(artifacts), writerDeps,
+            repository, checkpointManager: _checkpointManager);
     }
 
     [Fact]

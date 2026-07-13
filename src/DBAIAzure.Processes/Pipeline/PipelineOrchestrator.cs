@@ -4,38 +4,27 @@ using DBAIAzure.Core.Models;
 using DBAIAzure.Processes.Pipeline.Maf;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
-using Microsoft.SemanticKernel;
 using System.Collections.Concurrent;
-
-// Suppress SKEXP0080 — SK Process Framework is experimental in 1.77.0
-#pragma warning disable SKEXP0080
 
 namespace DBAIAzure.Processes.Pipeline;
 
 /// <summary>
-/// Singleton service that owns all pipeline run lifecycles.
-/// Accepts a kernel factory so the web and runner layers can provide their own
-/// kernel configuration (Anthropic key, IProgressReporter registration) without
-/// coupling this class to any specific chat completion provider.
+/// Singleton service that owns all pipeline run lifecycles. Runs the ticket-intake pipeline on MAF
+/// Workflows; the provider-neutral <see cref="IChatClient"/> gives every LLM executor its model access
+/// without coupling this class to any specific chat completion provider.
 /// </summary>
 public sealed class PipelineOrchestrator
 {
-    private const int MaxClarificationRounds = 3;
-
-    private readonly Func<IProgressReporter, Kernel> _kernelFactory;
     private readonly IRunRepository _repository;
     private readonly IHitlNotifier? _hitlNotifier;
     private readonly string _portalBaseUrl;
     private readonly IConnectorHealthChecker? _healthChecker;
 
-    // spec-019 T022: the provider-neutral model client and the flag that runs the pipeline on MAF
-    // Workflows instead of the SK Process Framework. Additive — the flag is off until the atomic cutover,
-    // so production behaviour is unchanged; HITL resume on the MAF path lands in US2.
-    private readonly IChatClient? _chatClient;
-    private readonly bool _useMafRuntime;
+    // The provider-neutral model client every LLM executor uses.
+    private readonly IChatClient _chatClient;
 
-    // spec-019 T032: when set, MAF runs are checkpointed so a run paused at the clarification gate can be
-    // resumed after a restart. Null → in-process resume only.
+    // When set, MAF runs are checkpointed so a run paused at the clarification gate can be resumed after a
+    // restart (spec-019 T032). Null → in-process resume only.
     private readonly CheckpointManager? _checkpointManager;
 
     private readonly ConcurrentDictionary<string, PipelineRun> _runs = new();
@@ -44,22 +33,18 @@ public sealed class PipelineOrchestrator
     public event Action<string>? RunUpdated;
 
     public PipelineOrchestrator(
-        Func<IProgressReporter, Kernel> kernelFactory,
+        IChatClient chatClient,
         IRunRepository? repository = null,
         IHitlNotifier? hitlNotifier = null,
         string portalBaseUrl = "http://localhost:5000",
         IConnectorHealthChecker? healthChecker = null,
-        IChatClient? chatClient = null,
-        bool useMafRuntime = false,
         CheckpointManager? checkpointManager = null)
     {
-        _kernelFactory     = kernelFactory;
+        _chatClient        = chatClient;
         _repository        = repository ?? NullRunRepository.Instance;
         _hitlNotifier      = hitlNotifier;
         _portalBaseUrl     = portalBaseUrl.TrimEnd('/');
         _healthChecker     = healthChecker;
-        _chatClient        = chatClient;
-        _useMafRuntime     = useMafRuntime && chatClient is not null;
         _checkpointManager = checkpointManager;
     }
 
@@ -159,75 +144,8 @@ public sealed class PipelineOrchestrator
                 }
             }
 
-            // spec-019 T022: when the MAF runtime is enabled, run the pipeline on MAF Workflows instead of
-            // the SK Process Framework. The SK loop below stays as the production default until cutover.
-            if (_useMafRuntime)
-            {
-                await ExecuteViaMafAsync(run, initialTicket);
-                return;
-            }
-
-            var currentTicket = initialTicket;
-
-            for (int clarificationRound = 0; clarificationRound <= MaxClarificationRounds; clarificationRound++)
-            {
-                void NotifyUpdated() => RunUpdated?.Invoke(run.RunId);
-
-                var reporter    = new BoundProgressReporter(run, NotifyUpdated, _repository);
-                var kernel      = _kernelFactory(reporter);
-                var hitlChannel = new HitlExternalChannel();
-                var process     = IntakePipelineBuilder.Build();
-
-                var startEvent = clarificationRound == 0
-                    ? new KernelProcessEvent { Id = Events.TicketReceived,  Data = currentTicket }
-                    : new KernelProcessEvent { Id = Events.HumanResponded, Data = currentTicket };
-
-                await LocalKernelProcessFactory.RunToEndAsync(
-                    process, kernel, startEvent, TimeSpan.FromSeconds(180), hitlChannel);
-
-                if (!hitlChannel.WasPaused)
-                {
-                    var finalTicket = reporter.FinalTicket ?? currentTicket;
-                    run.SetComplete(finalTicket);
-                    await _repository.UpsertRunAsync(run.RunId, finalTicket, run.Status);
-                    RunUpdated?.Invoke(run.RunId);
-                    break;
-                }
-
-                var pausedTicket = ExtractTicket(hitlChannel.PausedMessage!, currentTicket);
-                run.SetAwaitingHuman(pausedTicket);
-                await _repository.UpsertRunAsync(run.RunId, pausedTicket, PipelineRunStatus.AwaitingHuman);
-                RunUpdated?.Invoke(run.RunId);
-
-                // Fire Teams / external notification — non-blocking
-                if (_hitlNotifier is not null)
-                {
-                    var portalUrl = $"{_portalBaseUrl}/run/{run.RunId}";
-                    _ = _hitlNotifier.NotifyAsync(
-                        run.RunId,
-                        pausedTicket.TicketId,
-                        pausedTicket.Title,
-                        pausedTicket.ClarifyingQuestions,
-                        portalUrl);
-                }
-
-                var answer = await run.WaitForHitlInputAsync();
-
-                currentTicket = pausedTicket with
-                {
-                    HumanAnswer       = answer,
-                    ClarificationRound = pausedTicket.ClarificationRound + 1,
-                };
-
-                run.SetRunning();
-                run.AddEvent(new PipelineEvent(
-                    "HitlResume",
-                    $"PO answered (round {currentTicket.ClarificationRound}) — re-validating",
-                    ReportLevel.Info,
-                    DateTimeOffset.UtcNow));
-                await _repository.UpsertRunAsync(run.RunId, currentTicket, PipelineRunStatus.Running);
-                RunUpdated?.Invoke(run.RunId);
-            }
+            // Run the ticket-intake pipeline on MAF Workflows, driving the clarification loop.
+            await ExecuteViaMafAsync(run, initialTicket);
         }
         catch (Exception ex)
         {
@@ -265,7 +183,7 @@ public sealed class PipelineOrchestrator
     /// </summary>
     public void RehydratePausedRun(TicketState pausedTicket, CheckpointInfo checkpoint)
     {
-        if (!_useMafRuntime || _checkpointManager is null)
+        if (_checkpointManager is null)
         {
             return;
         }
@@ -381,11 +299,5 @@ public sealed class PipelineOrchestrator
             .Select(r => $"{r.Type}: {r.Message}")
             .ToArray();
         return $"Pre-flight check failed — {string.Join("; ", reasons)}";
-    }
-
-    private static TicketState ExtractTicket(KernelProcessProxyMessage message, TicketState fallback)
-    {
-        if (message.EventData?.ToObject() is TicketState ticket) return ticket;
-        return fallback;
     }
 }

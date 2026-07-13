@@ -4,7 +4,6 @@
 using DBAIAzure.Core.Models;
 using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Tests.Parity;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests;
@@ -16,8 +15,6 @@ namespace DBAIAzure.Tests;
 /// </summary>
 public sealed class VisualOrchestratorApprovalResumeTests
 {
-    private static Kernel StubKernel() => Kernel.CreateBuilder().Build();
-
     private static WorkflowDefinition ApprovalWorkflow()
     {
         var trigger = WorkflowNode.CreateNew(WorkflowNodeType.Trigger, "Start");
@@ -63,7 +60,7 @@ public sealed class VisualOrchestratorApprovalResumeTests
     public async Task MafRuntime_ApprovalGate_PausesThenCompletesOnApprove()
     {
         var chatClient = new RecordedChatClient(RecordedTurn.With("a concise summary", 20, 6));
-        var orchestrator = new WorkflowExecutionOrchestrator(StubKernel, chatClient: chatClient, useMafRuntime: true);
+        var orchestrator = new WorkflowExecutionOrchestrator(chatClient);
 
         var runId = await orchestrator.StartRunAsync(ApprovalWorkflow(), "process the input");
 
@@ -76,7 +73,7 @@ public sealed class VisualOrchestratorApprovalResumeTests
     public async Task MafRuntime_ApprovalGate_CompletesOnReject()
     {
         var chatClient = new RecordedChatClient(RecordedTurn.With("a concise summary", 20, 6));
-        var orchestrator = new WorkflowExecutionOrchestrator(StubKernel, chatClient: chatClient, useMafRuntime: true);
+        var orchestrator = new WorkflowExecutionOrchestrator(chatClient);
 
         var runId = await orchestrator.StartRunAsync(ApprovalWorkflow(), "process the input");
 

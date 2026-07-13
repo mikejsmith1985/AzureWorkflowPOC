@@ -7,7 +7,6 @@ using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Tests.Parity;
 using DBAIAzure.Web.Pages;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests;
@@ -20,8 +19,6 @@ namespace DBAIAzure.Tests;
 /// </summary>
 public sealed class RunDetailStreamTabTests : TestContext
 {
-    private static Kernel StubKernel(IProgressReporter _) => Kernel.CreateBuilder().Build();
-
     [Fact]
     public async Task StreamTab_ShowsStreamedTokens_ForMafRun()
     {
@@ -36,7 +33,7 @@ public sealed class RunDetailStreamTabTests : TestContext
             RecordedTurn.With("{\"points\":5,\"reasoning\":\"comparable to the CRUD anchor\"}", 25, 8),
         }, repeatLast: true);
 
-        var orchestrator = new PipelineOrchestrator(StubKernel, chatClient: chatClient, useMafRuntime: true);
+        var orchestrator = new PipelineOrchestrator(chatClient);
         var ticket = new TicketState { TicketId = "INC0001", Title = "Sample", Description = "Sample description." };
         var runId = orchestrator.StartRun(ticket);
 

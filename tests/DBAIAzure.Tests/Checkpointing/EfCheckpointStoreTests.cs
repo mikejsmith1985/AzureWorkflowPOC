@@ -80,13 +80,15 @@ public sealed class EfCheckpointStoreTests : IDisposable
     {
         var chatClient = new RecordedChatClient(
             RecordedTurn.With("{\"summary\":\"The spec is clear.\",\"gaps\":[]}", 50, 20));
-        var services = new MafExecutorServices().Add<IArtifactReader>(new FakeReader());
+        // Drives only to the approval suspension, so no board-write deps are needed (writerDeps: default).
+        Microsoft.Agents.AI.Workflows.Workflow BuildWorkflow() => MafPhaseHandlerWorkflowFactory.Build(
+            chatClient, new FakeReader(), progressSink: null, bindingKeyMinter: null, default);
         const string session = "phase-chk-1";
 
         // Run #1: execute with EF checkpointing until it suspends at the approval gate; capture the checkpoint.
         var manager1 = CheckpointManager.CreateJson(NewStore(), JsonOptions);
         var run1 = await InProcessExecution.RunStreamingAsync(
-            MafPhaseHandlerWorkflowFactory.Build(chatClient, services), SampleState, manager1, session, default);
+            BuildWorkflow(), SampleState, manager1, session, default);
 
         CheckpointInfo? pausedCheckpoint = null;
         await foreach (var workflowEvent in run1.WatchStreamAsync(default))
@@ -104,7 +106,7 @@ public sealed class EfCheckpointStoreTests : IDisposable
         // and re-emit the outstanding approval request — the run recovered its pause point (SC-003).
         var manager2 = CheckpointManager.CreateJson(NewStore(), JsonOptions);
         var run2 = await InProcessExecution.ResumeStreamingAsync(
-            MafPhaseHandlerWorkflowFactory.Build(chatClient, services), pausedCheckpoint!, manager2, default);
+            BuildWorkflow(), pausedCheckpoint!, manager2, default);
 
         ExternalRequest? recoveredRequest = null;
         await foreach (var workflowEvent in run2.WatchStreamAsync(default))

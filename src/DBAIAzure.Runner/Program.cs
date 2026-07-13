@@ -1,17 +1,14 @@
 using Azure.Monitor.OpenTelemetry.Exporter;
-using DBAIAzure.Connectors;
+using DBAIAzure.Connectors.Ai;
 using DBAIAzure.Core.Models;
-using DBAIAzure.Processes;
+using DBAIAzure.Core.Models.Ai;
+using DBAIAzure.Processes.Pipeline.Maf;
+using Microsoft.Agents.AI.Workflows;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
 using OpenTelemetry;
 using OpenTelemetry.Trace;
 using Spectre.Console;
-
-// Suppress SKEXP0080 solution-wide: SK Process Framework is experimental in 1.77.0
-#pragma warning disable SKEXP0080
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 var config = new ConfigurationBuilder()
@@ -29,16 +26,13 @@ if (string.IsNullOrWhiteSpace(anthropicKey) || anthropicKey.StartsWith("REPLACE"
         "Anthropic:ApiKey is required. Add it to appsettings.Development.json (gitignored).");
 
 // ── OpenTelemetry → Azure Monitor ─────────────────────────────────────────────
-// Model-call and orchestration spans auto-trace to Azure Monitor. spec-019 T013/T049: the modern
-// MAF/M.E.AI source is registered alongside the legacy SK source so traces keep flowing with no gap
-// during the migration; the SK source is removed at the atomic cutover. The exporter is unchanged.
+// Model-call and workflow spans auto-trace to Azure Monitor via the MAF / Microsoft.Extensions.AI sources.
 TracerProvider? tracerProvider = null;
 if (!string.IsNullOrWhiteSpace(azureMonitorCs) && !azureMonitorCs.StartsWith("REPLACE"))
 {
     tracerProvider = Sdk.CreateTracerProviderBuilder()
         .AddSource(DBAIAzure.Core.Diagnostics.AiTelemetrySourceNames.ChatClient) // MAF/M.E.AI model-call spans
         .AddSource(DBAIAzure.Core.Diagnostics.AiTelemetrySourceNames.Agents)     // MAF workflow/agent spans
-        .AddSource("Microsoft.SemanticKernel*")                                  // legacy — removed at cutover
         .AddAzureMonitorTraceExporter(o => o.ConnectionString = azureMonitorCs)
         .Build();
     AnsiConsole.MarkupLine("[dim]Azure Monitor tracing enabled.[/]");
@@ -48,15 +42,11 @@ else
     AnsiConsole.MarkupLine("[dim]Azure Monitor not configured — set AzureMonitor:ConnectionString to enable.[/]");
 }
 
-// ── Semantic Kernel ────────────────────────────────────────────────────────────
-// AnthropicChatCompletionService implements SK's IChatCompletionService.
-// Interview note: to swap to Azure OpenAI, replace the AddSingleton line with:
-//   builder.AddAzureOpenAIChatCompletion(deployment, endpoint, apiKey)
-// The process steps, routing, and observability code are completely unchanged.
-var kernelBuilder = Kernel.CreateBuilder();
-kernelBuilder.Services.AddSingleton<IChatCompletionService>(
-    new AnthropicChatCompletionService(anthropicKey, anthropicModel));
-var kernel = kernelBuilder.Build();
+// ── Model client (provider-neutral IChatClient over Claude) ────────────────────
+// To swap providers, build a different IChatClientProvider (e.g. OpenAiChatClientProvider) — the workflow,
+// executors, routing, and observability are completely unchanged.
+IChatClient chatClient = new AnthropicChatClientProvider()
+    .Create(new AiProviderConfig(AiProviderConfig.DefaultProviderId, anthropicModel, anthropicKey));
 
 // ── Demo tickets ──────────────────────────────────────────────────────────────
 TicketState[] demoTickets =
@@ -83,85 +73,70 @@ TicketState[] demoTickets =
     },
 ];
 
-AnsiConsole.Write(new Rule("[bold blue]DBAIAzure — Ticket Intake Pipeline (SK Process Framework)[/]"));
+AnsiConsole.Write(new Rule("[bold blue]DBAIAzure — Ticket Intake Pipeline (MAF Workflows)[/]"));
 AnsiConsole.WriteLine();
 
 foreach (var ticket in demoTickets)
 {
-    await RunTicketAsync(kernel, ticket);
+    await RunTicketAsync(chatClient, ticket);
     AnsiConsole.WriteLine();
 }
 
 tracerProvider?.Dispose();
 
 // ── Per-ticket runner ──────────────────────────────────────────────────────────
-// HITL loop: run the process, check if it paused for human input, collect
-// Console.ReadLine(), then restart with HumanResponded. Loops up to 3 rounds,
-// matching the cap in ValidationStep (ClarificationRound >= 3 → Blocked).
-static async Task RunTicketAsync(Kernel kernel, TicketState ticket)
+// HITL loop on MAF Workflows: drive the intake workflow to completion or to the clarification RequestPort,
+// collect Console.ReadLine() at each pause, respond, and drive again. The ValidationExecutor blocks after
+// its max clarification round, ending the loop.
+static async Task RunTicketAsync(IChatClient chatClient, TicketState ticket)
 {
-    const int MaxClarificationRounds = 3;
-
     AnsiConsole.Write(new Rule($"[yellow]{ticket.TicketId}[/] {Markup.Escape(ticket.Title)}"));
 
-    var currentTicket = ticket;
+    var workflow = MafIntakeWorkflowFactory.Build(chatClient);
+    var session = await MafWorkflowSession<TicketState>.StartAsync(
+        workflow, ticket, ticket.TicketId, checkpointManager: null, CancellationToken.None);
 
-    for (int clarificationRound = 0; clarificationRound <= MaxClarificationRounds; clarificationRound++)
+    while (true)
     {
-        var hitlChannel = new HitlExternalChannel();
-        var process = IntakePipelineBuilder.Build();
-
-        // Round 0: start from the beginning with TicketReceived.
-        // Rounds 1+: skip intake and start at ValidationStep with the PO's answer.
-        var initialEvent = clarificationRound == 0
-            ? new KernelProcessEvent { Id = Events.TicketReceived, Data = currentTicket }
-            : new KernelProcessEvent { Id = Events.HumanResponded, Data = currentTicket };
-
-        // RunToEndAsync blocks until the process terminates or times out.
-        // The 5th argument wires the HitlExternalChannel so the proxy step can
-        // call channel.EmitExternalEventAsync when HitlPauseStep fires.
-        await LocalKernelProcessFactory.RunToEndAsync(
-            process, kernel, initialEvent, TimeSpan.FromSeconds(60), hitlChannel);
-
-        if (!hitlChannel.WasPaused)
+        var segment = await session.DriveAsync(CancellationToken.None);
+        if (!segment.Suspended)
         {
-            // Process reached a terminal state (Ready → Estimation → Action, or Blocked).
-            break;
+            break; // Ready → Estimation → Action, or Blocked — a terminal state.
         }
 
-        // Extract the TicketState carried by the proxy message.
-        // In the local runtime the data stays typed; defensively fall back to current state.
-        var pausedTicket = ExtractTicketFromProxyMessage(hitlChannel.PausedMessage!, currentTicket);
+        // Parked at the clarification gate: surface the questions and collect the PO's answer.
+        var pausedTicket = ExtractTicket(segment.PendingRequest!, ticket);
+        if (pausedTicket.ClarifyingQuestions.Count > 0)
+        {
+            AnsiConsole.MarkupLine("\n  [bold]Clarifying questions:[/]");
+            foreach (var question in pausedTicket.ClarifyingQuestions)
+                AnsiConsole.MarkupLine($"    • {Markup.Escape(question)}");
+        }
 
-        // Present the PO prompt and collect their answer.
-        AnsiConsole.MarkupLine("\n  [bold yellow]⏸ Awaiting PO input[/] — please answer the clarifying questions above.");
+        AnsiConsole.MarkupLine("\n  [bold yellow]⏸ Awaiting PO input[/]");
         AnsiConsole.Markup("  [bold]Your answer:[/] ");
         var humanAnswer = Console.ReadLine() ?? string.Empty;
         AnsiConsole.WriteLine();
 
-        currentTicket = pausedTicket with
+        // Apply the answer and clear the now-answered questions so validation's ready/not-ready routing
+        // (keyed on whether the ticket still carries questions) evaluates the re-validation cleanly.
+        var answeredTicket = pausedTicket with
         {
             HumanAnswer = humanAnswer,
             ClarificationRound = pausedTicket.ClarificationRound + 1,
+            ClarifyingQuestions = [],
         };
 
         AnsiConsole.MarkupLine(
-            $"  [dim]↳ Clarification round {currentTicket.ClarificationRound} — re-validating with PO input.[/]");
+            $"  [dim]↳ Clarification round {answeredTicket.ClarificationRound} — re-validating with PO input.[/]");
         AnsiConsole.WriteLine();
+
+        await session.RespondAsync(segment.PendingRequest!.Request, answeredTicket, CancellationToken.None);
     }
 
     AnsiConsole.MarkupLine("[green]✓ Pipeline complete.[/]");
 }
 
-/// <summary>
-/// Extracts the TicketState from a KernelProcessProxyMessage.
-/// KernelProcessEventData.ToObject() deserializes the JSON-serialized payload back
-/// to its original type; we cast the result to TicketState.
-/// </summary>
-static TicketState ExtractTicketFromProxyMessage(KernelProcessProxyMessage message, TicketState fallback)
-{
-    if (message.EventData?.ToObject() is TicketState deserializedTicket)
-        return deserializedTicket;
-
-    return fallback;
-}
+/// <summary>Reads the paused ticket carried by the clarification request, falling back to the last state.</summary>
+static TicketState ExtractTicket(RequestInfoEvent request, TicketState fallback) =>
+    request.Request.TryGetDataAs<TicketState>(out var ticket) && ticket is not null ? ticket : fallback;

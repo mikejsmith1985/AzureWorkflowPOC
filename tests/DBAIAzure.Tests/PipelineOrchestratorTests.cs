@@ -1,7 +1,6 @@
 using DBAIAzure.Core.Models;
 using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Tests.Parity;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests;
@@ -12,9 +11,6 @@ namespace DBAIAzure.Tests;
 /// </summary>
 public class PipelineOrchestratorTests
 {
-    private static Kernel StubKernel(IProgressReporter _) =>
-        Kernel.CreateBuilder().Build();
-
     private static TicketState SampleTicket => new()
     {
         TicketId = "INC0001",
@@ -25,7 +21,7 @@ public class PipelineOrchestratorTests
     [Fact]
     public void GetRun_ReturnsNull_ForUnknownId()
     {
-        var orchestrator = new PipelineOrchestrator(StubKernel);
+        var orchestrator = new PipelineOrchestrator(new RecordedChatClient(RecordedTurn.With("{}", 1, 1)));
 
         var result = orchestrator.GetRun("nonexistent");
 
@@ -35,7 +31,7 @@ public class PipelineOrchestratorTests
     [Fact]
     public void GetAllRuns_ReturnsEmpty_WhenNoRunsStarted()
     {
-        var orchestrator = new PipelineOrchestrator(StubKernel);
+        var orchestrator = new PipelineOrchestrator(new RecordedChatClient(RecordedTurn.With("{}", 1, 1)));
 
         var runs = orchestrator.GetAllRuns();
 
@@ -45,7 +41,7 @@ public class PipelineOrchestratorTests
     [Fact]
     public void SubmitHitlAnswer_DoesNotThrow_ForUnknownRunId()
     {
-        var orchestrator = new PipelineOrchestrator(StubKernel);
+        var orchestrator = new PipelineOrchestrator(new RecordedChatClient(RecordedTurn.With("{}", 1, 1)));
 
         // Graceful no-op — should not throw even if runId doesn't exist
         var exception = Record.Exception(() =>
@@ -66,7 +62,7 @@ public class PipelineOrchestratorTests
             RecordedTurn.With("{\"points\":5,\"reasoning\":\"comparable to the CRUD anchor\"}", 25, 8),
         }, repeatLast: true);
 
-        var orchestrator = new PipelineOrchestrator(StubKernel, chatClient: chatClient, useMafRuntime: true);
+        var orchestrator = new PipelineOrchestrator(chatClient);
 
         var runId = orchestrator.StartRun(SampleTicket);
         var run = await WaitForCompletionAsync(orchestrator, runId);
@@ -87,7 +83,7 @@ public class PipelineOrchestratorTests
             RecordedTurn.With("[\"What is the target environment?\"]", 35, 8),
         }, repeatLast: true);
 
-        var orchestrator = new PipelineOrchestrator(StubKernel, chatClient: chatClient, useMafRuntime: true);
+        var orchestrator = new PipelineOrchestrator(chatClient);
 
         var runId = orchestrator.StartRun(SampleTicket);
         var run = await WaitForCompletionAsync(orchestrator, runId);
@@ -109,7 +105,7 @@ public class PipelineOrchestratorTests
             RecordedTurn.With("{\"points\":5,\"reasoning\":\"comparable to the CRUD anchor\"}", 25, 8),        // estimation
         }, repeatLast: true);
 
-        var orchestrator = new PipelineOrchestrator(StubKernel, chatClient: chatClient, useMafRuntime: true);
+        var orchestrator = new PipelineOrchestrator(chatClient);
         var runId = orchestrator.StartRun(SampleTicket);
 
         var paused = await WaitForStatusAsync(orchestrator, runId, PipelineRunStatus.AwaitingHuman);
@@ -136,7 +132,7 @@ public class PipelineOrchestratorTests
             RecordedTurn.With("{\"points\":5,\"reasoning\":\"comparable to the CRUD anchor\"}", 25, 8),
         }, repeatLast: true);
 
-        var orchestrator = new PipelineOrchestrator(StubKernel, chatClient: chatClient, useMafRuntime: true);
+        var orchestrator = new PipelineOrchestrator(chatClient);
         var runId = orchestrator.StartRun(SampleTicket);
         var run = await WaitForCompletionAsync(orchestrator, runId);
 

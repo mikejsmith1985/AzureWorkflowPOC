@@ -2,7 +2,7 @@
 // without requiring a page reload — wires directly to ILlmAvailabilityMonitor.
 
 using DBAIAzure.Core.Interfaces;
-using Microsoft.SemanticKernel.ChatCompletion;
+using Microsoft.Extensions.AI;
 
 namespace DBAIAzure.Web.Services;
 
@@ -15,7 +15,7 @@ public sealed class LlmAvailabilityMonitor : ILlmAvailabilityMonitor, IDisposabl
 {
     private static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(30);
 
-    private readonly IChatCompletionService _chatService;
+    private readonly IChatClient _chatClient;
     private readonly ILogger<LlmAvailabilityMonitor> _logger;
 
     private CancellationTokenSource? _cts;
@@ -29,15 +29,15 @@ public sealed class LlmAvailabilityMonitor : ILlmAvailabilityMonitor, IDisposabl
     public event Action<bool>? StateChanged;
 
     /// <summary>
-    /// Initialises the monitor with the Semantic Kernel chat completion service and
-    /// a logger for availability transition events.
+    /// Initialises the monitor with the provider-neutral chat client and a logger for
+    /// availability transition events.
     /// </summary>
     public LlmAvailabilityMonitor(
-        IChatCompletionService chatService,
+        IChatClient chatClient,
         ILogger<LlmAvailabilityMonitor> logger)
     {
-        _chatService = chatService;
-        _logger      = logger;
+        _chatClient = chatClient;
+        _logger     = logger;
     }
 
     /// <inheritdoc/>
@@ -101,10 +101,8 @@ public sealed class LlmAvailabilityMonitor : ILlmAvailabilityMonitor, IDisposabl
         try
         {
             // Minimal single-turn probe — does not affect conversation history.
-            var probeHistory = new ChatHistory();
-            probeHistory.AddUserMessage("ping");
-            var result = await _chatService
-                .GetChatMessageContentAsync(probeHistory, cancellationToken: token)
+            var result = await _chatClient
+                .GetResponseAsync([new ChatMessage(ChatRole.User, "ping")], options: null, token)
                 .ConfigureAwait(false);
             return result is not null;
         }

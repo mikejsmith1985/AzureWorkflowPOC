@@ -1,18 +1,14 @@
-// WorkflowDesignSkillService — Semantic Kernel plugin for design review and whole-workflow generation.
-
-#pragma warning disable SKEXP0001
+// WorkflowDesignSkillService — design review and whole-workflow generation over the provider-neutral chat client.
 
 using DBAIAzure.Core.Models;
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
-using System.ComponentModel;
+using Microsoft.Extensions.AI;
 using System.Text.Json;
 
 namespace DBAIAzure.Web.Services;
 
 /// <summary>
-/// A Semantic Kernel plugin that analyses a workflow topology and generates clarifying
-/// questions for the user, one question at a time. Answers are persisted in
+/// Analyses a workflow topology and generates clarifying questions for the user, one question at a
+/// time. Answers are persisted in
 /// <see cref="WorkflowSettings.DesignSkillAnswers"/> so the same question is never
 /// shown again. A deferred question is recorded as <c>"user-deferred"</c> so the assistant
 /// can proceed without blocking on optional decisions.
@@ -22,20 +18,20 @@ public sealed class WorkflowDesignSkillService
     private const string UserDeferredSentinel = "user-deferred";
 
     private readonly WorkflowTopologySerializer _serializer;
-    private readonly IChatCompletionService _chatService;
+    private readonly IChatClient _chatClient;
     private readonly ILogger<WorkflowDesignSkillService> _logger;
 
     /// <summary>
-    /// Initialises the service with the topology serializer and SK chat completion service.
+    /// Initialises the service with the topology serializer and the provider-neutral chat client.
     /// </summary>
     public WorkflowDesignSkillService(
         WorkflowTopologySerializer serializer,
-        IChatCompletionService chatService,
+        IChatClient chatClient,
         ILogger<WorkflowDesignSkillService> logger)
     {
-        _serializer  = serializer;
-        _chatService = chatService;
-        _logger      = logger;
+        _serializer = serializer;
+        _chatClient = chatClient;
+        _logger     = logger;
     }
 
     /// <summary>
@@ -93,17 +89,19 @@ public sealed class WorkflowDesignSkillService
         string description,
         CancellationToken ct = default)
     {
-        var history = new ChatHistory();
-        history.AddSystemMessage(BuildGenerationSystemPrompt());
-        history.AddUserMessage(description);
+        var messages = new List<ChatMessage>
+        {
+            new(Microsoft.Extensions.AI.ChatRole.System, BuildGenerationSystemPrompt()),
+            new(Microsoft.Extensions.AI.ChatRole.User, description),
+        };
 
         try
         {
-            var response = await _chatService
-                .GetChatMessageContentAsync(history, cancellationToken: ct)
+            var response = await _chatClient
+                .GetResponseAsync(messages, options: null, ct)
                 .ConfigureAwait(false);
 
-            return ParseGenerationResponse(response.Content ?? string.Empty);
+            return ParseGenerationResponse(response.Text ?? string.Empty);
         }
         catch (Exception ex)
         {
@@ -191,31 +189,30 @@ public sealed class WorkflowDesignSkillService
         }
     }
 
-    // ── KernelFunction ──────────────────────────────────────────────────────────
+    // ── Topology analysis ────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Semantic Kernel plugin function — exposed to the kernel tool loop.
     /// Calls the LLM with the serialised topology to produce a structured list of design questions.
     /// Returns a list of (Key, Text) pairs; each key is stable across renames.
     /// </summary>
-    [KernelFunction("AnalyseTopology")]
-    [Description("Analyses a workflow topology and returns a list of clarifying design questions.")]
     public async Task<IReadOnlyList<(string Key, string Text)>> AnalyseTopologyAsync(
-        [Description("The workflow definition to analyse.")] WorkflowDefinition workflow,
+        WorkflowDefinition workflow,
         CancellationToken cancellationToken = default)
     {
         var topology = _serializer.Serialize(workflow);
-        var history  = new ChatHistory();
-        history.AddSystemMessage(BuildSystemPrompt());
-        history.AddUserMessage(topology);
+        var messages = new List<ChatMessage>
+        {
+            new(Microsoft.Extensions.AI.ChatRole.System, BuildSystemPrompt()),
+            new(Microsoft.Extensions.AI.ChatRole.User, topology),
+        };
 
         try
         {
-            var response = await _chatService
-                .GetChatMessageContentAsync(history, cancellationToken: cancellationToken)
+            var response = await _chatClient
+                .GetResponseAsync(messages, options: null, cancellationToken)
                 .ConfigureAwait(false);
 
-            return ParseQuestionsFromResponse(workflow, response.Content ?? string.Empty);
+            return ParseQuestionsFromResponse(workflow, response.Text ?? string.Empty);
         }
         catch (Exception ex)
         {
@@ -230,7 +227,7 @@ public sealed class WorkflowDesignSkillService
         """
         You are a workflow design consultant reviewing an agentic pipeline.
         Given the workflow topology below, output one clarifying question per step
-        that will help code generation produce correct, production-ready Semantic Kernel steps.
+        that will help code generation produce correct, production-ready pipeline steps.
         Format each question on its own line, prefixed by the step number: "1. <question>"
         Keep each question to one sentence and avoid technical jargon.
         """;

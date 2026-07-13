@@ -1,12 +1,11 @@
-// The OpenTelemetry source names for the modernized (Microsoft Agent Framework / Microsoft.Extensions.AI)
-// telemetry, registered with the tracer + meter providers in place of the old Semantic Kernel source.
+// The OpenTelemetry source names for the Microsoft Agent Framework / Microsoft.Extensions.AI telemetry,
+// registered with the tracer + meter providers.
 namespace DBAIAzure.Core.Diagnostics;
 
 /// <summary>
-/// OpenTelemetry ActivitySource / Meter names for the modernized AI telemetry (spec-019 D9). These are
-/// passed to <c>.UseOpenTelemetry(sourceName)</c> / <c>.WithOpenTelemetry(sourceName)</c> and registered
-/// on both the tracer and meter providers — replacing the Semantic Kernel source
-/// (<c>"Microsoft.SemanticKernel*"</c>) so traces keep reaching Azure Monitor with no coverage gap.
+/// OpenTelemetry ActivitySource / Meter names for the AI telemetry (spec-019 D9). These are passed to
+/// <c>.UseOpenTelemetry(sourceName)</c> / <c>.WithOpenTelemetry(sourceName)</c> and registered on both the
+/// tracer and meter providers so model-call and workflow spans reach Azure Monitor.
 /// </summary>
 public static class AiTelemetrySourceNames
 {

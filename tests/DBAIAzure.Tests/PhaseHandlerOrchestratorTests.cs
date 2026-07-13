@@ -3,7 +3,6 @@ using DBAIAzure.Core.Models;
 using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests;
@@ -29,19 +28,16 @@ public class PhaseHandlerOrchestratorTests
         Gaps = [new PhaseValidationGap { Label = "Edge case", Description = "Timeouts unspecified." }],
     };
 
-    // Builds a kernel factory wiring the supplied fakes plus the orchestrator-provided progress sink.
-    private static Func<IPhaseProgressSink, Kernel> KernelFactory(
-        IArtifactReader reader, IStructuredCompletionService chat, IBoardsClient boards) =>
-        sink =>
-        {
-            var builder = Kernel.CreateBuilder();
-            builder.Services.AddSingleton(reader);
-            builder.Services.AddSingleton(chat);
-            builder.Services.AddSingleton(boards);
-            builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter>(WorkTrackerAdapters.AdoAdapterFor(boards));
-            builder.Services.AddSingleton(sink);
-            return builder.Build();
-        };
+    // Builds the phase-handler orchestrator wiring the supplied fakes onto the MAF runtime.
+    private static PhaseHandlerOrchestrator BuildOrchestrator(
+        IArtifactReader reader, PhaseValidationResult validation, FakeBoardsClient boards,
+        IPhaseApprovalNotifier? notifier = null)
+    {
+        var writerDeps = new PhaseWorkItemWriterDeps(Tracker: WorkTrackerAdapters.AdoAdapterFor(boards));
+        return new PhaseHandlerOrchestrator(
+            PhaseValidationChat.Returning(validation), reader, writerDeps,
+            approvalNotifier: notifier);
+    }
 
     private static FakeArtifactReader ReaderWithArtifacts() =>
         new([new PhaseArtifact { FileName = "spec.md", Content = "# Spec\nContent." }]);
@@ -76,8 +72,7 @@ public class PhaseHandlerOrchestratorTests
     public async Task PausesForApproval_AndWritesNothingBeforeDecision()
     {
         var boards = new FakeBoardsClient();
-        var orchestrator = new PhaseHandlerOrchestrator(
-            KernelFactory(ReaderWithArtifacts(), new FakeStructuredCompletionService(SampleValidation), boards));
+        var orchestrator = BuildOrchestrator(ReaderWithArtifacts(), SampleValidation, boards);
 
         var runId = orchestrator.StartRun(SampleState());
         var run = await WaitUntilAwaitingAsync(orchestrator, runId);
@@ -91,8 +86,7 @@ public class PhaseHandlerOrchestratorTests
     public async Task Approval_CreatesEpic_AndCompletes()
     {
         var boards = new FakeBoardsClient();
-        var orchestrator = new PhaseHandlerOrchestrator(
-            KernelFactory(ReaderWithArtifacts(), new FakeStructuredCompletionService(SampleValidation), boards));
+        var orchestrator = BuildOrchestrator(ReaderWithArtifacts(), SampleValidation, boards);
 
         var runId = orchestrator.StartRun(SampleState());
         await WaitUntilAwaitingAsync(orchestrator, runId);
@@ -111,8 +105,7 @@ public class PhaseHandlerOrchestratorTests
     public async Task Rejection_CreatesNoWorkItem_AndRecordsRejected()
     {
         var boards = new FakeBoardsClient();
-        var orchestrator = new PhaseHandlerOrchestrator(
-            KernelFactory(ReaderWithArtifacts(), new FakeStructuredCompletionService(SampleValidation), boards));
+        var orchestrator = BuildOrchestrator(ReaderWithArtifacts(), SampleValidation, boards);
 
         var runId = orchestrator.StartRun(SampleState());
         await WaitUntilAwaitingAsync(orchestrator, runId);
@@ -128,8 +121,7 @@ public class PhaseHandlerOrchestratorTests
     public async Task BoardWriteFailureAfterApproval_RecordsFailed_PreservingApproval()
     {
         var boards = new FakeBoardsClient { FailWith = new InvalidOperationException("boom") };
-        var orchestrator = new PhaseHandlerOrchestrator(
-            KernelFactory(ReaderWithArtifacts(), new FakeStructuredCompletionService(SampleValidation), boards));
+        var orchestrator = BuildOrchestrator(ReaderWithArtifacts(), SampleValidation, boards);
 
         var runId = orchestrator.StartRun(SampleState());
         await WaitUntilAwaitingAsync(orchestrator, runId);
@@ -149,8 +141,7 @@ public class PhaseHandlerOrchestratorTests
     public async Task MissingArtifacts_FailsBeforeApproval_WithReason()
     {
         var boards = new FakeBoardsClient();
-        var orchestrator = new PhaseHandlerOrchestrator(
-            KernelFactory(new FakeArtifactReader([]), new FakeStructuredCompletionService(SampleValidation), boards));
+        var orchestrator = BuildOrchestrator(new FakeArtifactReader([]), SampleValidation, boards);
 
         var runId = orchestrator.StartRun(SampleState());
 
@@ -164,8 +155,7 @@ public class PhaseHandlerOrchestratorTests
     public void UnsupportedPhase_RecordedAsUnsupported_NoRun()
     {
         var boards = new FakeBoardsClient();
-        var orchestrator = new PhaseHandlerOrchestrator(
-            KernelFactory(ReaderWithArtifacts(), new FakeStructuredCompletionService(SampleValidation), boards));
+        var orchestrator = BuildOrchestrator(ReaderWithArtifacts(), SampleValidation, boards);
 
         var runId = orchestrator.StartRun(SampleState(SpecKitPhase.Unsupported));
 
@@ -177,8 +167,7 @@ public class PhaseHandlerOrchestratorTests
     public async Task ApprovalForUnknownRun_ReturnsNotAwaiting()
     {
         var boards = new FakeBoardsClient();
-        var orchestrator = new PhaseHandlerOrchestrator(
-            KernelFactory(ReaderWithArtifacts(), new FakeStructuredCompletionService(SampleValidation), boards));
+        var orchestrator = BuildOrchestrator(ReaderWithArtifacts(), SampleValidation, boards);
 
         var result = orchestrator.SubmitApproval("does-not-exist", new ApprovalDecision { IsApproved = true });
         Assert.Equal(PhaseHandlerOrchestrator.ApprovalResult.NotAwaiting, result);
@@ -189,8 +178,7 @@ public class PhaseHandlerOrchestratorTests
     public async Task DoubleDecision_SecondReturnsNotAwaiting()
     {
         var boards = new FakeBoardsClient();
-        var orchestrator = new PhaseHandlerOrchestrator(
-            KernelFactory(ReaderWithArtifacts(), new FakeStructuredCompletionService(SampleValidation), boards));
+        var orchestrator = BuildOrchestrator(ReaderWithArtifacts(), SampleValidation, boards);
 
         var runId = orchestrator.StartRun(SampleState());
         await WaitUntilAwaitingAsync(orchestrator, runId);
@@ -202,17 +190,14 @@ public class PhaseHandlerOrchestratorTests
         Assert.Equal(PhaseHandlerOrchestrator.ApprovalResult.NotAwaiting, second);
     }
 
-    // spec-019 T022: with the MAF runtime flag on, a phase signal runs read → validate on MAF Workflows
-    // and parks at the approval gate — behaviour-equivalent to the SK path, driven by a pinned client.
+    // A phase signal runs read → validate on MAF Workflows and parks at the approval gate.
     [Fact]
     public async Task MafRuntime_PhaseSignal_RunsReadValidate_AndParksAtApproval()
     {
-        var chatClient = new DBAIAzure.Tests.Parity.RecordedChatClient(
-            DBAIAzure.Tests.Parity.RecordedTurn.With("{\"summary\":\"The spec is clear.\",\"gaps\":[]}", 50, 20));
-        Func<IPhaseProgressSink, Kernel> stubKernel = _ => Kernel.CreateBuilder().Build();
-
-        var orchestrator = new PhaseHandlerOrchestrator(
-            stubKernel, chatClient: chatClient, artifactReader: ReaderWithArtifacts(), useMafRuntime: true);
+        var orchestrator = BuildOrchestrator(
+            ReaderWithArtifacts(),
+            new PhaseValidationResult { Summary = "The spec is clear.", Gaps = [] },
+            new FakeBoardsClient());
 
         var runId = orchestrator.StartRun(SampleState());
 

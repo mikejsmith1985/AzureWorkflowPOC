@@ -11,7 +11,6 @@ using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Tests.Parity;
 using DBAIAzure.Web.Integrations.Messaging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests.Messaging;
@@ -23,8 +22,6 @@ namespace DBAIAzure.Tests.Messaging;
 /// </summary>
 public sealed class McpDeliveryFromMafPipelineTests
 {
-    private static Kernel StubKernel(IProgressReporter _) => Kernel.CreateBuilder().Build();
-
     private static TicketState SampleTicket => new() { TicketId = "INC0007", Title = "Sample", Description = "Sample description." };
 
     private static IPlatformWebhookProfile[] Profiles() =>
@@ -61,7 +58,7 @@ public sealed class McpDeliveryFromMafPipelineTests
         }, repeatLast: true);
 
         var orchestrator = new PipelineOrchestrator(
-            StubKernel, hitlNotifier: notifier, chatClient: chatClient, useMafRuntime: true);
+            chatClient, hitlNotifier: notifier);
 
         orchestrator.StartRun(SampleTicket);
 

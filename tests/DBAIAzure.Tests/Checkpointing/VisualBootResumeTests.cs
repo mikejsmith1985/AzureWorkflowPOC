@@ -10,7 +10,6 @@ using DBAIAzure.Tests.Parity;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests.Checkpointing;
@@ -40,11 +39,8 @@ public sealed class VisualBootResumeTests : IDisposable
     }
 
     public void Dispose() => _keepAlive.Dispose();
-
-    private static Kernel StubKernel() => Kernel.CreateBuilder().Build();
-
     private WorkflowExecutionOrchestrator NewOrchestrator(RecordedChatClient chatClient) =>
-        new(StubKernel, chatClient: chatClient, useMafRuntime: true, checkpointManager: _checkpointManager);
+        new(chatClient, checkpointManager: _checkpointManager);
 
     private static WorkflowDefinition ApprovalWorkflow()
     {

@@ -9,7 +9,6 @@ using DBAIAzure.Tests.Parity;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests.Checkpointing;
@@ -34,9 +33,6 @@ public sealed class OrchestratorCheckpointingTests : IDisposable
     }
 
     public void Dispose() => _keepAlive.Dispose();
-
-    private static Kernel StubKernel(IProgressReporter _) => Kernel.CreateBuilder().Build();
-
     private static TicketState SampleTicket => new()
     {
         TicketId = "INC0001",
@@ -58,7 +54,7 @@ public sealed class OrchestratorCheckpointingTests : IDisposable
             new EfCheckpointStore(new SharedFactory(_options)), new JsonSerializerOptions());
 
         var orchestrator = new PipelineOrchestrator(
-            StubKernel, chatClient: chatClient, useMafRuntime: true, checkpointManager: checkpointManager);
+            chatClient, checkpointManager: checkpointManager);
 
         var runId = orchestrator.StartRun(SampleTicket);
         await WaitForStatusAsync(orchestrator, runId, PipelineRunStatus.AwaitingHuman);

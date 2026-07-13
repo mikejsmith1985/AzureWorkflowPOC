@@ -5,7 +5,6 @@ using DBAIAzure.Core.Models;
 using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests;
@@ -21,18 +20,11 @@ public class HierarchyLinkingTests
         FakeBoardsClient boards, IPhaseRunRepository repository, IReadOnlyList<PhaseArtifact> artifacts)
     {
         var validation = new PhaseValidationResult { Summary = "Summary.", Gaps = [] };
-        Func<IPhaseProgressSink, Kernel> factory = sink =>
-        {
-            var builder = Kernel.CreateBuilder();
-            builder.Services.AddSingleton<IArtifactReader>(new FakeArtifactReader(artifacts));
-            builder.Services.AddSingleton<IStructuredCompletionService>(new FakeStructuredCompletionService(validation));
-            builder.Services.AddSingleton<IBoardsClient>(boards);
-            builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter>(WorkTrackerAdapters.AdoAdapterFor(boards));
-            builder.Services.AddSingleton(repository);
-            builder.Services.AddSingleton(sink);
-            return builder.Build();
-        };
-        return new PhaseHandlerOrchestrator(factory, repository);
+        var repo = repository;
+        var writerDeps = new PhaseWorkItemWriterDeps(
+            Tracker: WorkTrackerAdapters.AdoAdapterFor(boards), Repository: repo);
+        return new PhaseHandlerOrchestrator(
+            PhaseValidationChat.Returning(validation), new FakeArtifactReader(artifacts), writerDeps, repo);
     }
 
     private static PhaseHandlerState State(SpecKitPhase phase) => new()

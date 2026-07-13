@@ -1,6 +1,5 @@
 // Owns the lifecycle of every workflow execution run initiated from the visual workflow builder:
-// start, background execution via the SK Process Framework, stop, and human-approval routing.
-#pragma warning disable SKEXP0080
+// start, background execution on MAF Workflows, stop, and human-approval routing.
 
 using System.Collections.Concurrent;
 using DBAIAzure.Core.Interfaces;
@@ -9,17 +8,14 @@ using DBAIAzure.Core.Models.NodeConfig;
 using DBAIAzure.Processes.Pipeline.Maf;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
 
 namespace DBAIAzure.Processes.Pipeline;
 
 /// <summary>
-/// Singleton service that owns all visual-workflow execution run lifecycles.
-/// It accepts a kernel factory so the web layer can supply its own kernel configuration
-/// (LLM connector, DI services) without coupling this class to any specific provider.
-/// The SK Process Framework handles all orchestration state — this class is intentionally
-/// thin, acting only as the entry/exit boundary between the UI layer and the process runtime.
+/// Singleton service that owns all visual-workflow execution run lifecycles. It translates a persisted
+/// <see cref="WorkflowDefinition"/> into a MAF <see cref="Workflow"/> and drives it, acting as the
+/// entry/exit boundary between the UI layer and the workflow runtime. Model access flows through the
+/// provider-neutral <see cref="IChatClient"/>.
 /// </summary>
 public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrator
 {
@@ -37,8 +33,6 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
 
     // ── Fields ─────────────────────────────────────────────────────────────────────
 
-    private readonly Func<Kernel> _kernelFactory;
-    private readonly WorkflowRuntimeBuilder _runtimeBuilder;
     private readonly ConcurrentDictionary<string, WorkflowRunState> _runs = new();
     private readonly IWorkflowRunRepository? _runRepository;
     private readonly IWorkflowApprovalNotifier? _approvalNotifier;
@@ -49,10 +43,9 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
     // IHubContext<WorkflowRunHub>; null means no external broadcast (dev/test default).
     private readonly Func<string, string, Task>? _broadcastUpdate;
 
-    // spec-019 T022: the provider-neutral model client + flag that run the visual workflow on MAF Workflows
-    // (default off until cutover), plus deps the node executors and durable checkpointing need.
-    private readonly IChatClient? _chatClient;
-    private readonly bool _useMafRuntime;
+    // The provider-neutral model client, the connector config the node executors need, and the durable
+    // checkpoint manager (null → in-process resume only).
+    private readonly IChatClient _chatClient;
     private readonly IConnectorConfigRepository? _connectorRepository;
     private readonly CheckpointManager? _checkpointManager;
 
@@ -72,26 +65,21 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
     /// Program.cs wires this to IHubContext&lt;WorkflowRunHub&gt; for SignalR broadcasting (T048).
     /// </param>
     public WorkflowExecutionOrchestrator(
-        Func<Kernel> kernelFactory,
+        IChatClient chatClient,
         IWorkflowRunRepository? runRepository = null,
         IWorkflowApprovalNotifier? approvalNotifier = null,
         IEnumerable<IWorkflowObserver>? observers = null,
         Func<string, string, Task>? broadcastUpdate = null,
-        IChatClient? chatClient = null,
-        bool useMafRuntime = false,
         IConnectorConfigRepository? connectorRepository = null,
         CheckpointManager? checkpointManager = null)
     {
-        _kernelFactory    = kernelFactory;
-        _runtimeBuilder   = new WorkflowRuntimeBuilder();
+        _chatClient       = chatClient;
         _runRepository    = runRepository;
         _approvalNotifier = approvalNotifier;
         _broadcastUpdate  = broadcastUpdate;
         _observers        = observers is not null
             ? (IReadOnlyList<IWorkflowObserver>)observers.ToList().AsReadOnly()
             : Array.Empty<IWorkflowObserver>();
-        _chatClient          = chatClient;
-        _useMafRuntime       = useMafRuntime && chatClient is not null;
         _connectorRepository = connectorRepository;
         _checkpointManager   = checkpointManager;
     }
@@ -262,9 +250,9 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
     /// </summary>
     public void RehydratePausedRun(WorkflowRunRecord record, WorkflowDefinition definition, CheckpointInfo checkpoint)
     {
-        if (!_useMafRuntime || _checkpointManager is null)
+        if (_checkpointManager is null)
         {
-            RehydratePausedRun(record); // fall back to reconstitute-only (approve/reject resolves the TCS)
+            RehydratePausedRun(record); // no checkpointing: reconstitute-only (approve/reject resolves the TCS)
             return;
         }
 
@@ -528,236 +516,8 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
         // Make the run id ambient so the LLM connector's usage reporter tags this run's calls (FR-008).
         DBAIAzure.Core.Diagnostics.LlmRunContext.CurrentRunId.Value = runId;
 
-        // spec-019 T022: run the visual workflow on MAF Workflows when enabled (default off until cutover).
-        if (_useMafRuntime)
-        {
-            await ExecuteViaMafAsync(runState, workflow, inputDescription);
-            return;
-        }
-
-        try
-        {
-            // ── Mark the run as active ────────────────────────────────────────────
-            runState.Run = runState.Run with { Status = WorkflowRunStatus.Running };
-            PersistRunState(runState);
-            FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
-            BroadcastRunStatus(runId, WorkflowRunStatus.Running);
-
-            // Emit StepStarted for each runnable node so the Run History page shows
-            // the run beginning even before per-step SK callbacks are available (T058).
-            foreach (var node in workflow.Nodes.Where(n => n.NodeType != WorkflowNodeType.Trigger))
-            {
-                DispatchEvent(new Core.Models.WorkflowExecutionEvent(
-                    EventId:         Guid.NewGuid(),
-                    RunId:           runId,
-                    NodeId:          node.Id,
-                    NodeLabel:       node.Label,
-                    EventType:       Core.Models.WorkflowEventType.StepStarted,
-                    OccurredAt:      runState.Run.StartedAt,
-                    DurationMs:      null,
-                    Outcome:         null,
-                    LlmModelName:    null,
-                    LlmInputTokens:  null,
-                    LlmOutputTokens: null));
-            }
-
-            // ── Translate plain-language input to a structured workflow payload ────
-            // WorkflowInputTranslator is stateless so it is safe to create per-run;
-            // it relies on the kernel for the chat-completion backend only.
-            var kernel = _kernelFactory();
-            var chatService = kernel.GetRequiredService<IChatCompletionService>();
-            var inputTranslator = new WorkflowInputTranslator(chatService);
-
-            var (translatedInput, _) = await inputTranslator
-                .TranslateAsync(inputDescription, workflow.Nodes, runState.Cts.Token)
-                .ConfigureAwait(false);
-            // Mutable local so the Trigger context merge below can prepend to it.
-            var structuredInput = translatedInput;
-
-            // ── Resolve the graph entry point ─────────────────────────────────────
-            // The Trigger node marks the entry point but has no runnable logic of its own.
-            // If a Trigger is present, we skip it and start from the first downstream node
-            // (the target of the Trigger's "Begin" output edge). If no Trigger is present
-            // (e.g., legacy workflows) we fall back to the first node in the list.
-            var triggerNode = workflow.Nodes.FirstOrDefault(n => n.NodeType == WorkflowNodeType.Trigger);
-            string firstRunnableNodeId;
-
-            if (triggerNode is not null)
-            {
-                // Find the downstream node connected to the Trigger's output port.
-                var triggerOutEdge = workflow.Edges.FirstOrDefault(e => e.SourceNodeId == triggerNode.Id);
-                firstRunnableNodeId = triggerOutEdge?.TargetNodeId
-                    ?? workflow.Nodes.FirstOrDefault(n => n.NodeType != WorkflowNodeType.Trigger)?.Id
-                    ?? string.Empty;
-
-                // Merge the Trigger's GoalPrompt and initial-data description into the input payload so
-                // the first runnable step receives the workflow intent as context. The description is
-                // read via the realized TriggerNodeConfig when present, falling back to the legacy blob.
-                var initialDataDescription = ReadTriggerInitialData(triggerNode.FunctionConfig);
-                var triggerContext = triggerNode.GoalPrompt ?? string.Empty;
-                if (!string.IsNullOrWhiteSpace(initialDataDescription))
-                {
-                    triggerContext = string.IsNullOrWhiteSpace(triggerContext)
-                        ? $"Available data: {initialDataDescription}"
-                        : $"{triggerContext}\n\nAvailable data: {initialDataDescription}";
-                }
-
-                if (!string.IsNullOrWhiteSpace(triggerContext))
-                {
-                    structuredInput = string.IsNullOrWhiteSpace(structuredInput)
-                        ? triggerContext
-                        : $"{triggerContext}\n\n{structuredInput}";
-                }
-            }
-            else
-            {
-                firstRunnableNodeId = workflow.Nodes.Count > 0 ? workflow.Nodes[0].Id : string.Empty;
-            }
-
-            // ── Build the KernelProcess from the workflow definition ───────────────
-            var process = _runtimeBuilder.Build(workflow);
-
-            var startEvent = new KernelProcessEvent
-            {
-                Id   = WorkflowNodeEvents.NodeStart,
-                Data = new WorkflowStepData
-                {
-                    RunId        = runId,
-                    NodeId       = firstRunnableNodeId,
-                    InputPayload = structuredInput,
-                },
-            };
-
-            // ── Run the process under the configured timeout ──────────────────────
-            var executionTimeout = TimeSpan.FromMinutes(workflow.Settings.ExecutionTimeoutMinutes);
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(runState.Cts.Token);
-            timeoutCts.CancelAfter(executionTimeout);
-
-            bool didTimeOut = false;
-            try
-            {
-                await LocalKernelProcessFactory
-                    .RunToEndAsync(process, kernel, startEvent, executionTimeout)
-                    .ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!runState.Cts.IsCancellationRequested)
-            {
-                // The linked token fired due to timeout, not an explicit stop request.
-                didTimeOut = true;
-            }
-
-            // ── Write the terminal status ─────────────────────────────────────────
-            // For this POC we do not have per-step callbacks from the SK process, so all
-            // nodes are marked Succeeded on clean completion. Future work (specs/003) will
-            // wire per-step progress events to update individual node states during the run.
-            if (runState.Cts.IsCancellationRequested && !didTimeOut)
-            {
-                // RequestStop was called; the status was already written there — nothing more to do.
-                return;
-            }
-
-            if (didTimeOut)
-            {
-                var timedOutAt = DateTimeOffset.UtcNow;
-                var timedOutNodeStates = runState.Run.NodeStates
-                    .Select(nodeState => nodeState.Status is NodeStatus.NotStarted or NodeStatus.Active
-                        ? nodeState with { Status = NodeStatus.Skipped, CompletedAt = timedOutAt }
-                        : nodeState)
-                    .ToList()
-                    .AsReadOnly();
-
-                runState.Run = runState.Run with
-                {
-                    Status      = WorkflowRunStatus.TimedOut,
-                    NodeStates  = timedOutNodeStates,
-                    CompletedAt = timedOutAt,
-                };
-
-                // Emit StepFailed for nodes that did not finish before timeout (T058).
-                foreach (var node in workflow.Nodes.Where(n => n.NodeType != WorkflowNodeType.Trigger))
-                {
-                    DispatchEvent(new Core.Models.WorkflowExecutionEvent(
-                        EventId:         Guid.NewGuid(),
-                        RunId:           runId,
-                        NodeId:          node.Id,
-                        NodeLabel:       node.Label,
-                        EventType:       Core.Models.WorkflowEventType.StepFailed,
-                        OccurredAt:      timedOutAt,
-                        DurationMs:      (long)(timedOutAt - runState.Run.StartedAt).TotalMilliseconds,
-                        Outcome:         "Timed out before completing.",
-                        LlmModelName:    null,
-                        LlmInputTokens:  null,
-                        LlmOutputTokens: null));
-                }
-            }
-            else
-            {
-                var completedAt = DateTimeOffset.UtcNow;
-                var completedNodeStates = runState.Run.NodeStates
-                    .Select(nodeState => nodeState with
-                    {
-                        Status      = NodeStatus.Completed,
-                        StartedAt   = nodeState.StartedAt   ?? runState.Run.StartedAt,
-                        CompletedAt = nodeState.CompletedAt ?? completedAt,
-                    })
-                    .ToList()
-                    .AsReadOnly();
-
-                runState.Run = runState.Run with
-                {
-                    Status      = WorkflowRunStatus.Completed,
-                    NodeStates  = completedNodeStates,
-                    CompletedAt = completedAt,
-                };
-
-                // Emit StepCompleted for each runnable node on clean completion (T058).
-                foreach (var node in workflow.Nodes.Where(n => n.NodeType != WorkflowNodeType.Trigger))
-                {
-                    DispatchEvent(new Core.Models.WorkflowExecutionEvent(
-                        EventId:         Guid.NewGuid(),
-                        RunId:           runId,
-                        NodeId:          node.Id,
-                        NodeLabel:       node.Label,
-                        EventType:       Core.Models.WorkflowEventType.StepCompleted,
-                        OccurredAt:      completedAt,
-                        DurationMs:      (long)(completedAt - runState.Run.StartedAt).TotalMilliseconds,
-                        Outcome:         "Completed",
-                        LlmModelName:    null,
-                        LlmInputTokens:  null,
-                        LlmOutputTokens: null));
-                }
-            }
-
-            PersistRunState(runState);
-            BroadcastRunStatus(runId, runState.Run.Status);
-            FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            runState.Run = runState.Run with
-            {
-                Status        = WorkflowRunStatus.Failed,
-                FailureReason = ex.Message,
-                CompletedAt   = DateTimeOffset.UtcNow,
-            };
-
-            PersistRunState(runState);
-            BroadcastRunStatus(runId, WorkflowRunStatus.Failed);
-            DispatchEvent(new Core.Models.WorkflowExecutionEvent(
-                EventId:         Guid.NewGuid(),
-                RunId:           runId,
-                NodeId:          null,
-                NodeLabel:       null,
-                EventType:       Core.Models.WorkflowEventType.StepFailed,
-                OccurredAt:      DateTimeOffset.UtcNow,
-                DurationMs:      null,
-                Outcome:         ex.Message,
-                LlmModelName:    null,
-                LlmInputTokens:  null,
-                LlmOutputTokens: null));
-            RunUpdated?.Invoke(runId);
-        }
+        // Run the visual workflow on MAF Workflows.
+        await ExecuteViaMafAsync(runState, workflow, inputDescription);
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────────

@@ -2,14 +2,12 @@ using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
 using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Tests.Fakes;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests;
 
 /// <summary>
-/// Tests for CreateWorkItemStep via the real SK process: an approved Specify run creates exactly one
+/// Tests the create-work-item behaviour on the MAF phase-handler: an approved Specify run creates exactly one
 /// Epic populated from the validation summary, and nothing is ever written without an approval (FR-006).
 /// </summary>
 public class CreateWorkItemStepTests
@@ -25,18 +23,12 @@ public class CreateWorkItemStepTests
             Gaps = [new PhaseValidationGap { Label = "Gap1", Description = "Detail1" }],
         };
         var canned = artifacts ?? [new PhaseArtifact { FileName = "spec.md", Content = "x" }];
-        Func<IPhaseProgressSink, Kernel> factory = sink =>
-        {
-            var builder = Kernel.CreateBuilder();
-            builder.Services.AddSingleton<IArtifactReader>(new FakeArtifactReader(canned));
-            builder.Services.AddSingleton<IStructuredCompletionService>(new FakeStructuredCompletionService(validation));
-            builder.Services.AddSingleton<IBoardsClient>(boards);
-            builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter>(WorkTrackerAdapters.AdoAdapterFor(boards));
-            builder.Services.AddSingleton(repository ?? (IPhaseRunRepository)new FakePhaseRunRepository());
-            builder.Services.AddSingleton(sink);
-            return builder.Build();
-        };
-        return new PhaseHandlerOrchestrator(factory, repository);
+        var repo = repository ?? new FakePhaseRunRepository();
+        var writerDeps = new PhaseWorkItemWriterDeps(
+            Tracker: WorkTrackerAdapters.AdoAdapterFor(boards), Repository: repo);
+
+        return new PhaseHandlerOrchestrator(
+            PhaseValidationChat.Returning(validation), new FakeArtifactReader(canned), writerDeps, repo);
     }
 
     private static PhaseHandlerState State(SpecKitPhase phase = SpecKitPhase.Specify) => new()

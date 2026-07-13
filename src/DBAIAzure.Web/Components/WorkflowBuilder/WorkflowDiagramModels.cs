@@ -1,7 +1,6 @@
 // Blazor.Diagrams subclasses that bridge domain workflow models to the diagramming library's
 // node, port, and link primitives used by the visual workflow canvas.
 
-#pragma warning disable SKEXP0080
 
 using Blazor.Diagrams.Core.Geometry;
 using Blazor.Diagrams.Core.Models;

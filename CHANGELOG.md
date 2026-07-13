@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — MAF modernization: atomic cutover, Semantic Kernel removed (spec-019, T050/T051/T056)
+
+The Semantic Kernel Process Framework is **gone**. This is the atomic cutover: MAF Workflows is now the only
+runtime, unconditionally (the `Maf:Enabled` flag is removed). Deleted every SK Step, the
+`IntakePipelineBuilder` / `PhaseHandlerPipelineBuilder` / `WorkflowRuntimeBuilder`, the HITL/approval external
+channels, the two SK cost filters, `AnthropicChatCompletionService` / `HotReloadAnthropicService`, and the
+`Events` / `WorkflowNodeEvents` / `WorkflowInputTranslator` helpers; `FunctionTransformStep` /
+`FunctionDataStep` became pure static helpers (their mapping/description logic is reused by the MAF
+executors). All `Microsoft.SemanticKernel*` package references and every `SKEXP0080` pragma/NoWarn were
+stripped from `src/` and `tests/`; `SemanticKernelRemovedGateTests` is a permanent grep gate asserting zero
+`Microsoft.SemanticKernel` / `SKEXP` matches across the tree (FR-003 / SC-002).
+
+The three orchestrators are MAF-only, constructed directly with `IChatClient` (no kernel factory, no flag).
+The phase-handler's board-write dependencies — previously sourced from the SK kernel container via the
+interim `CompositeServiceProvider` shim — are now injected directly as an explicit `PhaseWorkItemWriterDeps`,
+and `MafPhaseHandlerWorkflowFactory.Build` takes those deps as parameters. The design-time AI services
+(Workflow Builder assistant, code generator, availability monitor, node realization) were migrated from SK
+`IChatCompletionService` to `Microsoft.Extensions.AI.IChatClient`. The **Runner** console host was rewritten
+to build the intake pipeline via `MafIntakeWorkflowFactory` and drive the `RequestPort` console HITL loop over
+a `MafWorkflowSession`, with the model client from `AnthropicChatClientProvider`.
+
+Obsolete SK-only tests were removed (they exercised deleted infrastructure covered on MAF by parity/executor
+tests): the SK-vs-MAF perf benchmark, the SK-runtime node-realization test, the `AnthropicChatCompletionService`
+usage/structured-output tests, the `HotReloadAnthropicService` key-resolution test, and the SK step/channel
+unit tests (`ValidationStep`, `PhaseValidationStep`, `ReadArtifactsStep`, `HitlExternalChannel`,
+`AdoTelemetryPreflightStep`). The remaining phase-handler/orchestrator tests were migrated to the MAF
+constructors + a scripted `IChatClient`. **Cutover gate (T056): `dotnet test` green** — 634 passing, 1 skipped,
+1 pre-existing unrelated failure (`ConnectorSettingsPanel`); grep gate clean. The migration is complete: every
+pipeline and HITL surface runs, resumes, and rehydrates on MAF Workflows with no Semantic Kernel dependency.
+
 ### Added — MAF modernization: provider-neutral IChatClient seam (spec-019, Setup + Foundational)
 
 First increment of the Microsoft Agent Framework migration (spec-019). Additive and behavior-neutral —

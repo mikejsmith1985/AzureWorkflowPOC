@@ -3,7 +3,6 @@ using DBAIAzure.Core.Models;
 using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests;
@@ -24,21 +23,12 @@ public class PhaseApprovalNotifierTests
         };
         var notifier = new FakePhaseApprovalNotifier();
 
-        Func<IPhaseProgressSink, Kernel> kernelFactory = sink =>
-        {
-            var builder = Kernel.CreateBuilder();
-            builder.Services.AddSingleton<IArtifactReader>(
-                new FakeArtifactReader([new PhaseArtifact { FileName = "spec.md", Content = "content" }]));
-            builder.Services.AddSingleton<IStructuredCompletionService>(new FakeStructuredCompletionService(validation));
-            var boards = new FakeBoardsClient();
-            builder.Services.AddSingleton<IBoardsClient>(boards);
-            builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter>(WorkTrackerAdapters.AdoAdapterFor(boards));
-            builder.Services.AddSingleton(sink);
-            return builder.Build();
-        };
+        var reader = new FakeArtifactReader([new PhaseArtifact { FileName = "spec.md", Content = "content" }]);
+        var writerDeps = new PhaseWorkItemWriterDeps(Tracker: WorkTrackerAdapters.AdoAdapterFor(new FakeBoardsClient()));
 
         var orchestrator = new PhaseHandlerOrchestrator(
-            kernelFactory, repository: null, approvalNotifier: notifier, portalBaseUrl: "http://localhost:5000");
+            PhaseValidationChat.Returning(validation), reader, writerDeps,
+            repository: null, approvalNotifier: notifier, portalBaseUrl: "http://localhost:5000");
 
         var runId = orchestrator.StartRun(new PhaseHandlerState
         {
