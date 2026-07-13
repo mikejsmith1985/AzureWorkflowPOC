@@ -49,6 +49,10 @@ public sealed class MafWorkflowRuntimeFactory
             var config = BuildNodeConfig(node);
             bindingByNodeId[node.Id] = node.NodeType switch
             {
+                // The Trigger node marks the entry point and carries no runnable logic — forward the seed
+                // straight to its successor (a transform with no mappings is a pass-through).
+                WorkflowNodeType.Trigger => new FunctionTransformExecutor(
+                    node.Id, config, IsTerminal(node.Id)).BindExecutor(),
                 WorkflowNodeType.AgenticReason => new AgenticNodeExecutor(
                     node.Id, chatClient, config, IsTerminal(node.Id)).BindExecutor(),
                 WorkflowNodeType.FunctionRoute => new FunctionRouteExecutor(

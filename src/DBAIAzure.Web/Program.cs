@@ -589,7 +589,14 @@ builder.Services.AddSingleton<IWorkflowExecutionOrchestrator>(sp =>
     Func<string, string, Task> broadcastUpdate = (runId, statusText) =>
         hubContext.Clients.All.SendAsync("RunStatusChanged", runId, statusText);
 
-    return new WorkflowExecutionOrchestrator(kernelFactory, runRepo, approvalNotifier, observers, broadcastUpdate);
+    // spec-019 T022: hand the visual orchestrator the MAF model client + flag + executor deps + checkpoints.
+    var chatClient = sp.GetService<Microsoft.Extensions.AI.IChatClient>();
+    var runOnMaf   = builder.Configuration.GetValue<bool>("Maf:Enabled");
+    var checkpointManager = sp.GetService<Microsoft.Agents.AI.Workflows.CheckpointManager>();
+
+    return new WorkflowExecutionOrchestrator(
+        kernelFactory, runRepo, approvalNotifier, observers, broadcastUpdate,
+        chatClient, runOnMaf, configRepo, checkpointManager);
 });
 
 var app = builder.Build();

@@ -6,6 +6,9 @@ using System.Collections.Concurrent;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
 using DBAIAzure.Core.Models.NodeConfig;
+using DBAIAzure.Processes.Pipeline.Maf;
+using Microsoft.Agents.AI.Workflows;
+using Microsoft.Extensions.AI;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 
@@ -46,6 +49,13 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
     // IHubContext<WorkflowRunHub>; null means no external broadcast (dev/test default).
     private readonly Func<string, string, Task>? _broadcastUpdate;
 
+    // spec-019 T022: the provider-neutral model client + flag that run the visual workflow on MAF Workflows
+    // (default off until cutover), plus deps the node executors and durable checkpointing need.
+    private readonly IChatClient? _chatClient;
+    private readonly bool _useMafRuntime;
+    private readonly IConnectorConfigRepository? _connectorRepository;
+    private readonly CheckpointManager? _checkpointManager;
+
     // ── Constructor ────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -66,7 +76,11 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
         IWorkflowRunRepository? runRepository = null,
         IWorkflowApprovalNotifier? approvalNotifier = null,
         IEnumerable<IWorkflowObserver>? observers = null,
-        Func<string, string, Task>? broadcastUpdate = null)
+        Func<string, string, Task>? broadcastUpdate = null,
+        IChatClient? chatClient = null,
+        bool useMafRuntime = false,
+        IConnectorConfigRepository? connectorRepository = null,
+        CheckpointManager? checkpointManager = null)
     {
         _kernelFactory    = kernelFactory;
         _runtimeBuilder   = new WorkflowRuntimeBuilder();
@@ -76,6 +90,10 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
         _observers        = observers is not null
             ? (IReadOnlyList<IWorkflowObserver>)observers.ToList().AsReadOnly()
             : Array.Empty<IWorkflowObserver>();
+        _chatClient          = chatClient;
+        _useMafRuntime       = useMafRuntime && chatClient is not null;
+        _connectorRepository = connectorRepository;
+        _checkpointManager   = checkpointManager;
     }
 
     // ── IWorkflowExecutionOrchestrator ─────────────────────────────────────────────
@@ -281,6 +299,88 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
     /// back to the run record. All exceptions are caught and converted to a Failed status
     /// so the background task never faults silently.
     /// </summary>
+    /// <summary>
+    /// Runs the visual workflow on MAF Workflows (spec-019 T022): builds the graph from the definition,
+    /// drives it to completion, and maps the outcome to the run's status. A HumanApproval node suspends the
+    /// run as <see cref="WorkflowRunStatus.Paused"/> for review (the approval-resume bridge is US2 for the
+    /// visual surface). Executors run under the provider-neutral <see cref="IChatClient"/>.
+    /// </summary>
+    private async Task ExecuteViaMafAsync(
+        WorkflowRunState runState, WorkflowDefinition workflow, string inputDescription)
+    {
+        var runId = runState.Run.RunId;
+
+        try
+        {
+            runState.Run = runState.Run with { Status = WorkflowRunStatus.Running };
+            PersistRunState(runState);
+            FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+            BroadcastRunStatus(runId, WorkflowRunStatus.Running);
+
+            // Seed the entry node (Nodes[0], typically the Trigger) with the run's input description.
+            var seed = new WorkflowStepData
+            {
+                RunId = runId,
+                NodeId = workflow.Nodes.Count > 0 ? workflow.Nodes[0].Id : string.Empty,
+                InputPayload = inputDescription,
+            };
+
+            var services = new MafExecutorServices();
+            if (_connectorRepository is not null)
+            {
+                services.Add<IConnectorConfigRepository>(_connectorRepository);
+            }
+            var mafWorkflow = new MafWorkflowRuntimeFactory().Build(workflow, _chatClient!, services);
+
+            var session = await MafWorkflowSession<WorkflowStepData>.StartAsync(
+                mafWorkflow, seed, runId, _checkpointManager, CancellationToken.None);
+            var segment = await session.DriveAsync(CancellationToken.None);
+
+            if (segment.Suspended)
+            {
+                // A HumanApproval node paused the run for review; approval-resume is US2 (visual surface).
+                runState.Run = runState.Run with { Status = WorkflowRunStatus.Paused };
+                PersistRunState(runState);
+                FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+                BroadcastRunStatus(runId, WorkflowRunStatus.Paused);
+                return;
+            }
+
+            var completedAt = DateTimeOffset.UtcNow;
+            var completedNodeStates = runState.Run.NodeStates
+                .Select(nodeState => nodeState with
+                {
+                    Status = NodeStatus.Completed,
+                    StartedAt = nodeState.StartedAt ?? runState.Run.StartedAt,
+                    CompletedAt = nodeState.CompletedAt ?? completedAt,
+                })
+                .ToList()
+                .AsReadOnly();
+
+            runState.Run = runState.Run with
+            {
+                Status = WorkflowRunStatus.Completed,
+                NodeStates = completedNodeStates,
+                CompletedAt = completedAt,
+            };
+            PersistRunState(runState);
+            BroadcastRunStatus(runId, WorkflowRunStatus.Completed);
+            FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+        }
+        catch (Exception ex)
+        {
+            runState.Run = runState.Run with
+            {
+                Status = WorkflowRunStatus.Failed,
+                FailureReason = ex.Message,
+                CompletedAt = DateTimeOffset.UtcNow,
+            };
+            PersistRunState(runState);
+            BroadcastRunStatus(runId, WorkflowRunStatus.Failed);
+            FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+        }
+    }
+
     private async Task ExecuteRunAsync(
         WorkflowRunState runState,
         WorkflowDefinition workflow,
@@ -290,6 +390,13 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
 
         // Make the run id ambient so the LLM connector's usage reporter tags this run's calls (FR-008).
         DBAIAzure.Core.Diagnostics.LlmRunContext.CurrentRunId.Value = runId;
+
+        // spec-019 T022: run the visual workflow on MAF Workflows when enabled (default off until cutover).
+        if (_useMafRuntime)
+        {
+            await ExecuteViaMafAsync(runState, workflow, inputDescription);
+            return;
+        }
 
         try
         {
