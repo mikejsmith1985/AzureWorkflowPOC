@@ -8,7 +8,6 @@ using DBAIAzure.Tests.Fakes;
 using DBAIAzure.Tests.Parity;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests;
@@ -37,26 +36,12 @@ public sealed class PhaseHandlerMafResumeTests
         var artifacts = new[] { new PhaseArtifact { FileName = "spec.md", Content = "x" } };
         var repository = new FakePhaseRunRepository();
 
-        // The MAF path sources the create executor's board-write dependencies from the SK kernel's container,
-        // so register the fake tracker/repository/artifact-reader/sink there exactly as the SK path would.
-        Func<IPhaseProgressSink, Kernel> kernelFactory = sink =>
-        {
-            var builder = Kernel.CreateBuilder();
-            builder.Services.AddSingleton<IArtifactReader>(new FakeArtifactReader(artifacts));
-            builder.Services.AddSingleton<IWorkTrackerAdapter>(WorkTrackerAdapters.AdoAdapterFor(boards));
-            builder.Services.AddSingleton<IPhaseRunRepository>(repository);
-            builder.Services.AddSingleton(sink);
-            return builder.Build();
-        };
-
         var chatClient = new RecordedChatClient(new[] { RecordedTurn.With(ValidationJson, 50, 20) }, repeatLast: true);
+        var writerDeps = new PhaseWorkItemWriterDeps(
+            Tracker: WorkTrackerAdapters.AdoAdapterFor(boards), Repository: repository);
 
         return new PhaseHandlerOrchestrator(
-            kernelFactory,
-            repository,
-            chatClient: chatClient,
-            artifactReader: new FakeArtifactReader(artifacts),
-            useMafRuntime: true);
+            chatClient, new FakeArtifactReader(artifacts), writerDeps, repository);
     }
 
     private static async Task WaitAsync(PhaseHandlerOrchestrator orchestrator, string runId, Func<PhaseHandlerRun, bool> done)

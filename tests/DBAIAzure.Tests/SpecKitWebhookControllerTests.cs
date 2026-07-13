@@ -3,7 +3,6 @@ using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Tests.Fakes;
 using DBAIAzure.Core.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests;
@@ -64,18 +63,10 @@ public class SpecKitWebhookControllerTests
     private static PhaseHandlerOrchestrator BuildOrchestrator()
     {
         var validation = new PhaseValidationResult { Summary = "s", Gaps = [] };
-        Func<IPhaseProgressSink, Kernel> factory = sink =>
-        {
-            var builder = Kernel.CreateBuilder();
-            builder.Services.AddSingleton<IArtifactReader>(
-                new FakeArtifactReader([new PhaseArtifact { FileName = "spec.md", Content = "x" }]));
-            builder.Services.AddSingleton<IStructuredCompletionService>(new FakeStructuredCompletionService(validation));
-            var boards = new FakeBoardsClient();
-            builder.Services.AddSingleton<IBoardsClient>(boards);
-            builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter>(WorkTrackerAdapters.AdoAdapterFor(boards));
-            builder.Services.AddSingleton(sink);
-            return builder.Build();
-        };
-        return new PhaseHandlerOrchestrator(factory);
+        var repo = new FakePhaseRunRepository();
+        var writerDeps = new PhaseWorkItemWriterDeps(
+            Tracker: WorkTrackerAdapters.AdoAdapterFor(new FakeBoardsClient()), Repository: repo);
+        return new PhaseHandlerOrchestrator(
+            PhaseValidationChat.Returning(validation), new FakeArtifactReader([new PhaseArtifact { FileName = "spec.md", Content = "x" }]), writerDeps, repo);
     }
 }

@@ -6,7 +6,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.SemanticKernel" Version="1.77.0" />
     <!-- spec-019: Microsoft Agent Framework modernization. The provider-neutral model layer is
          Microsoft.Extensions.AI (IChatClient); Claude is reached via the official Anthropic SDK's
          .AsIChatClient() (GA — deliberately NOT the prerelease Microsoft.Agents.AI.Anthropic). SK stays

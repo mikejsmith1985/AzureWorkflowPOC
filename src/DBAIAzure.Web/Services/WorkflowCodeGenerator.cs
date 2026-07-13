@@ -1,40 +1,38 @@
-// Generates and refines Semantic Kernel process code from workflow definitions,
+// Generates and refines workflow implementation code from workflow definitions,
 // streaming tokens to the UI for a live typing effect.
 
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
-using System.Runtime.CompilerServices;
+using Microsoft.Extensions.AI;
 using System.Text;
+using MeaiChatRole = Microsoft.Extensions.AI.ChatRole;
 
 namespace DBAIAzure.Web.Services;
 
 /// <summary>
-/// Implements <see cref="IWorkflowCodeGenerator"/> using Semantic Kernel's streaming
-/// chat completion. Each call to <see cref="GenerateAsync"/> builds a prompt from the
-/// serialised topology and the full conversation history, then streams tokens back to the
-/// caller via an <see cref="Action{T}"/> callback.
-/// <see cref="RefineAsync"/> appends the user's instruction as a new chat turn and computes
-/// a line-level diff against the previous code using a Myers-style algorithm.
+/// Implements <see cref="IWorkflowCodeGenerator"/> using the provider-neutral streaming chat client.
+/// Each call to <see cref="GenerateAsync"/> builds a prompt from the serialised topology and the full
+/// conversation history, then streams tokens back to the caller via an <see cref="Action{T}"/> callback.
+/// <see cref="RefineAsync"/> appends the user's instruction as a new chat turn and computes a line-level
+/// diff against the previous code using a Myers-style algorithm.
 /// </summary>
 public sealed class WorkflowCodeGenerator : IWorkflowCodeGenerator
 {
     private readonly WorkflowTopologySerializer _serializer;
-    private readonly IChatCompletionService _chatService;
+    private readonly IChatClient _chatClient;
     private readonly ILogger<WorkflowCodeGenerator> _logger;
 
     /// <summary>
-    /// Initialises the generator with the topology serializer and SK chat completion service.
+    /// Initialises the generator with the topology serializer and the provider-neutral chat client.
     /// </summary>
     public WorkflowCodeGenerator(
         WorkflowTopologySerializer serializer,
-        IChatCompletionService chatService,
+        IChatClient chatClient,
         ILogger<WorkflowCodeGenerator> logger)
     {
-        _serializer  = serializer;
-        _chatService = chatService;
-        _logger      = logger;
+        _serializer = serializer;
+        _chatClient = chatClient;
+        _logger     = logger;
     }
 
     /// <inheritdoc/>
@@ -44,8 +42,8 @@ public sealed class WorkflowCodeGenerator : IWorkflowCodeGenerator
         Action<string> onToken,
         CancellationToken cancellationToken = default)
     {
-        var history = BuildChatHistory(workflow, chatHistory, userInstruction: null);
-        return await StreamResponseAsync(history, onToken, cancellationToken).ConfigureAwait(false);
+        var messages = BuildChatHistory(workflow, chatHistory, userInstruction: null);
+        return await StreamResponseAsync(messages, onToken, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -56,12 +54,12 @@ public sealed class WorkflowCodeGenerator : IWorkflowCodeGenerator
         Action<string> onToken,
         CancellationToken cancellationToken = default)
     {
-        var history = BuildChatHistory(workflow, workflow.ChatHistory, instruction);
+        var messages = BuildChatHistory(workflow, workflow.ChatHistory, instruction);
         // Provide the previous code as context so the LLM knows what to change.
-        history.AddAssistantMessage(previousCode);
-        history.AddUserMessage(instruction);
+        messages.Add(new ChatMessage(MeaiChatRole.Assistant, previousCode));
+        messages.Add(new ChatMessage(MeaiChatRole.User, instruction));
 
-        var updatedCode = await StreamResponseAsync(history, onToken, cancellationToken)
+        var updatedCode = await StreamResponseAsync(messages, onToken, cancellationToken)
             .ConfigureAwait(false);
 
         var diff = ComputeLinesDiff(previousCode, updatedCode);
@@ -70,28 +68,29 @@ public sealed class WorkflowCodeGenerator : IWorkflowCodeGenerator
 
     // ── Private helpers ─────────────────────────────────────────────────────────
 
-    private ChatHistory BuildChatHistory(
+    private List<ChatMessage> BuildChatHistory(
         WorkflowDefinition workflow,
         IReadOnlyList<WorkflowChatMessage> domainHistory,
         string? userInstruction)
     {
         var topology = _serializer.Serialize(workflow);
         var triggerContext = BuildTriggerContext(workflow);
-        var history  = new ChatHistory();
-        history.AddSystemMessage(BuildSystemPrompt(topology, triggerContext));
+        var messages = new List<ChatMessage>
+        {
+            new(MeaiChatRole.System, BuildSystemPrompt(topology, triggerContext)),
+        };
 
         foreach (var message in domainHistory)
         {
-            if (message.Role == ChatRole.User)
-                history.AddUserMessage(message.Content);
-            else
-                history.AddAssistantMessage(message.Content);
+            // message.Role is the domain ChatRole (DBAIAzure.Core.Models); map it onto the chat client role.
+            var role = message.Role == DBAIAzure.Core.Models.ChatRole.User ? MeaiChatRole.User : MeaiChatRole.Assistant;
+            messages.Add(new ChatMessage(role, message.Content));
         }
 
         if (userInstruction is not null)
-            history.AddUserMessage(userInstruction);
+            messages.Add(new ChatMessage(MeaiChatRole.User, userInstruction));
 
-        return history;
+        return messages;
     }
 
     /// <summary>
@@ -136,28 +135,29 @@ public sealed class WorkflowCodeGenerator : IWorkflowCodeGenerator
             : string.Empty;
 
         return $"""
-        You are an expert Semantic Kernel developer. Generate production-ready C# code
-        implementing the workflow described below as a KernelProcess with typed steps and events.
-        Follow .NET 8 and Semantic Kernel 1.x conventions. Add XML doc comments to every public type.
+        You are an expert C# developer. Generate production-ready .NET 8 code
+        implementing the workflow described below as a Microsoft Agent Framework (MAF) Workflow —
+        typed Executors wired with a WorkflowBuilder, model access through Microsoft.Extensions.AI
+        IChatClient. Add XML doc comments to every public type.
         {entryPointComment}
         {topology}
         """;
     }
 
     private async Task<string> StreamResponseAsync(
-        ChatHistory history,
+        List<ChatMessage> messages,
         Action<string> onToken,
         CancellationToken cancellationToken)
     {
         var codeBuilder = new StringBuilder();
         try
         {
-            await foreach (var chunk in _chatService
-                .GetStreamingChatMessageContentsAsync(history, cancellationToken: cancellationToken)
+            await foreach (var update in _chatClient
+                .GetStreamingResponseAsync(messages, options: null, cancellationToken)
                 .WithCancellation(cancellationToken)
                 .ConfigureAwait(false))
             {
-                var token = chunk.Content ?? string.Empty;
+                var token = update.Text ?? string.Empty;
                 if (token.Length > 0)
                 {
                     onToken(token);

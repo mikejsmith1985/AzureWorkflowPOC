@@ -3,7 +3,6 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <NoWarn>SKEXP0080</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,9 +17,6 @@
     <!-- MAF modernization (spec-019): the provider-neutral model layer. CostCapturingChatClient wraps
          the pipeline as a DelegatingChatClient; abstractions carry ChatResponse/UsageDetails. -->
     <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.7.0" />
-    <PackageReference Include="Microsoft.SemanticKernel" Version="1.77.0" />
-    <PackageReference Include="Microsoft.SemanticKernel.Process.Core" Version="1.77.0-alpha" />
-    <PackageReference Include="Microsoft.SemanticKernel.Process.LocalRuntime" Version="1.77.0-alpha" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.11" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.11" PrivateAssets="all" />
     <PackageReference Include="Microsoft.TeamFoundationServer.Client" Version="20.256.2" />

@@ -1,11 +1,10 @@
 // Unit tests for WorkflowDesignSkillService.GenerateWorkflowAsync (T068-T069).
-// Uses a hand-rolled fake IChatCompletionService so no LLM call is made.
+// Uses a hand-rolled fake IChatClient so no LLM call is made.
 
 using DBAIAzure.Core.Models;
 using DBAIAzure.Web.Services;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
 using Xunit;
 
 namespace DBAIAzure.Tests;
@@ -124,64 +123,54 @@ public sealed class WorkflowGenerationTests
 
     private static WorkflowDesignSkillService BuildService(string? responseContent, bool shouldThrow = false)
     {
-        var fakeChatService = shouldThrow
-            ? (IChatCompletionService) new ThrowingChatService()
-            : new StaticChatService(responseContent ?? string.Empty);
+        IChatClient fakeChatClient = shouldThrow
+            ? new ThrowingChatClient()
+            : new StaticChatClient(responseContent ?? string.Empty);
 
         return new WorkflowDesignSkillService(
             new WorkflowTopologySerializer(),
-            fakeChatService,
+            fakeChatClient,
             NullLogger<WorkflowDesignSkillService>.Instance);
     }
 
-    private sealed class StaticChatService(string content) : IChatCompletionService
+    /// <summary>A fake <see cref="IChatClient"/> that returns a fixed assistant response.</summary>
+    private sealed class StaticChatClient(string content) : IChatClient
     {
-        public IReadOnlyDictionary<string, object?> Attributes { get; } =
-            new Dictionary<string, object?>();
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new ChatResponse(new ChatMessage(Microsoft.Extensions.AI.ChatRole.Assistant, content)));
 
-        public Task<IReadOnlyList<ChatMessageContent>> GetChatMessageContentsAsync(
-            ChatHistory chatHistory,
-            PromptExecutionSettings? executionSettings = null,
-            Kernel? kernel = null,
-            CancellationToken cancellationToken = default)
-        {
-            IReadOnlyList<ChatMessageContent> result = new[]
-            {
-                new ChatMessageContent(AuthorRole.Assistant, content)
-            };
-            return Task.FromResult(result);
-        }
-
-        public async IAsyncEnumerable<StreamingChatMessageContent> GetStreamingChatMessageContentsAsync(
-            ChatHistory chatHistory,
-            PromptExecutionSettings? executionSettings = null,
-            Kernel? kernel = null,
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            yield break;
+            yield return new ChatResponseUpdate(Microsoft.Extensions.AI.ChatRole.Assistant, content);
+            await Task.CompletedTask;
         }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
     }
 
-    private sealed class ThrowingChatService : IChatCompletionService
+    /// <summary>A fake <see cref="IChatClient"/> that fails as if the LLM were unreachable.</summary>
+    private sealed class ThrowingChatClient : IChatClient
     {
-        public IReadOnlyDictionary<string, object?> Attributes { get; } =
-            new Dictionary<string, object?>();
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => Task.FromException<ChatResponse>(new HttpRequestException("Simulated LLM timeout"));
 
-        public Task<IReadOnlyList<ChatMessageContent>> GetChatMessageContentsAsync(
-            ChatHistory chatHistory,
-            PromptExecutionSettings? executionSettings = null,
-            Kernel? kernel = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromException<IReadOnlyList<ChatMessageContent>>(
-                new HttpRequestException("Simulated LLM timeout"));
-
-        public async IAsyncEnumerable<StreamingChatMessageContent> GetStreamingChatMessageContentsAsync(
-            ChatHistory chatHistory,
-            PromptExecutionSettings? executionSettings = null,
-            Kernel? kernel = null,
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            await Task.CompletedTask;
+            throw new HttpRequestException("Simulated LLM timeout");
+#pragma warning disable CS0162
             yield break;
+#pragma warning restore CS0162
         }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
     }
 }

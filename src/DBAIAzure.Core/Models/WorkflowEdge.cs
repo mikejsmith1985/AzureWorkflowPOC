@@ -1,6 +1,5 @@
 // Defines the edge model used to represent directed connections between workflow node ports.
 
-#pragma warning disable SKEXP0080
 
 namespace DBAIAzure.Core.Models;
 

@@ -16,7 +16,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests.Checkpointing;
@@ -57,12 +56,10 @@ public sealed class PausedRunRehydrationServiceTests : IDisposable
 
     public void Dispose() => _keepAlive.Dispose();
 
-    private static Kernel StubKernel(IProgressReporter _) => Kernel.CreateBuilder().Build();
-
     private static TicketState SampleTicket => new() { TicketId = "INC0001", Title = "Sample", Description = "Sample description." };
 
     private PipelineOrchestrator NewOrchestrator(RecordedChatClient chatClient) =>
-        new(StubKernel, repository: _repository, chatClient: chatClient, useMafRuntime: true, checkpointManager: _checkpointManager);
+        new(chatClient, repository: _repository, checkpointManager: _checkpointManager);
 
     [Fact]
     public async Task StartupService_RehydratesPausedRun_ThatCompletesOnAnswer()
@@ -146,24 +143,17 @@ public sealed class PausedRunRehydrationServiceTests : IDisposable
 
     /// <summary>A minimal phase orchestrator for the intake-only test (its phase repository is empty).</summary>
     private static PhaseHandlerOrchestrator StubPhaseOrchestrator() =>
-        new(_ => Kernel.CreateBuilder().Build());
+        new(new RecordedChatClient(RecordedTurn.With("{}", 1, 1)), new FakeArtifactReader([]), default);
 
     private PhaseHandlerOrchestrator NewPhaseOrchestrator(FakeBoardsClient boards)
     {
         var artifacts = new[] { new PhaseArtifact { FileName = "spec.md", Content = "x" } };
-        Func<IPhaseProgressSink, Kernel> kernelFactory = sink =>
-        {
-            var builder = Kernel.CreateBuilder();
-            builder.Services.AddSingleton<IArtifactReader>(new FakeArtifactReader(artifacts));
-            builder.Services.AddSingleton<IWorkTrackerAdapter>(WorkTrackerAdapters.AdoAdapterFor(boards));
-            builder.Services.AddSingleton<IPhaseRunRepository>(_phaseRepository);
-            builder.Services.AddSingleton(sink);
-            return builder.Build();
-        };
         var chatClient = new RecordedChatClient(new[] { RecordedTurn.With(PhaseValidationJson, 50, 20) }, repeatLast: true);
+        var writerDeps = new PhaseWorkItemWriterDeps(
+            Tracker: WorkTrackerAdapters.AdoAdapterFor(boards), Repository: _phaseRepository);
         return new PhaseHandlerOrchestrator(
-            kernelFactory, _phaseRepository, chatClient: chatClient,
-            artifactReader: new FakeArtifactReader(artifacts), useMafRuntime: true, checkpointManager: _checkpointManager);
+            chatClient, new FakeArtifactReader(artifacts), writerDeps,
+            _phaseRepository, checkpointManager: _checkpointManager);
     }
 
     [Fact]
@@ -196,7 +186,7 @@ public sealed class PausedRunRehydrationServiceTests : IDisposable
 
     /// <summary>A minimal intake orchestrator for the phase-only test (its intake repository is empty).</summary>
     private PipelineOrchestrator StubOrchestrator() =>
-        new(StubKernel, repository: _repository, useMafRuntime: false);
+        new(new RecordedChatClient(RecordedTurn.With("{}", 1, 1)), repository: _repository);
 
     private async Task WaitForPersistedPhaseStatusAsync(string runId, PhaseRunStatus target)
     {

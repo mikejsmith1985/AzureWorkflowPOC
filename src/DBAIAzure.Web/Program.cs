@@ -17,11 +17,8 @@ using DBAIAzure.Web.Rules;
 using DBAIAzure.Web.Services;
 using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.SemanticKernel;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.SemanticKernel.ChatCompletion;
 
-#pragma warning disable SKEXP0080
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -142,58 +139,17 @@ builder.Services.AddSingleton<IMessageDelivery, DBAIAzure.Connectors.Messaging.M
 // ── HITL notifier — delivers pause-for-input notifications via the Messaging connector (010 US2) ─
 builder.Services.AddSingleton<IHitlNotifier, DBAIAzure.Web.Integrations.Messaging.MessagingHitlNotifier>();
 
-// ── Pipeline orchestrator ──────────────────────────────────────────────────────
+// ── Pipeline orchestrator (runs the ticket-intake pipeline on MAF Workflows) ────
 builder.Services.AddSingleton<PipelineOrchestrator>(sp =>
 {
-    var configRepo = sp.GetRequiredService<IConnectorConfigRepository>();
-    var usageReporter = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ILlmUsageReporter>();
-
-    // Kernel factory: resolves LLM credentials from DB at each run start (hot-reload, FR-014).
-    // Runs on a thread-pool thread (inside Task.Run), so synchronous .GetResult() is safe.
-    Func<IProgressReporter, Kernel> kernelFactory = reporter =>
-    {
-        var effectiveKey   = anthropicKey;
-        var effectiveModel = anthropicModel;
-        try
-        {
-            var configResult = configRepo.GetAsync(ConnectorType.LLM).GetAwaiter().GetResult();
-            if (configResult?.NonSecretConfig is { } nsJson)
-            {
-                using var nsDoc = JsonDocument.Parse(nsJson);
-                if (nsDoc.RootElement.TryGetProperty("modelName", out var mProp) && !string.IsNullOrEmpty(mProp.GetString()))
-                    effectiveModel = mProp.GetString()!;
-            }
-            var secretsJson = configRepo.GetDecryptedSecretsAsync(ConnectorType.LLM).GetAwaiter().GetResult();
-            if (secretsJson is not null)
-            {
-                using var sDoc = JsonDocument.Parse(secretsJson);
-                if (sDoc.RootElement.TryGetProperty("apiKey", out var kProp) && !string.IsNullOrEmpty(kProp.GetString()))
-                    effectiveKey = kProp.GetString()!;
-            }
-        }
-        catch
-        {
-            // DB not available or no LLM config yet — fall back to IConfiguration values.
-        }
-
-        var kernelBuilder = Kernel.CreateBuilder();
-        kernelBuilder.Services.AddSingleton<IChatCompletionService>(
-            new AnthropicChatCompletionService(effectiveKey, effectiveModel, usageReporter));
-        kernelBuilder.Services.AddSingleton<IProgressReporter>(reporter);
-        return kernelBuilder.Build();
-    };
-
-    var repo          = sp.GetRequiredService<IRunRepository>();
-    var notifier      = sp.GetService<IHitlNotifier>();
-    var healthChecker = sp.GetService<IConnectorHealthChecker>();
-
-    // spec-019 T022/T032: hand the orchestrator the MAF model client, runtime flag, and checkpoint manager.
-    var chatClient = sp.GetService<Microsoft.Extensions.AI.IChatClient>();
-    var runOnMaf   = builder.Configuration.GetValue<bool>("Maf:Enabled");
+    var chatClient        = sp.GetRequiredService<Microsoft.Extensions.AI.IChatClient>();
+    var repo              = sp.GetRequiredService<IRunRepository>();
+    var notifier          = sp.GetService<IHitlNotifier>();
+    var healthChecker     = sp.GetService<IConnectorHealthChecker>();
     var checkpointManager = sp.GetService<Microsoft.Agents.AI.Workflows.CheckpointManager>();
 
     return new PipelineOrchestrator(
-        kernelFactory, repo, notifier, portalBaseUrl, healthChecker, chatClient, runOnMaf, checkpointManager);
+        chatClient, repo, notifier, portalBaseUrl, healthChecker, checkpointManager);
 });
 
 // ── Spec Kit phase handler (parallel track — does not touch the ticket pipeline) ─
@@ -267,70 +223,30 @@ builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapterProvi
 
 builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
 {
-    var configRepo     = sp.GetRequiredService<IConnectorConfigRepository>();
+    var chatClient     = sp.GetRequiredService<Microsoft.Extensions.AI.IChatClient>();
     var artifactReader = sp.GetRequiredService<IArtifactReader>();
-    var boardsClient   = sp.GetRequiredService<IBoardsClient>();
     var phaseRepo      = sp.GetRequiredService<IPhaseRunRepository>();
-    var telemetryWriteBack = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ITelemetryWriteBack>();
-    var phaseUsageReporter = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ILlmUsageReporter>();
     var bindingKeyMinter   = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IBindingKeyMinter>();
-    var bindingWorkItemMap = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IBindingWorkItemMap>();
-    var costLedger         = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ICostLedger>();
-    var costProjection     = sp.GetRequiredService<DBAIAzure.Core.Interfaces.ICostProjection>();
-    var runTelemetrySource = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IRunTelemetrySource>();
     var workTrackerAdapter = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IWorkTrackerAdapterProvider>().GetAdapter();
 
-    Func<IPhaseProgressSink, Kernel> kernelFactory = sink =>
-    {
-        var effectiveKey   = anthropicKey;
-        var effectiveModel = anthropicModel;
-        try
-        {
-            var configResult = configRepo.GetAsync(ConnectorType.LLM).GetAwaiter().GetResult();
-            if (configResult?.NonSecretConfig is { } nsJson)
-            {
-                using var nsDoc = JsonDocument.Parse(nsJson);
-                if (nsDoc.RootElement.TryGetProperty("modelName", out var mProp) && !string.IsNullOrEmpty(mProp.GetString()))
-                    effectiveModel = mProp.GetString()!;
-            }
-            var secretsJson = configRepo.GetDecryptedSecretsAsync(ConnectorType.LLM).GetAwaiter().GetResult();
-            if (secretsJson is not null)
-            {
-                using var sDoc = JsonDocument.Parse(secretsJson);
-                if (sDoc.RootElement.TryGetProperty("apiKey", out var kProp) && !string.IsNullOrEmpty(kProp.GetString()))
-                    effectiveKey = kProp.GetString()!;
-            }
-        }
-        catch { }
+    // The board-write dependencies the create executor needs, resolved from DI (the cost/telemetry ones are
+    // best-effort and may be absent). Replaces the old per-run SK kernel container.
+    var writerDeps = new PhaseWorkItemWriterDeps(
+        Tracker:         workTrackerAdapter,
+        Repository:      phaseRepo,
+        BindingMap:      sp.GetService<DBAIAzure.Core.Interfaces.IBindingWorkItemMap>(),
+        Ledger:          sp.GetService<DBAIAzure.Core.Interfaces.ICostLedger>(),
+        TelemetrySource: sp.GetService<DBAIAzure.Core.Interfaces.IRunTelemetrySource>(),
+        Projection:      sp.GetService<DBAIAzure.Core.Interfaces.ICostProjection>(),
+        WriteBack:       sp.GetService<DBAIAzure.Core.Interfaces.ITelemetryWriteBack>());
 
-        var kernelBuilder = Kernel.CreateBuilder();
-        kernelBuilder.Services.AddSingleton<IStructuredCompletionService>(
-            new AnthropicChatCompletionService(effectiveKey, effectiveModel, phaseUsageReporter));
-        kernelBuilder.Services.AddSingleton(artifactReader);
-        kernelBuilder.Services.AddSingleton(boardsClient);
-        kernelBuilder.Services.AddSingleton(phaseRepo);
-        kernelBuilder.Services.AddSingleton(sink);
-        kernelBuilder.Services.AddSingleton(telemetryWriteBack);
-        kernelBuilder.Services.AddSingleton(bindingKeyMinter);
-        kernelBuilder.Services.AddSingleton(bindingWorkItemMap);
-        kernelBuilder.Services.AddSingleton(costLedger);
-        kernelBuilder.Services.AddSingleton(costProjection);
-        kernelBuilder.Services.AddSingleton(runTelemetrySource);
-        kernelBuilder.Services.AddSingleton(workTrackerAdapter);
-        return kernelBuilder.Build();
-    };
-
-    var notifier      = sp.GetService<IPhaseApprovalNotifier>();
-    var healthChecker = sp.GetService<IConnectorHealthChecker>();
-
-    // spec-019 T022/T032: hand the orchestrator the MAF model client + executor deps + flag + checkpoints.
-    var chatClient = sp.GetService<Microsoft.Extensions.AI.IChatClient>();
-    var runOnMaf   = builder.Configuration.GetValue<bool>("Maf:Enabled");
+    var notifier          = sp.GetService<IPhaseApprovalNotifier>();
+    var healthChecker     = sp.GetService<IConnectorHealthChecker>();
     var checkpointManager = sp.GetService<Microsoft.Agents.AI.Workflows.CheckpointManager>();
 
     return new PhaseHandlerOrchestrator(
-        kernelFactory, phaseRepo, notifier, portalBaseUrl, healthChecker,
-        chatClient, artifactReader, bindingKeyMinter, runOnMaf, checkpointManager);
+        chatClient, artifactReader, writerDeps, phaseRepo, notifier, portalBaseUrl, healthChecker,
+        bindingKeyMinter, checkpointManager);
 });
 
 // ── Connector health checker + per-connector testers (T020) ───────────────────
@@ -449,10 +365,6 @@ builder.Services.AddSingleton<Microsoft.Agents.AI.Workflows.CheckpointManager>(s
         sp.GetRequiredService<DBAIAzure.Storage.Checkpointing.EfCheckpointStore>(),
         new System.Text.Json.JsonSerializerOptions()));
 
-// ── SK kernel filters (FR-21.2 token tracing, Article IX prompt hashing) ──────
-builder.Services.AddSingleton<WorkflowFunctionInvocationFilter>();
-builder.Services.AddSingleton<WorkflowPromptRenderFilter>();
-
 // ── WorkflowApprovalNotifier — Teams notification on HITL pause (FR-19, US2) ──
 // Registered as null-safe stub; TeamsWorkflowApprovalNotifier wired in US2 implementation phase.
 builder.Services.AddSingleton<IWorkflowApprovalNotifier, TeamsWorkflowApprovalNotifier>();
@@ -482,15 +394,8 @@ builder.Services.AddApplicationInsightsTelemetry(builder.Configuration);
 builder.Services.AddSingleton<IWorkflowValidator, WorkflowValidator>();
 
 // ── Design-time LLM services (Workflow Builder assistant + Node Realization) ───────────
-// These resolve the LLM key+model from the LLM connector's DB row on each call (config fallback),
-// so the single key a visitor enters in the UI powers the builder assistant and node realization
-// without an app restart — matching the per-run execution factories (research Decision 7;
-// FR-003/FR-004/SC-006). One shared instance backs both IChatCompletionService and
-// IStructuredCompletionService.
-builder.Services.AddSingleton<HotReloadAnthropicService>(sp =>
-    new HotReloadAnthropicService(sp.GetRequiredService<IConnectorConfigRepository>(), anthropicKey, anthropicModel));
-builder.Services.AddSingleton<IChatCompletionService>(sp => sp.GetRequiredService<HotReloadAnthropicService>());
-
+// The builder assistant and node realization use the same provider-neutral IChatClient pipeline as the
+// pipelines (hot-reloads the visitor-entered key from the DB, cost-metered, OTel-traced).
 builder.Services.AddSingleton<WorkflowTopologySerializer>();
 builder.Services.AddSingleton<ILlmAvailabilityMonitor, LlmAvailabilityMonitor>();
 builder.Services.AddSingleton<IWorkflowCodeGenerator, WorkflowCodeGenerator>();
@@ -525,62 +430,24 @@ builder.Services.AddScoped<DBAIAzure.Web.Integrations.LLM.ILlmModelFetcherServic
     DBAIAzure.Web.Integrations.LLM.LlmModelFetcherService>();
 
 // ── Node Realization services (spec 007) ───────────────────────────────────────
-// Schema-bound LLM output for turning plain-language nodes into executable config (Article VII).
-// Resolves to the same hot-reloading service as the builder assistant, so node realization uses the
-// visitor-entered key from the DB rather than a key captured at startup (research Decision 7).
-builder.Services.AddSingleton<IStructuredCompletionService>(sp => sp.GetRequiredService<HotReloadAnthropicService>());
+// Schema-bound LLM output for turning plain-language nodes into executable config (Article VII), over the
+// provider-neutral IChatClient (structured output via ChatResponseFormat.ForJsonSchema).
+builder.Services.AddSingleton<IStructuredCompletionService>(sp =>
+    new DBAIAzure.Processes.Ai.ChatClientStructuredCompletionService(
+        sp.GetRequiredService<Microsoft.Extensions.AI.IChatClient>()));
 // Scoped to mirror WorkflowBuilderService — one realization/readiness instance per session.
 builder.Services.AddScoped<IWorkflowRealizationService, WorkflowRealizationService>();
 builder.Services.AddScoped<IWorkflowReadinessService, WorkflowReadinessService>();
 
-// WorkflowExecutionOrchestrator: singleton that owns all visual-workflow run lifecycles.
-// Accepts a Func<Kernel> so it can re-read LLM credentials from the DB on each run (hot-reload).
+// WorkflowExecutionOrchestrator: singleton that owns all visual-workflow run lifecycles on MAF Workflows.
 builder.Services.AddSingleton<WorkflowExecutionOrchestrator>(sp =>
 {
-    var configRepo = sp.GetRequiredService<IConnectorConfigRepository>();
-
-    Func<Kernel> kernelFactory = () =>
-    {
-        var effectiveKey   = anthropicKey;
-        var effectiveModel = anthropicModel;
-        try
-        {
-            var configResult = configRepo.GetAsync(ConnectorType.LLM).GetAwaiter().GetResult();
-            if (configResult?.NonSecretConfig is { } nsJson)
-            {
-                using var nsDoc = JsonDocument.Parse(nsJson);
-                if (nsDoc.RootElement.TryGetProperty("modelName", out var mProp) && !string.IsNullOrEmpty(mProp.GetString()))
-                    effectiveModel = mProp.GetString()!;
-            }
-            var secretsJson = configRepo.GetDecryptedSecretsAsync(ConnectorType.LLM).GetAwaiter().GetResult();
-            if (secretsJson is not null)
-            {
-                using var sDoc = JsonDocument.Parse(secretsJson);
-                if (sDoc.RootElement.TryGetProperty("apiKey", out var kProp) && !string.IsNullOrEmpty(kProp.GetString()))
-                    effectiveKey = kProp.GetString()!;
-            }
-        }
-        catch { }
-
-        var kernelBuilder = Kernel.CreateBuilder();
-        kernelBuilder.Services.AddSingleton<IChatCompletionService>(
-            new AnthropicChatCompletionService(effectiveKey, effectiveModel));
-
-        var kernel = kernelBuilder.Build();
-
-        // Register the LLM token-tracking filter so token counts appear in Run History.
-        var invocationFilter = sp.GetRequiredService<WorkflowFunctionInvocationFilter>();
-        kernel.FunctionInvocationFilters.Add(invocationFilter);
-
-        var promptFilter = sp.GetRequiredService<WorkflowPromptRenderFilter>();
-        kernel.PromptRenderFilters.Add(promptFilter);
-
-        return kernel;
-    };
-
+    var configRepo       = sp.GetRequiredService<IConnectorConfigRepository>();
+    var chatClient       = sp.GetRequiredService<Microsoft.Extensions.AI.IChatClient>();
     var runRepo          = sp.GetRequiredService<IWorkflowRunRepository>();
     var approvalNotifier = sp.GetRequiredService<IWorkflowApprovalNotifier>();
     var observers        = sp.GetServices<IWorkflowObserver>();
+    var checkpointManager = sp.GetService<Microsoft.Agents.AI.Workflows.CheckpointManager>();
 
     // T048: broadcast run status changes to SignalR so non-Blazor clients (e.g., external dashboards)
     // receive real-time updates without polling. The Blazor Review Queue uses the in-process
@@ -589,14 +456,8 @@ builder.Services.AddSingleton<WorkflowExecutionOrchestrator>(sp =>
     Func<string, string, Task> broadcastUpdate = (runId, statusText) =>
         hubContext.Clients.All.SendAsync("RunStatusChanged", runId, statusText);
 
-    // spec-019 T022: hand the visual orchestrator the MAF model client + flag + executor deps + checkpoints.
-    var chatClient = sp.GetService<Microsoft.Extensions.AI.IChatClient>();
-    var runOnMaf   = builder.Configuration.GetValue<bool>("Maf:Enabled");
-    var checkpointManager = sp.GetService<Microsoft.Agents.AI.Workflows.CheckpointManager>();
-
     return new WorkflowExecutionOrchestrator(
-        kernelFactory, runRepo, approvalNotifier, observers, broadcastUpdate,
-        chatClient, runOnMaf, configRepo, checkpointManager);
+        chatClient, runRepo, approvalNotifier, observers, broadcastUpdate, configRepo, checkpointManager);
 });
 
 // Expose the same singleton through the interface (UI/Review Queue consume the interface; the boot-time

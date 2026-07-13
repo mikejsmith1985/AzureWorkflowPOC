@@ -4,24 +4,18 @@ using DBAIAzure.Core.Models;
 using DBAIAzure.Processes.Pipeline.Maf;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
-using Microsoft.SemanticKernel;
 using System.Collections.Concurrent;
-
-// Suppress SKEXP0080 — SK Process Framework is experimental in 1.77.0
-#pragma warning disable SKEXP0080
 
 namespace DBAIAzure.Processes.Pipeline;
 
 /// <summary>
 /// Owns every phase-handler run, mirroring the ticket pipeline's <c>PipelineOrchestrator</c>:
-/// a background task per run, an SK process driven to its approval pause, an out-of-band approval
+/// a background task per run, a MAF workflow driven to its approval pause, an out-of-band approval
 /// gate, and durable persistence. It enforces the core safety rule — no board write occurs before
-/// an approved decision (FR-006) — by only resuming the create step once a decision arrives.
+/// an approved decision (FR-006) — by only resuming the create executor once a decision arrives.
 /// </summary>
 public sealed class PhaseHandlerOrchestrator
 {
-    private const int ProcessTimeoutSeconds = 180;
-
     /// <summary>
     /// Hours a run may wait for human approval before it is automatically expired as Failed.
     /// Prevents the background task leaking indefinitely when a reviewer never responds (e.g. the
@@ -29,21 +23,16 @@ public sealed class PhaseHandlerOrchestrator
     /// </summary>
     private const int ApprovalTimeoutHours = 72;
 
-    private readonly Func<IPhaseProgressSink, Kernel> _kernelFactory;
+    private readonly IChatClient _chatClient;
+    private readonly IArtifactReader _artifactReader;
+    private readonly PhaseWorkItemWriterDeps _writerDeps;
     private readonly IPhaseRunRepository _repository;
     private readonly IPhaseApprovalNotifier? _approvalNotifier;
     private readonly string _portalBaseUrl;
     private readonly IConnectorHealthChecker? _healthChecker;
-
-    // spec-019 T022: the MAF model client + executor dependencies + the flag that runs the phase handler
-    // on MAF Workflows. Additive — off until cutover, so production still runs on SK; approval resume on
-    // the MAF path (create-on-decision) lands in US2.
-    private readonly IChatClient? _chatClient;
-    private readonly IArtifactReader? _artifactReader;
     private readonly IBindingKeyMinter? _bindingKeyMinter;
-    private readonly bool _useMafRuntime;
 
-    // spec-019 T032: when set, MAF runs are checkpointed so a run paused at the approval gate survives a restart.
+    // When set, MAF runs are checkpointed so a run paused at the approval gate survives a restart (T032).
     private readonly CheckpointManager? _checkpointManager;
 
     private readonly ConcurrentDictionary<string, PhaseHandlerRun> _runs = new();
@@ -52,27 +41,24 @@ public sealed class PhaseHandlerOrchestrator
     public event Action<string>? RunUpdated;
 
     public PhaseHandlerOrchestrator(
-        Func<IPhaseProgressSink, Kernel> kernelFactory,
+        IChatClient chatClient,
+        IArtifactReader artifactReader,
+        PhaseWorkItemWriterDeps writerDeps,
         IPhaseRunRepository? repository = null,
         IPhaseApprovalNotifier? approvalNotifier = null,
         string portalBaseUrl = "http://localhost:5000",
         IConnectorHealthChecker? healthChecker = null,
-        IChatClient? chatClient = null,
-        IArtifactReader? artifactReader = null,
         IBindingKeyMinter? bindingKeyMinter = null,
-        bool useMafRuntime = false,
         CheckpointManager? checkpointManager = null)
     {
-        _kernelFactory     = kernelFactory;
+        _chatClient        = chatClient;
+        _artifactReader    = artifactReader;
+        _writerDeps        = writerDeps;
         _repository        = repository ?? NullPhaseRunRepository.Instance;
         _approvalNotifier  = approvalNotifier;
         _portalBaseUrl     = portalBaseUrl.TrimEnd('/');
         _healthChecker     = healthChecker;
-        _chatClient        = chatClient;
-        _artifactReader    = artifactReader;
         _bindingKeyMinter  = bindingKeyMinter;
-        // The MAF path needs both the model client and an artifact reader to run read→validate→approval.
-        _useMafRuntime     = useMafRuntime && chatClient is not null && artifactReader is not null;
         _checkpointManager = checkpointManager;
     }
 
@@ -160,67 +146,8 @@ public sealed class PhaseHandlerOrchestrator
                 }
             }
 
-            // spec-019 T022: when the MAF runtime is enabled, run read→validate→approval on MAF Workflows.
-            // The SK loop below stays as the production default until cutover.
-            if (_useMafRuntime)
-            {
-                await ExecuteViaMafAsync(run);
-                return;
-            }
-
-            var sink = new RecordingSink(run, () => RunUpdated?.Invoke(run.RunId), _repository);
-            var kernel = _kernelFactory(sink);
-
-            // Arm the approval gate before running, so a fast callback cannot race the pause.
-            run.BeginAwaitingApproval();
-
-            var channel = new ApprovalExternalChannel();
-            var process = PhaseHandlerPipelineBuilder.Build();
-            var startEvent = new KernelProcessEvent
-            {
-                Id = PhaseHandlerEvents.PhaseSignalReceived,
-                Data = run.State,
-            };
-
-            await LocalKernelProcessFactory.RunToEndAsync(
-                process, kernel, startEvent, TimeSpan.FromSeconds(ProcessTimeoutSeconds), channel);
-
-            // If the run failed before reaching the pause (e.g. missing artifacts), it is terminal.
-            if (!channel.WasPaused)
-            {
-                await PersistAndNotifyAsync(run, sink.LatestState ?? run.State);
-                return;
-            }
-
-            // Paused for approval: persist AwaitingApproval and push the decision card.
-            var pausedState = ExtractState(channel.PausedMessage!, sink.LatestState ?? run.State);
-            run.UpdateState(pausedState);
-            run.MarkPaused();
-            await _repository.UpsertRunAsync(pausedState);
-            RunUpdated?.Invoke(run.RunId);
-            PushApprovalCard(run, pausedState);
-
-            // Wait for the reviewer's decision (delivered via SubmitApproval), bounded by the
-            // configured timeout so the background task does not leak if approval never arrives.
-            ApprovalDecision decision;
-            using var approvalTimeoutCts = new CancellationTokenSource(
-                TimeSpan.FromHours(ApprovalTimeoutHours));
-            try
-            {
-                decision = await run.WaitForApprovalAsync().WaitAsync(approvalTimeoutCts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                var expired = pausedState with
-                {
-                    Status = PhaseRunStatus.Failed,
-                    FailureReason = $"No approval received within {ApprovalTimeoutHours} hours — run expired.",
-                };
-                await PersistAndNotifyAsync(run, expired);
-                return;
-            }
-
-            await ResumeWithDecisionAsync(run, pausedState, decision);
+            // Run read → validate → approval → create-on-approval on MAF Workflows.
+            await ExecuteViaMafAsync(run);
         }
         catch (Exception ex)
         {
@@ -262,7 +189,7 @@ public sealed class PhaseHandlerOrchestrator
     /// recovered from the checkpoint's re-emitted request, so only the run identity is needed here.</param>
     public void RehydratePausedRun(PhaseHandlerState placeholderState, CheckpointInfo checkpoint)
     {
-        if (!_useMafRuntime || _checkpointManager is null)
+        if (_checkpointManager is null)
         {
             return;
         }
@@ -298,28 +225,14 @@ public sealed class PhaseHandlerOrchestrator
     }
 
     /// <summary>
-    /// Builds the phase-handler MAF workflow for a run. Reuses the SK kernel's service container as the MAF
-    /// executor dependency source: it already wires the work-tracker adapter, cost/telemetry services, and
-    /// repositories, so the create executor resolves the same instances the SK <c>CreateWorkItemStep</c>
-    /// would. The orchestrator's own per-run dependencies (this run's sink, the injected artifact reader /
-    /// binding minter) take precedence; the kernel supplies the board-write infrastructure as a fallback. The
-    /// MAF executors never touch the kernel's SK chat service, so the execution path stays SK-free (SC-005).
+    /// Builds the phase-handler MAF workflow for a run from the directly-injected dependencies: the model
+    /// client, this run's progress sink, the artifact reader, the optional binding-key minter, and the
+    /// board-write dependencies (<see cref="PhaseWorkItemWriterDeps"/>). No Semantic Kernel container is
+    /// involved — the create executor writes the board through the same adapter/ledger the app wires in DI.
     /// </summary>
-    private Microsoft.Agents.AI.Workflows.Workflow BuildMafWorkflow(RecordingSink sink)
-    {
-        var kernel = _kernelFactory(sink);
-
-        var explicitDeps = new MafExecutorServices()
-            .Add<IArtifactReader>(_artifactReader!)
-            .Add<IPhaseProgressSink>(sink);
-        if (_bindingKeyMinter is not null)
-        {
-            explicitDeps.Add<IBindingKeyMinter>(_bindingKeyMinter);
-        }
-        var services = new CompositeServiceProvider(explicitDeps, kernel.Services);
-
-        return MafPhaseHandlerWorkflowFactory.Build(_chatClient!, services);
-    }
+    private Microsoft.Agents.AI.Workflows.Workflow BuildMafWorkflow(RecordingSink sink) =>
+        MafPhaseHandlerWorkflowFactory.Build(
+            _chatClient, _artifactReader, sink, _bindingKeyMinter, _writerDeps);
 
     /// <summary>
     /// Drives a started or resumed MAF session: a terminal failure path completes immediately; a suspension at
@@ -391,28 +304,6 @@ public sealed class PhaseHandlerOrchestrator
     private static PhaseHandlerState ExtractPausedState(RequestInfoEvent request, PhaseHandlerState fallback)
         => request.Request.TryGetDataAs<PhaseHandlerState>(out var state) && state is not null ? state : fallback;
 
-    /// <summary>Restarts the process from the decision, routing straight to the create step.</summary>
-    private async Task ResumeWithDecisionAsync(
-        PhaseHandlerRun run, PhaseHandlerState pausedState, ApprovalDecision decision)
-    {
-        var sink = new RecordingSink(run, () => RunUpdated?.Invoke(run.RunId), _repository);
-        var kernel = _kernelFactory(sink);
-
-        var decidedState = pausedState with { Decision = decision };
-        var channel = new ApprovalExternalChannel();
-        var process = PhaseHandlerPipelineBuilder.Build();
-        var resumeEvent = new KernelProcessEvent
-        {
-            Id = PhaseHandlerEvents.ApprovalDecided,
-            Data = decidedState,
-        };
-
-        await LocalKernelProcessFactory.RunToEndAsync(
-            process, kernel, resumeEvent, TimeSpan.FromSeconds(ProcessTimeoutSeconds), channel);
-
-        await PersistAndNotifyAsync(run, sink.LatestState ?? decidedState);
-    }
-
     /// <summary>Persists the final state and fires the update event.</summary>
     private async Task PersistAndNotifyAsync(PhaseHandlerRun run, PhaseHandlerState finalState)
     {
@@ -434,13 +325,6 @@ public sealed class PhaseHandlerOrchestrator
             pausedState.Validation.Summary,
             pausedState.Validation.Gaps,
             portalUrl);
-    }
-
-    /// <summary>Recovers the state object from the proxy message; falls back to the last sink snapshot.</summary>
-    private static PhaseHandlerState ExtractState(KernelProcessProxyMessage message, PhaseHandlerState fallback)
-    {
-        if (message.EventData?.ToObject() is PhaseHandlerState state) return state;
-        return fallback;
     }
 
     /// <summary>

@@ -3,7 +3,6 @@
 using DBAIAzure.Core.Models;
 using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Tests.Parity;
-using Microsoft.SemanticKernel;
 using Xunit;
 
 namespace DBAIAzure.Tests;
@@ -14,8 +13,6 @@ namespace DBAIAzure.Tests;
 /// </summary>
 public sealed class VisualOrchestratorMafTests
 {
-    private static Kernel StubKernel() => Kernel.CreateBuilder().Build();
-
     [Fact]
     public async Task MafRuntime_TriggerAgenticNotify_RunsToCompletion()
     {
@@ -44,7 +41,7 @@ public sealed class VisualOrchestratorMafTests
 
         var chatClient = new RecordedChatClient(RecordedTurn.With("a concise summary", inputTokens: 20, outputTokens: 6));
         var orchestrator = new WorkflowExecutionOrchestrator(
-            StubKernel, chatClient: chatClient, useMafRuntime: true);
+            chatClient);
 
         var runId = await orchestrator.StartRunAsync(definition, "process the input");
 
