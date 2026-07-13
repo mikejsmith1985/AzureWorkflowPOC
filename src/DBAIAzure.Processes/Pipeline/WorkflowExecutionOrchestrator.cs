@@ -253,6 +253,85 @@ public sealed class WorkflowExecutionOrchestrator : IWorkflowExecutionOrchestrat
     }
 
     /// <summary>
+    /// Rehydrates a visual run paused at a HumanApproval gate before an application restart, resuming its MAF
+    /// workflow from <paramref name="checkpoint"/> so a reviewer's decision submitted after the restart truly
+    /// drives the run to completion (spec-019 T032) — not just resolves an in-memory TCS. The paused run is
+    /// seeded at <see cref="WorkflowRunStatus.Running"/> (not Paused) so the drive loop, which arms the
+    /// approval gate before advertising Paused, is authoritative and a reviewer callback cannot race ahead of
+    /// the live session. No-op unless the MAF runtime is on.
+    /// </summary>
+    public void RehydratePausedRun(WorkflowRunRecord record, WorkflowDefinition definition, CheckpointInfo checkpoint)
+    {
+        if (!_useMafRuntime || _checkpointManager is null)
+        {
+            RehydratePausedRun(record); // fall back to reconstitute-only (approve/reject resolves the TCS)
+            return;
+        }
+
+        var run = new WorkflowExecutionRun(
+            RunId:         record.RunId,
+            WorkflowId:    record.WorkflowId,
+            Status:        WorkflowRunStatus.Running,
+            NodeStates:    Array.Empty<NodeExecutionState>(),
+            FailureReason: null,
+            StartedAt:     record.StartedAt,
+            CompletedAt:   null);
+
+        var runState = new WorkflowRunState
+        {
+            Run          = run,
+            WorkflowName = record.WorkflowName,
+            TriggeredBy  = record.TriggeredBy,
+            SuspendedAt  = record.SuspendedAt,
+            ApprovalTcs  = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+        };
+
+        _runs[record.RunId] = runState;
+        _ = Task.Run(() => RehydrateAndDriveVisualAsync(runState, definition, checkpoint));
+    }
+
+    private async Task RehydrateAndDriveVisualAsync(
+        WorkflowRunState runState, WorkflowDefinition definition, CheckpointInfo checkpoint)
+    {
+        var runId = runState.Run.RunId;
+        DBAIAzure.Core.Diagnostics.LlmRunContext.CurrentRunId.Value = runId;
+        try
+        {
+            var services = new MafExecutorServices();
+            if (_connectorRepository is not null)
+            {
+                services.Add<IConnectorConfigRepository>(_connectorRepository);
+            }
+            var mafWorkflow = new MafWorkflowRuntimeFactory().Build(definition, _chatClient!, services);
+
+            var session = await MafWorkflowSession<WorkflowStepData>.ResumeAsync(
+                mafWorkflow, checkpoint, _checkpointManager!, CancellationToken.None);
+
+            var segment = await session.DriveAsync(CancellationToken.None);
+            if (segment.Suspended)
+            {
+                await AwaitApprovalAndResumeAsync(runState, session, segment.PendingRequest!);
+            }
+            else
+            {
+                MarkRunCompleted(runState);
+            }
+        }
+        catch (Exception ex)
+        {
+            runState.Run = runState.Run with
+            {
+                Status = WorkflowRunStatus.Failed,
+                FailureReason = ex.Message,
+                CompletedAt = DateTimeOffset.UtcNow,
+            };
+            PersistRunState(runState);
+            BroadcastRunStatus(runId, WorkflowRunStatus.Failed);
+            FireRunUpdated(runState, ref runState.LastUpdateTimestamp);
+        }
+    }
+
+    /// <summary>
     /// Starts a background timer for a rehydrated paused run. If no human decision arrives
     /// within <see cref="DefaultApprovalTimeoutMinutes"/> of the run's suspension instant,
     /// the run is auto-rejected so stale approvals do not block the queue indefinitely (T041).

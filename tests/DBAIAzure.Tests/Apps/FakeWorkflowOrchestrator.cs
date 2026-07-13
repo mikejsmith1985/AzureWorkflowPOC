@@ -34,6 +34,9 @@ internal sealed class FakeWorkflowRepository : IWorkflowRepository
     public Task<WorkflowDefinition?> GetAsync(Guid id, string ownerId, CancellationToken ct = default)
         => Task.FromResult(_workflow is not null && _workflow.Id == id && _workflow.OwnerId == ownerId ? _workflow : null);
 
+    public Task<WorkflowDefinition?> GetByIdAsync(Guid id, CancellationToken ct = default)
+        => Task.FromResult(_workflow is not null && _workflow.Id == id ? _workflow : null);
+
     public Task<Guid> SaveAsync(WorkflowDefinition workflow, CancellationToken ct = default)
         => Task.FromResult(workflow.Id);
 

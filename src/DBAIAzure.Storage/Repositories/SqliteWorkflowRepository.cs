@@ -108,6 +108,18 @@ public sealed class SqliteWorkflowRepository : IWorkflowRepository
     }
 
     /// <inheritdoc/>
+    public async Task<WorkflowDefinition?> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        await using var db = await _factory.CreateDbContextAsync(ct);
+
+        var record = await db.Workflows
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == id, ct);
+
+        return record is null ? null : MapToDefinition(record);
+    }
+
+    /// <inheritdoc/>
     /// <remarks>
     /// Results are ordered by name so the gallery card list is deterministic regardless of
     /// insertion order. Scoping to <paramref name="ownerId"/> prevents cross-tenant data leakage

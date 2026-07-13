@@ -535,7 +535,7 @@ builder.Services.AddScoped<IWorkflowReadinessService, WorkflowReadinessService>(
 
 // WorkflowExecutionOrchestrator: singleton that owns all visual-workflow run lifecycles.
 // Accepts a Func<Kernel> so it can re-read LLM credentials from the DB on each run (hot-reload).
-builder.Services.AddSingleton<IWorkflowExecutionOrchestrator>(sp =>
+builder.Services.AddSingleton<WorkflowExecutionOrchestrator>(sp =>
 {
     var configRepo = sp.GetRequiredService<IConnectorConfigRepository>();
 
@@ -598,6 +598,11 @@ builder.Services.AddSingleton<IWorkflowExecutionOrchestrator>(sp =>
         kernelFactory, runRepo, approvalNotifier, observers, broadcastUpdate,
         chatClient, runOnMaf, configRepo, checkpointManager);
 });
+
+// Expose the same singleton through the interface (UI/Review Queue consume the interface; the boot-time
+// rehydration service needs the concrete type for the checkpoint-resume overload — spec-019 T032).
+builder.Services.AddSingleton<IWorkflowExecutionOrchestrator>(
+    sp => sp.GetRequiredService<WorkflowExecutionOrchestrator>());
 
 var app = builder.Build();
 

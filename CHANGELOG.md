@@ -246,7 +246,21 @@ status and submit *before* the resumed run armed its gate (`ProvideApproval` req
 the decision — the run is now seeded at a non-awaiting status and only advertises `AwaitingApproval` after the
 gate is armed. Two tests prove it: `PhaseHandlerBootResumeTests` (orchestrator-level restart→approve→create)
 and `PausedRunRehydrationServiceTests.StartupService_RehydratesPausedPhaseRun_ThatCreatesOnApprove` (the full
-boot-service path). Remaining rehydration gap: the visual approval surface.
+boot-service path).
+
+**Visual rehydration across restart (US2 T032).** The visual builder's HumanApproval gate now survives a
+restart too. `WorkflowExecutionOrchestrator.RehydratePausedRun(record, definition, checkpoint)` truly resumes
+the MAF session from its checkpoint (`ResumeAsync` → the shared `AwaitApprovalAndResumeAsync`) so approving a
+rehydrated run drives the workflow to completion — previously it only reconstituted the in-memory approval
+TCS with no live session, so an approval after restart did nothing. A new owner-less
+`IWorkflowRepository.GetByIdAsync` lets the boot-time `WorkflowRunRehydrationService` reload a paused run's
+definition (the run record carries no owner) and its latest checkpoint and call the resume overload (falling
+back to reconstitute-only when either is missing). The visual orchestrator is now registered as a concrete
+singleton (forwarded to the interface) so the service can reach the checkpoint-resume overload. The rehydrated
+run is seeded `Running` (not `Paused`) so the drive loop — which arms the gate before advertising `Paused` — is
+authoritative. `VisualBootResumeTests` proves restart → rehydrate → approve → complete. **With this, all three
+HITL surfaces (intake clarification, phase-handler approval, visual approval) suspend, resume, and rehydrate
+across an application restart on MAF Workflows.**
 
 **Polish — factory decomposition (T052).** `MafWorkflowRuntimeFactory.Build` (70 lines) was decomposed into
 `CreateBindings` / `DeclareTerminalOutputs` / `RecordRoutePortLabels` helpers so the orchestration method reads
