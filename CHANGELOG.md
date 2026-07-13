@@ -121,6 +121,16 @@ were persisted for the run's session — so a paused run is now recoverable. The
 iterates paused runs and resumes them on boot is the remaining piece (the visual `WorkflowRunRehydrationService`
 waits on the visual-orchestrator migration). Still `Maf:Enabled`-gated / off-production.
 
+**SK-paused-run migration (T033, core).** `SkPausedRunMigration` idempotently converts a run paused under the
+retired SK framework into a durable MAF checkpoint so it resumes in place at cutover (FR-006a). Because MAF
+checkpoints are opaque, it reconstructs one by running a **resume-seed workflow** — `BuildResumeWorkflow` +
+`IntakeResumeSeedExecutor` forward the already-paused ticket straight to the HITL `RequestPort` (no
+re-normalising, re-validating, or re-asking — **no model call**), and running that with checkpointing writes a
+checkpoint at the same suspension. Re-running the migration skips already-converted runs. A test proves SC-009
+for the intake surface: convert → idempotent skip → resume from the checkpoint → recover the outstanding
+clarification request → answer → complete through the real validation loop. Remaining: the deploy-time startup
+hook that enumerates SK-paused records, and the phase-handler resume-seed (needs its create-on-approval downstream).
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly

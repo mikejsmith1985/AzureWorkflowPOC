@@ -54,6 +54,35 @@ public static class MafIntakeWorkflowFactory
             .Build(validateOrphans: true);
     }
 
+    /// <summary>
+    /// Builds the intake <em>resume</em> workflow for migrating an SK-paused clarification run (spec-019 T033):
+    /// a seed forwards the paused ticket straight to the HITL <see cref="RequestPort"/>, then the real
+    /// validation loop takes over on the human's answer. Identical to <see cref="Build"/> except the entry
+    /// is the seed (the paused run already did intake/validation/gap-analysis under SK), so running it with
+    /// checkpointing produces a checkpoint at the same suspension. Migrated runs are resumed with this graph.
+    /// </summary>
+    public static Workflow BuildResumeWorkflow(IChatClient chatClient, IServiceProvider? services = null)
+    {
+        var reporter = services?.GetService(typeof(IProgressReporter)) as IProgressReporter;
+
+        var seed = new IntakeResumeSeedExecutor().BindExecutor();
+        var validation = new ValidationExecutor(chatClient, reporter).BindExecutor();
+        var estimation = new EstimationExecutor(chatClient, reporter).BindExecutor();
+        var action = new ActionExecutor(reporter).BindExecutor();
+        var gapAnalysis = new GapAnalysisExecutor(chatClient, reporter).BindExecutor();
+        var hitl = RequestPort.Create<TicketState, TicketState>(MafExecutorIds.IntakeHitl).BindAsExecutor(allowWrappedRequests: false);
+
+        return new WorkflowBuilder(seed)
+            .AddEdge(seed, hitl)                 // forward the paused ticket straight to the clarification gate
+            .AddEdge(hitl, validation)           // on answer, re-enter validation (the real loop)
+            .AddEdge(validation, estimation, (TicketState ticket) => IsReadyTicket(ticket))
+            .AddEdge(validation, gapAnalysis, (TicketState ticket) => IsNotReadyTicket(ticket))
+            .AddEdge(estimation, action)
+            .AddEdge(gapAnalysis, hitl)
+            .WithOutputFrom(action, validation)
+            .Build(validateOrphans: true);
+    }
+
     /// <summary>Ready branch: the validation executor forwarded the ticket with no clarifying questions.</summary>
     private static bool IsReadyTicket(TicketState ticket) => ticket.ClarifyingQuestions.Count == 0;
 

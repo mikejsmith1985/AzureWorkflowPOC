@@ -20,6 +20,8 @@ public static class MafExecutorIds
     public const string GapAnalysis = "gap-analysis";
     /// <summary>The human-in-the-loop clarification gate (was <c>HitlPauseStep</c> → now a RequestPort).</summary>
     public const string IntakeHitl = "intake-hitl";
+    /// <summary>Migration entry that forwards a paused ticket straight to the clarification gate (spec-019 T033).</summary>
+    public const string IntakeResumeSeed = "intake-resume-seed";
     /// <summary>Estimates story points on the ready path (was <c>EstimationStep</c>).</summary>
     public const string Estimation = "estimation";
     /// <summary>Terminal step that creates the work item (was <c>ActionStep</c>).</summary>
