@@ -154,9 +154,9 @@ still mark which story each task serves.
 
 - [ ] T050 Remove ALL `Microsoft.SemanticKernel*` package references and every `SKEXP0080` pragma across `src/`; add a grep gate proving zero matches (FR-003 / SC-002).
 - [ ] T051 Update `src/DBAIAzure.Runner/Program.cs` console host to build via `WorkflowBuilder` and drive the `RequestPort` console HITL loop.
-- [ ] T052 [P] Code-quality pass (Article IV) across the new executors/clients (self-documenting names, XML doc comments, guard clauses, <40-line methods).
-- [ ] T053 [P] Verify the **Article VII** amendment (done early in T003a) is in place and consistent with the shipped MAF stack; record the interim SK↔MAF **interop-shim inventory + removal conditions** (or assert none remain) in the CHANGELOG entry (FR-016 / SC-007). *(Resolves analysis finding G3; C1 amendment itself moved to T003a.)*
-- [ ] T054 [P] Update `CHANGELOG.md` `[Unreleased]` with the modernization entry (FR-017).
+- [X] T052 [P] Code-quality pass (Article IV) on the new executors/clients: the new files carry XML docs + self-documenting names + guard clauses throughout; `MafWorkflowRuntimeFactory.Build` decomposed into `CreateBindings`/`DeclareTerminalOutputs`/`RecordRoutePortLabels` (~20-line orchestrator). Two long methods intentionally left (documented in CHANGELOG): intake `HandleAsync` length is prompt-*data*, and `CostCapturingChatClient.GetStreamingResponseAsync` needs the manual-enumerator pattern. Parity/visual tests green.
+- [X] T053 [P] Article VII amendment verified in place (constitution names MAF/Workflows/`RequestPort`/checkpointing/`IChatClient`); recorded the SK↔MAF **interop-shim inventory + removal conditions** as a table in the CHANGELOG `[Unreleased]` entry (flag-gated dual paths, the kernel-container reuse for board-write deps, dual OTel sources, retained SK steps/builders; `PhaseWorkItemWriter` noted as permanent, not a shim). FR-016 / SC-007.
+- [X] T054 [P] `CHANGELOG.md` `[Unreleased]` carries the full modernization entry (per-increment through all six user stories + the polish/cutover-readiness section). FR-017.
 - [ ] T055 Performance-budget check: end-to-end run latency + per-model-call overhead within **10%** of baseline on the same host/model (SC-010 / quickstart scenario 9); a larger regression blocks cutover.
 - [ ] T056 **Cutover gate**: `dotnet test` + `./scripts/run-e2e.ps1` fully green with no test deleted (SC-001), paused-run migration verified against representative records (SC-009), and the grep gate (T050) clean — authorizes the atomic release.
 

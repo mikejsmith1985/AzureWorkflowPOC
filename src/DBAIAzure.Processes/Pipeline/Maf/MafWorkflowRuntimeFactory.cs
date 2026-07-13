@@ -35,15 +35,37 @@ public sealed class MafWorkflowRuntimeFactory
         }
 
         PortLabelsByNodeId.Clear();
-        var connectorRepository = services?.GetService(typeof(IConnectorConfigRepository)) as IConnectorConfigRepository;
 
         // A node is terminal when no edge leaves it — terminal nodes yield the run's output.
         var nodesWithOutgoingEdges = workflow.Edges.Select(edge => edge.SourceNodeId).ToHashSet(StringComparer.Ordinal);
         bool IsTerminal(string nodeId) => !nodesWithOutgoingEdges.Contains(nodeId);
 
-        // One executor per node, keyed by node id so the edge pass can look sources/targets up directly. A
-        // HumanApproval node maps to a RequestPort (it suspends for review); the rest map to executors.
+        var bindingByNodeId = CreateBindings(workflow, chatClient, services, IsTerminal);
+
+        // The first node is the entry point (parity with the SK builder).
+        var builder = new WorkflowBuilder(bindingByNodeId[workflow.Nodes[0].Id]);
+        foreach (var edge in workflow.Edges)
+        {
+            builder.AddEdge(bindingByNodeId[edge.SourceNodeId], bindingByNodeId[edge.TargetNodeId]);
+        }
+
+        DeclareTerminalOutputs(builder, workflow, bindingByNodeId, IsTerminal);
+        RecordRoutePortLabels(workflow);
+
+        return builder.Build(validateOrphans: true);
+    }
+
+    /// <summary>
+    /// Builds one <see cref="ExecutorBinding"/> per canvas node, keyed by node id so the edge pass can look
+    /// sources/targets up directly. A HumanApproval node maps to a <see cref="RequestPort"/> (it suspends for
+    /// review); every other node maps to its executor.
+    /// </summary>
+    private Dictionary<string, ExecutorBinding> CreateBindings(
+        WorkflowDefinition workflow, IChatClient chatClient, IServiceProvider? services, Func<string, bool> isTerminal)
+    {
+        var connectorRepository = services?.GetService(typeof(IConnectorConfigRepository)) as IConnectorConfigRepository;
         var bindingByNodeId = new Dictionary<string, ExecutorBinding>(workflow.Nodes.Count, StringComparer.Ordinal);
+
         foreach (var node in workflow.Nodes)
         {
             var config = BuildNodeConfig(node);
@@ -52,17 +74,17 @@ public sealed class MafWorkflowRuntimeFactory
                 // The Trigger node marks the entry point and carries no runnable logic — forward the seed
                 // straight to its successor (a transform with no mappings is a pass-through).
                 WorkflowNodeType.Trigger => new FunctionTransformExecutor(
-                    node.Id, config, IsTerminal(node.Id)).BindExecutor(),
+                    node.Id, config, isTerminal(node.Id)).BindExecutor(),
                 WorkflowNodeType.AgenticReason => new AgenticNodeExecutor(
-                    node.Id, chatClient, config, IsTerminal(node.Id)).BindExecutor(),
+                    node.Id, chatClient, config, isTerminal(node.Id)).BindExecutor(),
                 WorkflowNodeType.FunctionRoute => new FunctionRouteExecutor(
                     node.Id, chatClient, config.OutputPortLabels, BuildRouteTargets(node, workflow)).BindExecutor(),
                 WorkflowNodeType.FunctionTransform => new FunctionTransformExecutor(
-                    node.Id, config, IsTerminal(node.Id)).BindExecutor(),
+                    node.Id, config, isTerminal(node.Id)).BindExecutor(),
                 WorkflowNodeType.FunctionNotify => new FunctionNotifyExecutor(
-                    node.Id, config, IsTerminal(node.Id), connectorRepository).BindExecutor(),
+                    node.Id, config, isTerminal(node.Id), connectorRepository).BindExecutor(),
                 WorkflowNodeType.FunctionData => new FunctionDataExecutor(
-                    node.Id, config, IsTerminal(node.Id), connectorRepository).BindExecutor(),
+                    node.Id, config, isTerminal(node.Id), connectorRepository).BindExecutor(),
                 WorkflowNodeType.HumanApproval => RequestPort
                     .Create<WorkflowStepData, WorkflowStepData>(node.Id).BindAsExecutor(allowWrappedRequests: false),
 
@@ -71,32 +93,36 @@ public sealed class MafWorkflowRuntimeFactory
             };
         }
 
-        // The first node is the entry point (parity with the SK builder).
-        var builder = new WorkflowBuilder(bindingByNodeId[workflow.Nodes[0].Id]);
+        return bindingByNodeId;
+    }
 
-        foreach (var edge in workflow.Edges)
-        {
-            builder.AddEdge(bindingByNodeId[edge.SourceNodeId], bindingByNodeId[edge.TargetNodeId]);
-        }
-
-        // Terminal executor nodes yield the workflow output. A terminal HumanApproval node is a RequestPort
-        // (it suspends rather than yielding), so it is not declared as an output.
+    /// <summary>
+    /// Declares the terminal executor nodes as the workflow's outputs. A terminal HumanApproval node is a
+    /// <see cref="RequestPort"/> (it suspends rather than yielding), so it is not declared as an output.
+    /// </summary>
+    private static void DeclareTerminalOutputs(
+        WorkflowBuilder builder,
+        WorkflowDefinition workflow,
+        IReadOnlyDictionary<string, ExecutorBinding> bindingByNodeId,
+        Func<string, bool> isTerminal)
+    {
         var terminalBindings = workflow.Nodes
-            .Where(node => IsTerminal(node.Id) && node.NodeType != WorkflowNodeType.HumanApproval)
+            .Where(node => isTerminal(node.Id) && node.NodeType != WorkflowNodeType.HumanApproval)
             .Select(node => bindingByNodeId[node.Id])
             .ToArray();
         if (terminalBindings.Length > 0)
         {
             builder.WithOutputFrom(terminalBindings);
         }
+    }
 
-        // Record each route node's port labels (parity with the SK builder's KnownPortLabels).
+    /// <summary>Records each route node's output-port labels (parity with the SK builder's KnownPortLabels).</summary>
+    private void RecordRoutePortLabels(WorkflowDefinition workflow)
+    {
         foreach (var routeNode in workflow.Nodes.Where(node => node.NodeType == WorkflowNodeType.FunctionRoute))
         {
             PortLabelsByNodeId[routeNode.Id] = routeNode.OutputPorts.Select(port => port.Label).ToList().AsReadOnly();
         }
-
-        return builder.Build(validateOrphans: true);
     }
 
     /// <summary>Builds the per-node runtime state: identity, goal, realized config, and output-port labels.</summary>

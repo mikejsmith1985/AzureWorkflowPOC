@@ -234,6 +234,31 @@ pause→reject→complete. **With this, all three HITL surfaces (intake clarific
 visual approval) suspend and resume on MAF Workflows.** Remaining: phase-handler/visual rehydration across an
 app restart, and the polish/atomic-cutover tasks.
 
+**Polish — factory decomposition (T052).** `MafWorkflowRuntimeFactory.Build` (70 lines) was decomposed into
+`CreateBindings` / `DeclareTerminalOutputs` / `RecordRoutePortLabels` helpers so the orchestration method reads
+in ~20 lines (Article IV). Two other long methods were reviewed and intentionally left: the intake executors'
+`HandleAsync` length is dominated by the model-prompt *string literal* (data, not branching), and
+`CostCapturingChatClient.GetStreamingResponseAsync` needs the manual-enumerator pattern (a `yield` cannot sit
+inside the try/catch that meters a mid-stream failure) — decomposing either would reduce, not improve,
+readability. Parity/visual tests stay green.
+
+**Interop-shim inventory + cutover conditions (T053 / FR-016 / SC-007).** The migration is deliberately
+additive: SK still runs production behind `Maf:Enabled` (default **off**). The temporary SK↔MAF shims and the
+condition that retires each at the **atomic cutover** (T050/T056):
+
+| Shim | Where | Removal condition |
+|---|---|---|
+| `Maf:Enabled` flag-gated dual path | all three orchestrators (`PipelineOrchestrator`, `PhaseHandlerOrchestrator`, `WorkflowExecutionOrchestrator`) | Flip the default to on, validate, then delete the SK branch in each orchestrator. |
+| SK `Kernel` built to source board-write deps | `PhaseHandlerOrchestrator.ExecuteViaMafAsync` (via `CompositeServiceProvider` over `kernel.Services`) | Register the work-tracker/cost/telemetry deps in a MAF-native service bag (or app DI) and drop the `_kernelFactory` build on the MAF path. |
+| Dual OTel sources | `DBAIAzure.Runner/Program.cs` registers `Microsoft.SemanticKernel*` **and** MAF/M.E.AI sources | Remove the `Microsoft.SemanticKernel*` source once no SK code emits spans. |
+| SK Steps / `*Builder` / SK orchestrator branches retained | `src/DBAIAzure.Processes/Steps/*`, `*PipelineBuilder`, `WorkflowRuntimeBuilder` | T050 deletes them (and all `Microsoft.SemanticKernel*` packages + `SKEXP0080` pragmas) once MAF is the default and green. |
+
+Not a shim (permanent): `PhaseWorkItemWriter` is the framework-neutral home for the board write; the SK
+`CreateWorkItemStep` delegates to it today and is simply deleted at cutover while the writer stays. The MAF
+execution path is already provably SK-free (`ExecutionPathSkFreeTests`, SC-005). **Cutover gates still open:**
+phase-handler/visual rehydration across restart, the performance-budget baseline (T055, ≤10%), the T050 grep
+gate (zero `Microsoft.SemanticKernel*` / `SKEXP0080`), and a fully green `dotnet test` + E2E (T056).
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly
