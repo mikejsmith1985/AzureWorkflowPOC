@@ -207,6 +207,22 @@ it: an orchestrator-level proof that a MAF run enqueues streamed tokens via the 
 `RunDetailStreamTabTests` bUnit render asserting the Stream tab shows the tokens grouped by step. This closes
 US3.
 
+**Phase-handler approval resume on MAF (US2 T024/T027 core).** The phase-handler pipeline now completes a run
+end-to-end on MAF: read → validate → suspend at the approval `RequestPort` → resume on the reviewer's decision
+→ write the board. To make the reviewer-decided state (not just the bare decision) reach the create step, the
+approval port is now `RequestPort<PhaseHandlerState, PhaseHandlerState>` (mirroring the intake HITL port) with
+an `approval → createWorkItem` edge. The 340-line board-write logic was extracted verbatim from the SK
+`CreateWorkItemStep` into a framework-neutral `PhaseWorkItemWriter` (dependencies passed as an explicit
+`PhaseWorkItemWriterDeps` struct instead of `kernel.Services`), and both the SK step and the new MAF
+`CreateWorkItemExecutor` now delegate to it — so both frameworks produce identical board state (FR-015). The
+orchestrator's MAF path drives a `MafWorkflowSession<PhaseHandlerState>` across the suspension, reusing the
+run's existing approval gate (`WaitForApprovalAsync`/`SubmitApproval`) and the 72-hour timeout, and sources the
+create executor's board-write dependencies from the same SK kernel container the SK path uses (single DI source
+of truth; the MAF executors never touch the kernel's SK chat service, so the path stays SK-free). No board
+write occurs before an approved decision (FR-006). `PhaseHandlerMafResumeTests` proves approve→create-Epic and
+reject→no-write; the 5 existing SK `CreateWorkItemStepTests` still pass unchanged, confirming the extraction
+preserved behaviour. Remaining: the visual approval resume and phase-handler rehydration on restart.
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly

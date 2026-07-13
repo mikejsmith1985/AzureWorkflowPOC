@@ -232,45 +232,86 @@ public sealed class PhaseHandlerOrchestrator
     }
 
     /// <summary>
-    /// Runs the phase handler on MAF Workflows (spec-019 T022): read → validate → the approval gate, where
-    /// the run suspends. Terminal failure paths (missing artifacts, validation/DoR failure) complete here;
-    /// applying the reviewer's decision and creating the work item on resume is US2.
+    /// Runs the phase handler on MAF Workflows (spec-019 T022/T027): read → validate → the approval gate,
+    /// where the run suspends; on the reviewer's decision it resumes and the create executor writes the board
+    /// (only on approval — FR-006). Terminal failure paths (missing artifacts, validation/DoR failure)
+    /// complete without suspending. The board-write dependencies are sourced from the same DI container the
+    /// SK path uses (the kernel), so both frameworks write the board identically.
     /// </summary>
     private async Task ExecuteViaMafAsync(PhaseHandlerRun run)
     {
         var sink = new RecordingSink(run, () => RunUpdated?.Invoke(run.RunId), _repository);
 
-        var services = new MafExecutorServices()
+        // Reuse the SK kernel's service container as the MAF executor dependency source: it already wires the
+        // work-tracker adapter, cost/telemetry services, and repositories, so the create executor resolves the
+        // same instances the SK CreateWorkItemStep would. The MAF executors never touch the kernel's SK chat
+        // service, so the execution path stays SK-free (SC-005).
+        var kernel = _kernelFactory(sink);
+
+        // The orchestrator's own per-run dependencies (this run's sink, the injected artifact reader / binding
+        // minter) take precedence; the kernel container supplies the board-write infrastructure as a fallback.
+        var explicitDeps = new MafExecutorServices()
             .Add<IArtifactReader>(_artifactReader!)
             .Add<IPhaseProgressSink>(sink);
         if (_bindingKeyMinter is not null)
         {
-            services.Add<IBindingKeyMinter>(_bindingKeyMinter);
+            explicitDeps.Add<IBindingKeyMinter>(_bindingKeyMinter);
         }
+        var services = new CompositeServiceProvider(explicitDeps, kernel.Services);
 
-        // Arm the approval gate before running, so a fast suspension cannot race it (matches the SK path)
-        // and the gate is ready for the US2 resume bridge.
+        // Arm the approval gate before driving, so a fast suspension cannot race the reviewer's callback.
         run.BeginAwaitingApproval();
 
         var workflow = MafPhaseHandlerWorkflowFactory.Build(_chatClient!, services);
-        var outcome = await MafWorkflowExecution.RunAsync<PhaseHandlerState, PhaseHandlerState>(
-            workflow, run.State, run.RunId, CancellationToken.None, _checkpointManager);
+        var session = await MafWorkflowSession<PhaseHandlerState>.StartAsync(
+            workflow, run.State, run.RunId, _checkpointManager, CancellationToken.None);
 
-        if (outcome.Suspended)
+        var segment = await session.DriveAsync(CancellationToken.None);
+
+        if (!segment.Suspended)
         {
-            // Parked at the approval gate: persist AwaitingApproval and push the decision card. Applying the
-            // decision and resuming to the create step is US2 (RequestInfoEvent → SendResponseAsync).
-            var pausedState = (sink.LatestState ?? run.State) with { Status = PhaseRunStatus.AwaitingApproval };
-            run.UpdateState(pausedState);
-            run.MarkPaused();
-            await _repository.UpsertRunAsync(pausedState);
-            RunUpdated?.Invoke(run.RunId);
-            PushApprovalCard(run, pausedState);
+            // No suspension → a terminal failure path (missing artifacts, validation/DoR failure).
+            await PersistAndNotifyAsync(run, segment.Output ?? sink.LatestState ?? run.State);
             return;
         }
 
-        // No suspension → a terminal failure path (missing artifacts, validation/DoR failure).
-        await PersistAndNotifyAsync(run, outcome.Output ?? sink.LatestState ?? run.State);
+        // Parked at the approval gate: persist AwaitingApproval and push the decision card.
+        var pausedState = (sink.LatestState ?? run.State) with { Status = PhaseRunStatus.AwaitingApproval };
+        run.UpdateState(pausedState);
+        run.MarkPaused();
+        await _repository.UpsertRunAsync(pausedState);
+        RunUpdated?.Invoke(run.RunId);
+        PushApprovalCard(run, pausedState);
+
+        // Wait for the reviewer's decision (delivered via SubmitApproval → ProvideApproval), bounded by the
+        // configured timeout so the background task does not leak if approval never arrives.
+        ApprovalDecision decision;
+        using var approvalTimeoutCts = new CancellationTokenSource(TimeSpan.FromHours(ApprovalTimeoutHours));
+        try
+        {
+            decision = await run.WaitForApprovalAsync().WaitAsync(approvalTimeoutCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            var expired = pausedState with
+            {
+                Status = PhaseRunStatus.Failed,
+                FailureReason = $"No approval received within {ApprovalTimeoutHours} hours — run expired.",
+            };
+            await PersistAndNotifyAsync(run, expired);
+            return;
+        }
+
+        // Resume: respond to the approval port with the decided state; the create executor writes the board on
+        // an approved decision (or yields Rejected otherwise), then the run completes.
+        var decidedState = pausedState with { Decision = decision };
+        run.UpdateState(decidedState);
+        RunUpdated?.Invoke(run.RunId);
+
+        await session.RespondAsync(segment.PendingRequest!.Request, decidedState, CancellationToken.None);
+
+        var finalSegment = await session.DriveAsync(CancellationToken.None);
+        await PersistAndNotifyAsync(run, finalSegment.Output ?? sink.LatestState ?? decidedState);
     }
 
     /// <summary>Restarts the process from the decision, routing straight to the create step.</summary>
