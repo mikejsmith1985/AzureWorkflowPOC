@@ -42,6 +42,9 @@ public class PipelineDbContext : DbContext
     /// <summary>binding key → work item map for dev-usage resolution (spec-017, C1).</summary>
     public DbSet<BindingWorkItemMapEntity> BindingWorkItemMap { get; set; } = null!;
 
+    /// <summary>MAF workflow checkpoints — durable HITL pause/resume across restart (spec-019 T030).</summary>
+    public DbSet<WorkflowCheckpointEntity> WorkflowCheckpoints { get; set; } = null!;
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<RunRecord>(entity =>
@@ -161,6 +164,15 @@ public class PipelineDbContext : DbContext
             entity.ToTable("BindingWorkItemMap");
             entity.HasKey(e => e.BindingKey);
             entity.Property(e => e.BindingKey).ValueGeneratedNever();
+        });
+
+        modelBuilder.Entity<WorkflowCheckpointEntity>(entity =>
+        {
+            entity.ToTable("WorkflowCheckpoints");
+            // A checkpoint is uniquely identified by its session + id within the checkpoint tree.
+            entity.HasKey(e => new { e.SessionId, e.CheckpointId });
+            // The index query fetches a session's checkpoints filtered by parent, in write order.
+            entity.HasIndex(e => new { e.SessionId, e.ParentCheckpointId });
         });
     }
 }

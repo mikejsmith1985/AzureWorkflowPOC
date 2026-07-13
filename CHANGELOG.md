@@ -102,6 +102,16 @@ routing bug — the ready/not-ready conditional edge keys on whether the ticket 
 the answered ticket must clear them — was fixed. New test drives suspend→answer→complete. This is in-process
 resume; durable checkpoint/restore across restart (T030–T032) and the SK-paused-run migration (T033) follow.
 
+**Durable checkpointing (T030 + T025 core).** `EfCheckpointStore : JsonCheckpointStore` persists MAF
+workflow checkpoints to the pipeline database (new `WorkflowCheckpoints` table, keyed by session + id and
+parent-linked); the manager is built with `CheckpointManager.CreateJson(store, options)` and passed to
+`RunStreamingAsync`/`ResumeStreamingAsync`. Proven end-to-end: a phase-handler run paused at its approval
+gate is resumed from its checkpoint by a **brand-new store and workflow instance over the same database**,
+re-emitting the outstanding request — the restart-recovery mechanic (SC-003). Because the executors are
+stateless (state flows in messages), the framework's automatic checkpoint captures the run without custom
+`OnCheckpointingAsync`. Index ordering is done client-side (SQLite cannot `ORDER BY` a `DateTimeOffset`).
+Still off-production; the startup rehydration wiring (T032) and SK-paused-run migration (T033) follow.
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly
