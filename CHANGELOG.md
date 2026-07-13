@@ -148,6 +148,18 @@ one-time SK migration. A test drives the whole boot path: one orchestrator runs 
 and completes it on the answer. (Tests use a shared-cache named in-memory SQLite database so the orchestrators'
 concurrent background tasks each open their own connection.) Phase-handler/visual rehydration remain.
 
+**US3 metering / structured-output parity (T035/T036/T039).** With the seam already built (T010/T011), this
+proves equivalence to the pre-migration build. Cost parity: `CostParityTests` pins a response's token usage
+and asserts `CostCapturingChatClient` captures the same input/output/cache tokens and model, so
+`ModelPricing.EstimateCostUsd` returns an identical estimate (0% delta, SC-004). Structured-output parity:
+`ChatClientStructuredCompletionService` binds `RouteDecision` and `PhaseValidationResult` to identical typed
+records off the SK forced-tool path (FR-011). SC-005 gate: `ExecutionPathSkFreeTests` reflects over the MAF
+executor / workflow-factory namespaces and asserts none takes a Semantic Kernel chat-completion dependency,
+while the model-using executors inject `IChatClient` — so the MAF execution path is provably SK-free even
+though SK still backs the pre-cutover production default. (Streaming *cost capture* from the final
+`UsageContent` update was already built and tested in `CostCapturingChatClient`; the Run Detail Stream tab UI
+(T037/T038) is the remaining US3 piece.)
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly

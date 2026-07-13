@@ -104,11 +104,11 @@ still mark which story each task serves.
 **Goal**: model access is through `IChatClient` and fully metered; structured output and streaming preserved. *(Core seam built in Foundational; this phase proves parity and re-expresses structured/streaming.)*
 **Independent Test**: token/cost equals baseline (0% delta), tagged by provider/model; RouteDecision/realization deserialize identically; Run Detail Stream tab streams tokens.
 
-- [ ] T035 [P] [US3] Write FAILING parity test: captured token counts + computed cost equal the baseline (0% delta) and carry provider+model tags, using the T002a recorded harness (fixed `UsageDetails`), in `tests/DBAIAzure.Tests/Parity/CostParityTests.cs`.
-- [ ] T036 [P] [US3] Write FAILING test: structured outputs (`RouteDecision`, node realization) deserialize to identical typed records in `tests/DBAIAzure.Tests/Ai/StructuredOutputParityTests.cs`.
-- [ ] T037 [P] [US3] Write FAILING bUnit/E2E test: Run Detail **Stream** tab shows live token streaming in `tests/DBAIAzure.E2ETests/Tests/RunDetailStreamTests.cs`.
-- [ ] T038 [US3] Ensure the streaming path (`GetStreamingResponseAsync` → `IAsyncEnumerable<ChatResponseUpdate>`) drives the Stream tab and captures usage from the final update in `src/DBAIAzure.Web/Pages/RunDetail.razor` + streaming service.
-- [ ] T039 [US3] Make T035–T037 pass; add a grep gate confirming no execution-path dependency on SK `IChatCompletionService` (SC-005).
+- [X] T035 [P] [US3] Cost/metering parity: `CostParityTests` pins a response's token usage and asserts `CostCapturingChatClient` captures the same input/output/cache tokens + model, so `ModelPricing.EstimateCostUsd` yields an identical cost (0% delta).
+- [X] T036 [P] [US3] Structured-output parity: `StructuredOutputParityTests` — `ChatClientStructuredCompletionService` binds `RouteDecision` and `PhaseValidationResult` to identical typed records.
+- [ ] T037 [P] [US3] FAILING bUnit/E2E test: Run Detail **Stream** tab shows live token streaming. *(UI/E2E — remaining US3 piece.)*
+- [~] T038 [US3] Streaming: `CostCapturingChatClient.GetStreamingResponseAsync` already captures usage from the final `UsageContent` update (built+tested in T010). **Pending:** driving the Run Detail Stream tab from the streaming path in `RunDetail.razor` + streaming service.
+- [X] T039 [US3] SC-005 gate: `ExecutionPathSkFreeTests` (reflection) asserts no MAF executor/factory depends on SK `IChatCompletionService` and the model executors inject `IChatClient`. *(T035/T036 green; T037 streaming-UI remains.)*
 
 **Checkpoint**: metering is identical and provider-tagged; structured output + streaming preserved.
 
