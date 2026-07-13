@@ -431,7 +431,13 @@ builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
     }
 
     var hotReload = new DBAIAzure.Connectors.Ai.HotReloadChatClient(registry, ResolveActiveConfig);
-    return new DBAIAzure.Web.Services.Ai.CostCapturingChatClient(hotReload, usageReporter, costLogger);
+    var cost = new DBAIAzure.Web.Services.Ai.CostCapturingChatClient(hotReload, usageReporter, costLogger);
+
+    // spec-019 T013/T049: emit gen_ai model-call spans under the MAF/M.E.AI source so they reach Azure
+    // Monitor via the OTel exporter (replaces the SK telemetry filters as the model-call trace source).
+    var otelLogger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("Microsoft.Extensions.AI.OpenTelemetryChatClient");
+    return new Microsoft.Extensions.AI.OpenTelemetryChatClient(
+        cost, otelLogger, DBAIAzure.Core.Diagnostics.AiTelemetrySourceNames.ChatClient);
 });
 
 // ── Durable MAF checkpointing (spec-019 T030/T032) ────────────────────────────

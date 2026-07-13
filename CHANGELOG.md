@@ -179,6 +179,14 @@ workflow: a MAF intake run suspends at its clarification gate and its human-in-t
 the MCP tool through the production chain (`MessagingHitlNotifier` → `MessageDelivery` → `IMcpMessageGateway`),
 recorded by the fake gateway — MCP-backed delivery works from a MAF pipeline exactly as before.
 
+**US5 observability — traces to Azure Monitor (T013/T048/T049).** The Web `IChatClient` pipeline is now
+wrapped in `OpenTelemetryChatClient` under the `AiTelemetrySourceNames.ChatClient` source, so every model call
+emits gen_ai OpenTelemetry spans (tokens, latency, model) in place of the retired SK telemetry filters. The
+Runner's tracer provider registers the MAF/M.E.AI sources (`ChatClient` + `Agents`) **alongside** the legacy
+`Microsoft.SemanticKernel*` source — both flow to Azure Monitor during the migration so there is no trace gap;
+the SK source is removed at the atomic cutover, and the Azure Monitor exporter is unchanged. A validation test
+uses an `ActivityListener` to confirm a model call emits an `Activity` from the registered source.
+
 ### Added — Consistent empty-state treatment across the console (spec-014 T036 / FR-022)
 
 New shared `Shared/EmptyState.razor` component gives every empty list and panel the same friendly

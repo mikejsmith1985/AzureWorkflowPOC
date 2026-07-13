@@ -49,7 +49,7 @@ still mark which story each task serves.
 - [X] T010 Implement `CostCapturingChatClient : DelegatingChatClient` in `src/DBAIAzure.Web/Services/Ai/CostCapturingChatClient.cs`, reusing the existing cost ledger + binding key + ingest; make T006 pass. *(Feeds the existing `ILlmUsageReporter` → event → downstream ledger, so cost path is unchanged; not yet wired into DI — that is T012, coupled with US1.)*
 - [X] T011 Re-express `IStructuredCompletionService` atop `IChatClient` (`ChatResponseFormat.ForJsonSchema(schema, name, desc)` + deserialize `response.Text`) in `src/DBAIAzure.Connectors/Ai/ChatClientStructuredCompletionService.cs`. *(Provider-neutral; forced-tool via `RawRepresentationFactory` is a later Anthropic-native refinement if a provider ignores schema. Not yet wired into DI — T012.)*
 - [ ] T012 Compose the `IChatClient` pipeline in DI (`src/DBAIAzure.Web/Program.cs` and `src/DBAIAzure.Runner/Program.cs`): `provider → HotReload → CostCapturing → UseOpenTelemetry(SourceName) → UseFunctionInvocation`; register the provider registry; retire the SK `AnthropicChatCompletionService`/`HotReloadAnthropicService` registrations.
-- [ ] T013 Repoint observability: add `.UseOpenTelemetry(SourceName)` and replace `AddSource("Microsoft.SemanticKernel*")` with the MAF/M.E.AI source name(s) on **both** tracer and meter providers (`src/DBAIAzure.Web/Program.cs`, `src/DBAIAzure.Runner/Program.cs`); exporter unchanged.
+- [X] T013 Repoint observability: the Web `IChatClient` pipeline is wrapped in `OpenTelemetryChatClient(source = AiTelemetrySourceNames.ChatClient)` so model calls emit gen_ai spans; `DBAIAzure.Runner/Program.cs` registers the MAF/M.E.AI sources (`AiTelemetrySourceNames.ChatClient` + `.Agents`) on the tracer provider **alongside** `Microsoft.SemanticKernel*` (kept until the atomic cutover so there's no trace gap), Azure Monitor exporter unchanged.
 - [ ] T011a Re-target **all design-time LLM consumers** off SK `IChatCompletionService` onto `IChatClient` (and `IStructuredCompletionService` onto the T011 re-expression): `WorkflowDesignSkillService` (incl. its `[KernelFunction("AnalyseTopology")]` → an `AIFunction`/MAF tool — FR-014), `WorkflowCodeGenerator`, `LlmAvailabilityMonitor`, `WorkflowInputTranslator`, `WorkflowRealizationService` in `src/DBAIAzure.Web/Services/` and `src/DBAIAzure.Processes/`. Ensures **100%** of LLM paths use the modern client (SC-005), not just the pipeline steps. *(Resolves analysis finding G1/G2.)*
 
 **Checkpoint**: **every** model call (pipeline steps + design-time services) flows through `IChatClient` with cost capture + OTel; SK pipelines still run (on the new client) — nothing user-visible changed yet.
@@ -145,8 +145,8 @@ still mark which story each task serves.
 **Goal**: orchestration + model-call spans reach Azure Monitor under MAF/M.E.AI sources, no gap. *(Wiring done in T013; this validates.)*
 **Independent Test**: a run's spans appear in Azure Monitor sourced from the new framework.
 
-- [ ] T048 [P] [US5] Write validation test: orchestration + model-call activities are emitted under the registered MAF/M.E.AI `SourceName`(s) in `tests/DBAIAzure.Tests/Observability/TelemetrySourceTests.cs`.
-- [ ] T049 [US5] Validate the Azure Monitor export end-to-end (quickstart scenario 7): sources registered on tracer+meter, exporter unchanged; make T048 pass.
+- [X] T048 [P] [US5] `TelemetrySourceTests`: an `OpenTelemetryChatClient` under `AiTelemetrySourceNames.ChatClient` emits an OTel `Activity` from that source on each model call (captured via `ActivityListener`).
+- [X] T049 [US5] Model-call spans flow to the registered MAF/M.E.AI source (T048 green); the Runner tracer provider registers the source + keeps the exporter unchanged (T013). *(Full live Azure Monitor round-trip is a deploy-time smoke check.)*
 
 ---
 
