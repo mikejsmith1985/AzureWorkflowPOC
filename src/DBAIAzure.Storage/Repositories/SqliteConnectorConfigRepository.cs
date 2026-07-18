@@ -21,6 +21,8 @@ public sealed class SqliteConnectorConfigRepository : IConnectorConfigRepository
     private readonly ISecretProtector _protector;
 
     /// <summary>All four connector types, used to synthesize the full list returned by GetAllAsync.</summary>
+    // spec-020: the swap to the generic ConnectorType.WorkTracker lands together with the generic UI card
+    // (task T015) so GetAllAsync never surfaces a connector the Settings page cannot render. Held until then.
     private static readonly ConnectorType[] AllConnectorTypes =
         [ConnectorType.ServiceNow, ConnectorType.AzureDevOps, ConnectorType.LLM, ConnectorType.Messaging];
 

@@ -186,6 +186,13 @@ builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IBindingWorkItemMap,
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.ICostProjection,
     DBAIAzure.Web.Services.CostProjectionService>();
 
+// ── Work Tracking System config resolver (spec-020) ───────────────────────────────────────────
+// Reads the active WorkTracker connector (provider + credentials) from the store per run. Additive:
+// registered ahead of the consumers (adapter provider, Jira connection factory, testers) that the
+// generic-connector increment wires onto it.
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerConfigResolver,
+    DBAIAzure.Web.Services.WorkTrackerConfigResolver>();
+
 // ── Work-tracker adapter (spec-018): tracker-neutral seam + ADO implementation ───────────────
 // Additive — the adapter wraps the existing ADO client/preflight; the pipeline is not yet rewired
 // onto it (that is a later increment), so live ADO behaviour is unchanged. Scoped because the ADO
