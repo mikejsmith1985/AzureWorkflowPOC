@@ -88,7 +88,7 @@ user stories depend on this phase.**
 - [X] T022 [US1] Change `JiraWorkTrackerAdapter` to take `IJiraConnectionFactory` and obtain its client per operation (remove the injected pre-authed client + `JiraOptions` dependency) in `src/DBAIAzure.Web/Integrations/Jira/JiraWorkTrackerAdapter.cs` — depends on T021
 - [X] T023 [US1] Remove the startup-baked named `"Jira"` HttpClient auth and register `IJiraConnectionFactory` + the factory-based adapter in `src/DBAIAzure.Web/Program.cs` — depends on T021, T022
 - [X] T024 [US1] Add the Jira provider sub-form (site URL / email / API token / project key + InfoTips) and the `WorkTracker` `LoadDraftFromJson`/`SerializeToJson` Jira arms in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor` — depends on T015, T016. **The API-token input MUST NOT be pre-populated from stored secrets on load (SC-005/FR-006), matching the existing ADO PAT behavior**
-- [ ] T025 [US1] Route field provisioning through the active adapter (`IWorkTrackerAdapterProvider.GetAdapter().ProvisionFieldsAsync`, so provider=Jira uses `JiraFieldProvisioner`) in the startup/provision path in `src/DBAIAzure.Web/Program.cs` — depends on T011
+- [X] T025 [US1] Route field provisioning through the active adapter (`IWorkTrackerAdapterProvider.GetAdapter().ProvisionFieldsAsync`, so provider=Jira uses `JiraFieldProvisioner`) in the startup/provision path in `src/DBAIAzure.Web/Program.cs` — depends on T011
 
 **Checkpoint**: Jira is fully configurable from the UI and a run lands on a real Jira issue (US1 independently testable — MVP).
 
