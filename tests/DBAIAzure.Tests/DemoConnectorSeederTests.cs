@@ -37,8 +37,9 @@ public sealed class DemoConnectorSeederTests
         Assert.Equal($$"""{"instanceUrl":"{{ServiceNowUrl}}","username":"{{ServiceNowUser}}"}""", serviceNow.NonSecret);
         Assert.Equal($$"""{"password":"{{ServiceNowPassword}}"}""", serviceNow.Secret);
 
-        var ado = repo.SaveFor(ConnectorType.AzureDevOps);
-        Assert.Equal($$"""{"organizationUrl":"{{AdoOrgUrl}}","projectName":"{{AdoProject}}"}""", ado.NonSecret);
+        // spec-020: the legacy AzureDevOps seed section maps onto the generic WorkTracker connector.
+        var ado = repo.SaveFor(ConnectorType.WorkTracker);
+        Assert.Equal($$"""{"provider":"AzureDevOps","organizationUrl":"{{AdoOrgUrl}}","projectName":"{{AdoProject}}"}""", ado.NonSecret);
         Assert.Equal($$"""{"personalAccessToken":"{{AdoPat}}"}""", ado.Secret);
 
         var messaging = repo.SaveFor(ConnectorType.Messaging);
@@ -68,7 +69,7 @@ public sealed class DemoConnectorSeederTests
         await BuildSeeder(repo, options).SeedAsync();
 
         Assert.DoesNotContain(repo.Saves, save => save.Type == ConnectorType.ServiceNow);
-        Assert.Contains(repo.Saves, save => save.Type == ConnectorType.AzureDevOps);
+        Assert.Contains(repo.Saves, save => save.Type == ConnectorType.WorkTracker);
         Assert.Contains(repo.Saves, save => save.Type == ConnectorType.Messaging);
     }
 

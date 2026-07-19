@@ -67,9 +67,11 @@ public sealed class DemoConnectorSeederIntegrationTests : IDisposable
         Assert.Equal("""{"instanceUrl":"https://dev999.service-now.com","username":"svc"}""", serviceNow.NonSecretConfig);
         Assert.Equal("""{"password":"pw-secret"}""", await _repository.GetDecryptedSecretsAsync(ConnectorType.ServiceNow));
 
-        var ado = await _repository.GetAsync(ConnectorType.AzureDevOps);
+        // spec-020: the legacy AzureDevOps seed maps onto the generic WorkTracker connector.
+        var ado = await _repository.GetAsync(ConnectorType.WorkTracker);
         Assert.True(ado!.IsConfigured);
-        Assert.Equal("""{"personalAccessToken":"pat-secret"}""", await _repository.GetDecryptedSecretsAsync(ConnectorType.AzureDevOps));
+        Assert.Contains("\"provider\":\"AzureDevOps\"", ado.NonSecretConfig);
+        Assert.Equal("""{"personalAccessToken":"pat-secret"}""", await _repository.GetDecryptedSecretsAsync(ConnectorType.WorkTracker));
 
         var messaging = await _repository.GetAsync(ConnectorType.Messaging);
         Assert.True(messaging!.IsConfigured);

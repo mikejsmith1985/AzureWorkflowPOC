@@ -147,8 +147,8 @@ user stories depend on this phase.**
 
 ### Implementation
 
-- [ ] T036 [US4] Update test fixtures/setups that seed `ConnectorType.AzureDevOps` config to seed the `WorkTracker` row (provider=AzureDevOps) so the ADO regression suite exercises the generic identity, across `tests/DBAIAzure.Tests` — depends on T005, T010
-- [ ] T037 [US4] Run the full `dotnet test` ADO regression suite and confirm green with no expectation changes beyond the generic presentation (SC-003)
+- [X] T036 [US4] Update test fixtures/setups that seed `ConnectorType.AzureDevOps` config to seed the `WorkTracker` row (provider=AzureDevOps) so the ADO regression suite exercises the generic identity, across `tests/DBAIAzure.Tests` — depends on T005, T010
+- [X] T037 [US4] Run the full `dotnet test` ADO regression suite and confirm green with no expectation changes beyond the generic presentation (SC-003)
 
 **Checkpoint**: Existing ADO deployments verified unaffected; migration idempotent.
 
