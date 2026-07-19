@@ -215,13 +215,18 @@ builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter>(sp 
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapterProvider,
     DBAIAzure.Web.Services.WorkTrackerAdapterProvider>();
 
+// Routing adapter for components that hold a single adapter for their lifetime (the singleton orchestrator):
+// forwards each call to whichever provider is active now, so a UI provider switch applies without a restart.
+builder.Services.AddSingleton<DBAIAzure.Web.Services.ActiveWorkTrackerAdapter>();
+
 builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
 {
     var chatClient     = sp.GetRequiredService<Microsoft.Extensions.AI.IChatClient>();
     var artifactReader = sp.GetRequiredService<IArtifactReader>();
     var phaseRepo      = sp.GetRequiredService<IPhaseRunRepository>();
     var bindingKeyMinter   = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IBindingKeyMinter>();
-    var workTrackerAdapter = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IWorkTrackerAdapterProvider>().GetAdapter();
+    // Route board writes through the active-provider adapter so a UI tracker switch applies per run (spec-020).
+    var workTrackerAdapter = sp.GetRequiredService<DBAIAzure.Web.Services.ActiveWorkTrackerAdapter>();
 
     // The board-write dependencies the create executor needs, resolved from DI (the cost/telemetry ones are
     // best-effort and may be absent). Replaces the old per-run SK kernel container.

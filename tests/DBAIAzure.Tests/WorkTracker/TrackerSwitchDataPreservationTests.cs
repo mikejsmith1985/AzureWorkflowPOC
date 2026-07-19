@@ -47,18 +47,22 @@ public sealed class TrackerSwitchDataPreservationTests : IDisposable
         var adapters = new IWorkTrackerAdapter[] { new KeyedStubAdapter("AzureDevOps"), new KeyedStubAdapter("Jira") };
 
         // Switch the active tracker by reconfiguration — selection is the only thing that changes.
-        Assert.Equal("AzureDevOps", new WorkTrackerAdapterProvider(adapters, ConfigFor("AzureDevOps")).GetAdapter().TrackerKey);
-        Assert.Equal("Jira", new WorkTrackerAdapterProvider(adapters, ConfigFor("Jira")).GetAdapter().TrackerKey);
+        Assert.Equal("AzureDevOps", new WorkTrackerAdapterProvider(adapters, ResolverFor(Core.Models.WorkTrackerProvider.AzureDevOps)).GetAdapter().TrackerKey);
+        Assert.Equal("Jira", new WorkTrackerAdapterProvider(adapters, ResolverFor(Core.Models.WorkTrackerProvider.Jira)).GetAdapter().TrackerKey);
 
         // The tracker-neutral cost ledger + binding rows are intact and still resolvable after the switch.
         Assert.Equal(new WorkItemRef("PROJ-1"), await _bindingMap.ResolveAsync("BIND-X"));
         Assert.Equal(2.50, (await _ledger.GetTotalsAsync("BIND-X")).RuntimeUsd);
     }
 
-    private static IConfiguration ConfigFor(string activeTracker) =>
-        new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["WorkTracker:Active"] = activeTracker })
-            .Build();
+    private static IWorkTrackerConfigResolver ResolverFor(Core.Models.WorkTrackerProvider provider) =>
+        new StubResolver(provider);
+
+    private sealed class StubResolver(Core.Models.WorkTrackerProvider provider) : IWorkTrackerConfigResolver
+    {
+        public Task<Core.Models.ResolvedWorkTrackerConfig> ResolveActiveAsync(CancellationToken ct = default) =>
+            Task.FromResult(new Core.Models.ResolvedWorkTrackerConfig(provider, "{}", null, IsConfigured: true));
+    }
 
     private sealed class SharedFactory(DbContextOptions<PipelineDbContext> options)
         : IDbContextFactory<PipelineDbContext>
