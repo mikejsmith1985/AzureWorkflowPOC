@@ -77,16 +77,16 @@ user stories depend on this phase.**
 
 ### Tests (write first, must FAIL)
 
-- [ ] T017 [P] [US1] Unit test `JiraConnectionFactory` rebuilds the authed client only on `siteUrl|email|apiToken` change and sets Basic auth + BaseAddress, in `tests/DBAIAzure.Tests/WorkTracker/JiraConnectionFactoryTests.cs`
-- [ ] T018 [P] [US1] Unit test parsing Jira config from the discriminated `WorkTracker` JSON (`provider=Jira` → SiteUrl/Email/ProjectKey + secret) in `tests/DBAIAzure.Tests/WorkTracker/JiraConnectorConfigParseTests.cs`
+- [X] T017 [P] [US1] Unit test `JiraConnectionFactory` rebuilds the authed client only on `siteUrl|email|apiToken` change and sets Basic auth + BaseAddress, in `tests/DBAIAzure.Tests/WorkTracker/JiraConnectionFactoryTests.cs`
+- [X] T018 [P] [US1] Unit test parsing Jira config from the discriminated `WorkTracker` JSON (`provider=Jira` → SiteUrl/Email/ProjectKey + secret) in `tests/DBAIAzure.Tests/WorkTracker/JiraConnectorConfigParseTests.cs`
 - [ ] T019 [P] [US1] bUnit test: the generic card renders the Jira sub-form (site/email/token/project key) when provider=Jira, **and asserts the API-token field is never pre-filled on reload of a saved connector (SC-005/FR-006 — secret never redisplayed)**, in `tests/DBAIAzure.Tests/WorkTracker/ConnectorSettingsJiraFormTests.cs`
 
 ### Implementation
 
 - [X] T020 [US1] Create `JiraConnectorConfig` non-secret record (SiteUrl, Email, ProjectKey) in `src/DBAIAzure.Core/Models/JiraConnectorConfig.cs`
-- [ ] T021 [US1] Implement `IJiraConnectionFactory` + `JiraConnectionFactory` (per-run resolve via `IWorkTrackerConfigResolver`; cache authed `HttpClient` keyed by `siteUrl|email|apiToken`) in `src/DBAIAzure.Web/Integrations/Jira/JiraConnectionFactory.cs` — depends on T009, T020
-- [ ] T022 [US1] Change `JiraWorkTrackerAdapter` to take `IJiraConnectionFactory` and obtain its client per operation (remove the injected pre-authed client + `JiraOptions` dependency) in `src/DBAIAzure.Web/Integrations/Jira/JiraWorkTrackerAdapter.cs` — depends on T021
-- [ ] T023 [US1] Remove the startup-baked named `"Jira"` HttpClient auth and register `IJiraConnectionFactory` + the factory-based adapter in `src/DBAIAzure.Web/Program.cs` — depends on T021, T022
+- [X] T021 [US1] Implement `IJiraConnectionFactory` + `JiraConnectionFactory` (per-run resolve via `IWorkTrackerConfigResolver`; cache authed `HttpClient` keyed by `siteUrl|email|apiToken`) in `src/DBAIAzure.Web/Integrations/Jira/JiraConnectionFactory.cs` — depends on T009, T020
+- [X] T022 [US1] Change `JiraWorkTrackerAdapter` to take `IJiraConnectionFactory` and obtain its client per operation (remove the injected pre-authed client + `JiraOptions` dependency) in `src/DBAIAzure.Web/Integrations/Jira/JiraWorkTrackerAdapter.cs` — depends on T021
+- [X] T023 [US1] Remove the startup-baked named `"Jira"` HttpClient auth and register `IJiraConnectionFactory` + the factory-based adapter in `src/DBAIAzure.Web/Program.cs` — depends on T021, T022
 - [ ] T024 [US1] Add the Jira provider sub-form (site URL / email / API token / project key + InfoTips) and the `WorkTracker` `LoadDraftFromJson`/`SerializeToJson` Jira arms in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor` — depends on T015, T016. **The API-token input MUST NOT be pre-populated from stored secrets on load (SC-005/FR-006), matching the existing ADO PAT behavior**
 - [ ] T025 [US1] Route field provisioning through the active adapter (`IWorkTrackerAdapterProvider.GetAdapter().ProvisionFieldsAsync`, so provider=Jira uses `JiraFieldProvisioner`) in the startup/provision path in `src/DBAIAzure.Web/Program.cs` — depends on T011
 

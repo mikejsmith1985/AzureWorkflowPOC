@@ -201,27 +201,14 @@ builder.Services.AddSingleton<DBAIAzure.Web.Integrations.AzureDevOps.AdoFieldRef
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter,
     DBAIAzure.Web.Integrations.AzureDevOps.AzureDevOpsWorkTrackerAdapter>();
 
-// ── Jira work-tracker adapter (spec-018 increment 3) — registered alongside ADO; the provider selects
-// the active one by WorkTracker:Active. Only exercised when Jira is the configured tracker. ────────────
-builder.Services.AddSingleton(sp =>
-{
-    var jiraOptions = new DBAIAzure.Web.Integrations.Jira.JiraOptions();
-    sp.GetRequiredService<IConfiguration>().GetSection("WorkTracker:Jira").Bind(jiraOptions);
-    return jiraOptions;
-});
-builder.Services.AddHttpClient("Jira", (sp, client) =>
-{
-    var jiraOptions = sp.GetRequiredService<DBAIAzure.Web.Integrations.Jira.JiraOptions>();
-    if (!string.IsNullOrWhiteSpace(jiraOptions.SiteUrl))
-        client.BaseAddress = new Uri(jiraOptions.SiteUrl);
-    var basicToken = Convert.ToBase64String(
-        System.Text.Encoding.ASCII.GetBytes($"{jiraOptions.Email}:{jiraOptions.ApiToken}"));
-    client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", basicToken);
-});
+// ── Jira work-tracker adapter (spec-018 increment 3; spec-020 per-run credentials) ───────────────────
+// The Jira connection factory resolves credentials from the connector store on each call and rebuilds the
+// authed client only when they change (hot-reload — FR-005), replacing the former startup-baked HttpClient.
+builder.Services.AddSingleton<DBAIAzure.Web.Integrations.Jira.IJiraConnectionFactory,
+    DBAIAzure.Web.Integrations.Jira.JiraConnectionFactory>();
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter>(sp =>
     new DBAIAzure.Web.Integrations.Jira.JiraWorkTrackerAdapter(
-        sp.GetRequiredService<IHttpClientFactory>().CreateClient("Jira"),
-        sp.GetRequiredService<DBAIAzure.Web.Integrations.Jira.JiraOptions>(),
+        sp.GetRequiredService<DBAIAzure.Web.Integrations.Jira.IJiraConnectionFactory>(),
         sp.GetRequiredService<DBAIAzure.Core.Interfaces.IBindingWorkItemMap>(),
         sp.GetRequiredService<ILogger<DBAIAzure.Web.Integrations.Jira.JiraWorkTrackerAdapter>>()));
 
