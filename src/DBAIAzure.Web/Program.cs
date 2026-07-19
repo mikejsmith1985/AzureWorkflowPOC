@@ -251,6 +251,7 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
 // ── Connector health checker + per-connector testers (T020) ───────────────────
 builder.Services.AddSingleton<ServiceNowClient>();
 builder.Services.AddSingleton<AdoConnectorTester>();
+builder.Services.AddSingleton<JiraConnectorTester>();
 builder.Services.AddSingleton<LlmConnectorTester>();
 builder.Services.AddSingleton<MessagingConnectorTester>();
 builder.Services.AddSingleton<IConnectorHealthChecker, ConnectorHealthChecker>();
@@ -489,6 +490,11 @@ using (var scope = app.Services.CreateScope())
         CREATE UNIQUE INDEX IF NOT EXISTS IX_ConnectorConfigs_ConnectorType
             ON ConnectorConfigs (ConnectorType);
         """);
+
+    // spec-020 (FR-015): one-time, idempotent migration of an existing Azure DevOps connector onto the
+    // generic Work Tracking System connector. Runs before the app serves traffic and before any adapter/
+    // BoardsClient use, so an existing ADO deployment keeps working with zero reconfiguration.
+    await DBAIAzure.Storage.Migrations.WorkTrackerConnectorMigration.MigrateAsync(db);
 
     // Add WorkflowDefinitions table for databases created before the Visual Workflow Builder was added.
     // CREATE TABLE IF NOT EXISTS is idempotent — safe to run on every startup.

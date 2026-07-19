@@ -20,11 +20,12 @@ public sealed class SqliteConnectorConfigRepository : IConnectorConfigRepository
     private readonly IDbContextFactory<PipelineDbContext> _factory;
     private readonly ISecretProtector _protector;
 
-    /// <summary>All four connector types, used to synthesize the full list returned by GetAllAsync.</summary>
-    // spec-020: the swap to the generic ConnectorType.WorkTracker lands together with the generic UI card
-    // (task T015) so GetAllAsync never surfaces a connector the Settings page cannot render. Held until then.
+    /// <summary>
+    /// The operator-facing connector types synthesized by GetAllAsync. The generic <see cref="ConnectorType.WorkTracker"/>
+    /// replaces the vendor-specific <c>AzureDevOps</c> entry (spec-020); existing ADO rows are auto-migrated onto it.
+    /// </summary>
     private static readonly ConnectorType[] AllConnectorTypes =
-        [ConnectorType.ServiceNow, ConnectorType.AzureDevOps, ConnectorType.LLM, ConnectorType.Messaging];
+        [ConnectorType.ServiceNow, ConnectorType.WorkTracker, ConnectorType.LLM, ConnectorType.Messaging];
 
     /// <summary>The connector type formerly called "Teams"; tolerated on read and mapped to Messaging (FR-013).</summary>
     private const string LegacyMessagingType = "Teams";

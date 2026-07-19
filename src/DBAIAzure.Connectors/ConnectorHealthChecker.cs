@@ -28,12 +28,14 @@ public sealed class ConnectorHealthChecker : IConnectorHealthChecker
     /// </summary>
     private static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(60);
 
-    /// <summary>Production constructor — wires the four concrete connector testers.</summary>
+    /// <summary>Production constructor — wires the connector testers.</summary>
     public ConnectorHealthChecker(
         ServiceNowClient snowClient,
         AdoConnectorTester adoTester,
+        JiraConnectorTester jiraTester,
         LlmConnectorTester llmTester,
         MessagingConnectorTester messagingTester,
+        IWorkTrackerConfigResolver workTrackerResolver,
         IConnectorConfigRepository configRepo,
         ILogger<ConnectorHealthChecker> logger,
         IMemoryCache? cache = null)
@@ -44,10 +46,22 @@ public sealed class ConnectorHealthChecker : IConnectorHealthChecker
         _testers = new Dictionary<ConnectorType, Func<CancellationToken, Task<ConnectorTestResult>>>
         {
             [ConnectorType.ServiceNow]  = snowClient.TestConnectionAsync,
-            [ConnectorType.AzureDevOps] = adoTester.TestConnectionAsync,
+            // spec-020: the generic Work Tracking System connector dispatches to the active provider's tester.
+            [ConnectorType.WorkTracker] = ct => TestActiveWorkTrackerAsync(workTrackerResolver, adoTester, jiraTester, ct),
             [ConnectorType.LLM]         = llmTester.TestConnectionAsync,
             [ConnectorType.Messaging]   = messagingTester.TestConnectionAsync,
         };
+    }
+
+    /// <summary>Resolves the active work-tracker provider and runs its connection test (spec-020).</summary>
+    private static async Task<ConnectorTestResult> TestActiveWorkTrackerAsync(
+        IWorkTrackerConfigResolver resolver, AdoConnectorTester adoTester, JiraConnectorTester jiraTester,
+        CancellationToken ct)
+    {
+        var resolved = await resolver.ResolveActiveAsync(ct);
+        return resolved.Provider == WorkTrackerProvider.Jira
+            ? await jiraTester.TestConnectionAsync(ct)
+            : await adoTester.TestConnectionAsync(ct);
     }
 
     /// <summary>

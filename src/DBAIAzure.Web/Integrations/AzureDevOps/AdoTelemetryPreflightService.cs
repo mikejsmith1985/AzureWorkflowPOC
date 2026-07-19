@@ -303,7 +303,8 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
 
         try
         {
-            var configResult = await _configRepo.GetAsync(ConnectorType.AzureDevOps, ct);
+            // spec-020: ADO config now lives on the generic WorkTracker connector (provider=AzureDevOps).
+            var configResult = await _configRepo.GetAsync(ConnectorType.WorkTracker, ct);
             if (configResult?.NonSecretConfig is { } nsJson)
             {
                 using var doc = JsonDocument.Parse(nsJson);
@@ -315,7 +316,7 @@ public sealed class AdoTelemetryPreflightService : IAdoTelemetryPreflightService
                     project = projProp.GetString()!;
             }
 
-            var secretsJson = await _configRepo.GetDecryptedSecretsAsync(ConnectorType.AzureDevOps, ct);
+            var secretsJson = await _configRepo.GetDecryptedSecretsAsync(ConnectorType.WorkTracker, ct);
             if (secretsJson is not null)
             {
                 using var doc = JsonDocument.Parse(secretsJson);

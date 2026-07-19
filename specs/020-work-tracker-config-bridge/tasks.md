@@ -47,7 +47,7 @@ user stories depend on this phase.**
 ### Tests (write first, must FAIL)
 
 - [X] T003 [P] Unit test for `WorkTrackerConfigResolver` provider dispatch (ADO/Jira/unconfigured + seed fallback) in `tests/DBAIAzure.Tests/WorkTracker/WorkTrackerConfigResolverTests.cs`
-- [ ] T004 [P] Unit test for one-time ADO→WorkTracker migration (transforms JSON, copies ciphertext, sets active) in `tests/DBAIAzure.Tests/WorkTracker/WorkTrackerMigrationTests.cs`
+- [X] T004 [P] Unit test for one-time ADO→WorkTracker migration (transforms JSON, copies ciphertext, sets active) in `tests/DBAIAzure.Tests/WorkTracker/WorkTrackerMigrationTests.cs`
 
 ### Implementation
 
@@ -56,14 +56,14 @@ user stories depend on this phase.**
 - [X] T007 [P] Create `WorkTrackerProvider` discriminator (AzureDevOps | Jira) in `src/DBAIAzure.Core/Models/WorkTrackerProvider.cs`
 - [X] T008 [P] Define `IWorkTrackerConfigResolver` (`ResolveActiveAsync`) in `src/DBAIAzure.Core/Interfaces/IWorkTrackerConfigResolver.cs`
 - [X] T009 Implement `WorkTrackerConfigResolver` (reads the `WorkTracker` row via `IConnectorConfigRepository`, decrypts, dispatches on `provider`, `WorkTracker:Active` seed fallback) in `src/DBAIAzure.Web/Services/WorkTrackerConfigResolver.cs` — depends on T006–T008
-- [ ] T010 Swap `AllConnectorTypes` from `AzureDevOps` to `WorkTracker` in `src/DBAIAzure.Storage/Repositories/SqliteConnectorConfigRepository.cs` — depends on T005
+- [X] T010 Swap `AllConnectorTypes` from `AzureDevOps` to `WorkTracker` in `src/DBAIAzure.Storage/Repositories/SqliteConnectorConfigRepository.cs` — depends on T005
 - [X] T011 Rework `WorkTrackerAdapterProvider.GetAdapter()` to resolve the active adapter per run via `IWorkTrackerConfigResolver` (replace the startup `WorkTracker:Active` read) in `src/DBAIAzure.Web/Services/WorkTrackerAdapterProvider.cs` — depends on T009
-- [ ] T012 Repoint `AzureDevOpsBoardsClient` config source to the `WorkTracker` row (provider=AzureDevOps) through the resolver, preserving the appsettings baseline overlay in `src/DBAIAzure.Web/Integrations/AzureDevOps/AzureDevOpsBoardsClient.cs` — depends on T009
-- [ ] T013 Implement the one-time idempotent ADO→WorkTracker startup migration (guarded by absence of a WorkTracker row; copies encrypted blob verbatim) immediately after the DB-init block in `src/DBAIAzure.Web/Program.cs` — depends on T005, T010. **Ordering**: must run at boot BEFORE any adapter/BoardsClient use so T012's WorkTracker-row read resolves for existing installs
-- [ ] T014 Register `IWorkTrackerConfigResolver` and adjust the work-tracker DI registrations for per-run resolution in `src/DBAIAzure.Web/Program.cs` — depends on T009
-- [ ] T015 Add the generic **Work Tracking System** card shell — provider `<select>`, `WorkTracker` load/save switch arms, and the **Azure DevOps** sub-form (org URL / project / PAT) moved under it — in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor` — depends on T005
-- [ ] T015a **[Edge case — spec "no tracker configured"]** Render a clear unconfigured empty-state on the Work Tracking System card when `IsConfigured = false` (no provider chosen / no row), with a "select a provider to begin" prompt, in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor` — depends on T015
-- [ ] T016 Extend the `ConnectorEntry` draft model with `DraftProvider`, `DraftEmail`, `DraftProjectKey` in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor` — depends on T015
+- [X] T012 Repoint `AzureDevOpsBoardsClient` config source to the `WorkTracker` row (provider=AzureDevOps) through the resolver, preserving the appsettings baseline overlay in `src/DBAIAzure.Web/Integrations/AzureDevOps/AzureDevOpsBoardsClient.cs` — depends on T009
+- [X] T013 Implement the one-time idempotent ADO→WorkTracker startup migration (guarded by absence of a WorkTracker row; copies encrypted blob verbatim) immediately after the DB-init block in `src/DBAIAzure.Web/Program.cs` — depends on T005, T010. **Ordering**: must run at boot BEFORE any adapter/BoardsClient use so T012's WorkTracker-row read resolves for existing installs
+- [X] T014 Register `IWorkTrackerConfigResolver` and adjust the work-tracker DI registrations for per-run resolution in `src/DBAIAzure.Web/Program.cs` — depends on T009
+- [X] T015 Add the generic **Work Tracking System** card shell — provider `<select>`, `WorkTracker` load/save switch arms, and the **Azure DevOps** sub-form (org URL / project / PAT) moved under it — in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor` — depends on T005
+- [X] T015a **[Edge case — spec "no tracker configured"]** Render a clear unconfigured empty-state on the Work Tracking System card when `IsConfigured = false` (no provider chosen / no row), with a "select a provider to begin" prompt, in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor` — depends on T015
+- [X] T016 Extend the `ConnectorEntry` draft model with `DraftProvider`, `DraftEmail`, `DraftProjectKey` in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor` — depends on T015
 
 **Checkpoint**: The Connectors screen shows one generic card; an existing ADO connector auto-migrates and the ADO pipeline path behaves exactly as before (T003/T004 green).
 
@@ -79,7 +79,7 @@ user stories depend on this phase.**
 
 - [X] T017 [P] [US1] Unit test `JiraConnectionFactory` rebuilds the authed client only on `siteUrl|email|apiToken` change and sets Basic auth + BaseAddress, in `tests/DBAIAzure.Tests/WorkTracker/JiraConnectionFactoryTests.cs`
 - [X] T018 [P] [US1] Unit test parsing Jira config from the discriminated `WorkTracker` JSON (`provider=Jira` → SiteUrl/Email/ProjectKey + secret) in `tests/DBAIAzure.Tests/WorkTracker/JiraConnectorConfigParseTests.cs`
-- [ ] T019 [P] [US1] bUnit test: the generic card renders the Jira sub-form (site/email/token/project key) when provider=Jira, **and asserts the API-token field is never pre-filled on reload of a saved connector (SC-005/FR-006 — secret never redisplayed)**, in `tests/DBAIAzure.Tests/WorkTracker/ConnectorSettingsJiraFormTests.cs`
+- [X] T019 [P] [US1] bUnit test: the generic card renders the Jira sub-form (site/email/token/project key) when provider=Jira, **and asserts the API-token field is never pre-filled on reload of a saved connector (SC-005/FR-006 — secret never redisplayed)**, in `tests/DBAIAzure.Tests/WorkTracker/ConnectorSettingsJiraFormTests.cs`
 
 ### Implementation
 
@@ -87,7 +87,7 @@ user stories depend on this phase.**
 - [X] T021 [US1] Implement `IJiraConnectionFactory` + `JiraConnectionFactory` (per-run resolve via `IWorkTrackerConfigResolver`; cache authed `HttpClient` keyed by `siteUrl|email|apiToken`) in `src/DBAIAzure.Web/Integrations/Jira/JiraConnectionFactory.cs` — depends on T009, T020
 - [X] T022 [US1] Change `JiraWorkTrackerAdapter` to take `IJiraConnectionFactory` and obtain its client per operation (remove the injected pre-authed client + `JiraOptions` dependency) in `src/DBAIAzure.Web/Integrations/Jira/JiraWorkTrackerAdapter.cs` — depends on T021
 - [X] T023 [US1] Remove the startup-baked named `"Jira"` HttpClient auth and register `IJiraConnectionFactory` + the factory-based adapter in `src/DBAIAzure.Web/Program.cs` — depends on T021, T022
-- [ ] T024 [US1] Add the Jira provider sub-form (site URL / email / API token / project key + InfoTips) and the `WorkTracker` `LoadDraftFromJson`/`SerializeToJson` Jira arms in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor` — depends on T015, T016. **The API-token input MUST NOT be pre-populated from stored secrets on load (SC-005/FR-006), matching the existing ADO PAT behavior**
+- [X] T024 [US1] Add the Jira provider sub-form (site URL / email / API token / project key + InfoTips) and the `WorkTracker` `LoadDraftFromJson`/`SerializeToJson` Jira arms in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor` — depends on T015, T016. **The API-token input MUST NOT be pre-populated from stored secrets on load (SC-005/FR-006), matching the existing ADO PAT behavior**
 - [ ] T025 [US1] Route field provisioning through the active adapter (`IWorkTrackerAdapterProvider.GetAdapter().ProvisionFieldsAsync`, so provider=Jira uses `JiraFieldProvisioner`) in the startup/provision path in `src/DBAIAzure.Web/Program.cs` — depends on T011
 
 **Checkpoint**: Jira is fully configurable from the UI and a run lands on a real Jira issue (US1 independently testable — MVP).
@@ -102,14 +102,14 @@ user stories depend on this phase.**
 
 ### Tests (write first, must FAIL)
 
-- [ ] T026 [P] [US2] Integration test: after saving a provider change, `IWorkTrackerAdapterProvider.GetAdapter()` returns the newly selected adapter on the next call (no restart) in `tests/DBAIAzure.Tests/WorkTracker/ProviderSwitchTests.cs`
+- [X] T026 [P] [US2] Integration test: after saving a provider change, `IWorkTrackerAdapterProvider.GetAdapter()` returns the newly selected adapter on the next call (no restart) in `tests/DBAIAzure.Tests/WorkTracker/ProviderSwitchTests.cs`
 
 ### Implementation
 
-- [ ] T027 [US2] Wire the provider `<select>` to switch sub-forms, persist the `provider` into the `WorkTracker` JSON on save, and clearly indicate the active provider on the card in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor` — depends on T015, T024
-- [ ] T028 [P] [US2] Generify the onboarding chip label + deep-link (target `WorkTracker`) in `src/DBAIAzure.Web/Components/Settings/OnboardingBanner.razor`
-- [ ] T029 [P] [US2] Generify the work-tracker help copy in `src/DBAIAzure.Web/Pages/UserGuide.razor`
-- [ ] T030 [US2] Sweep remaining hardcoded "Azure DevOps" user-facing strings so the displayed provider reflects the active selection (SC-006) across `src/DBAIAzure.Web`
+- [X] T027 [US2] Wire the provider `<select>` to switch sub-forms, persist the `provider` into the `WorkTracker` JSON on save, and clearly indicate the active provider on the card in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor` — depends on T015, T024
+- [X] T028 [P] [US2] Generify the onboarding chip label + deep-link (target `WorkTracker`) in `src/DBAIAzure.Web/Components/Settings/OnboardingBanner.razor`
+- [X] T029 [P] [US2] Generify the work-tracker help copy in `src/DBAIAzure.Web/Pages/UserGuide.razor`
+- [X] T030 [US2] Sweep remaining hardcoded "Azure DevOps" user-facing strings so the displayed provider reflects the active selection (SC-006) across `src/DBAIAzure.Web`
 
 **Checkpoint**: One generic card; live ADO↔Jira switching without restart (US1 + US2 both independently testable).
 
@@ -123,13 +123,13 @@ user stories depend on this phase.**
 
 ### Tests (write first, must FAIL)
 
-- [ ] T031 [P] [US3] Unit test `JiraConnectorTester`: success (auth + project), invalid-token failure, bad-project failure, and no-write guarantee in `tests/DBAIAzure.Tests/WorkTracker/JiraConnectorTesterTests.cs`
+- [X] T031 [P] [US3] Unit test `JiraConnectorTester`: success (auth + project), invalid-token failure, bad-project failure, and no-write guarantee in `tests/DBAIAzure.Tests/WorkTracker/JiraConnectorTesterTests.cs`
 
 ### Implementation
 
-- [ ] T032 [US3] Implement `JiraConnectorTester : IConnectorHealthChecker` (probe `GET /rest/api/3/myself` then `GET /rest/api/3/project/{key}`, return `ConnectorTestResult` with sanitized messages) in `src/DBAIAzure.Web/Integrations/Jira/JiraConnectorTester.cs` — depends on T021
-- [ ] T033 [US3] Wire the "Test Connection" button to resolve the tester for the selected provider and persist via `UpdateTestResultAsync(ConnectorType.WorkTracker, ...)` in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor` — depends on T032, T015
-- [ ] T034 [US3] Register `JiraConnectorTester` for the health-checker seam in `src/DBAIAzure.Web/Program.cs` — depends on T032
+- [X] T032 [US3] Implement `JiraConnectorTester : IConnectorHealthChecker` (probe `GET /rest/api/3/myself` then `GET /rest/api/3/project/{key}`, return `ConnectorTestResult` with sanitized messages) in `src/DBAIAzure.Web/Integrations/Jira/JiraConnectorTester.cs` — depends on T021
+- [X] T033 [US3] Wire the "Test Connection" button to resolve the tester for the selected provider and persist via `UpdateTestResultAsync(ConnectorType.WorkTracker, ...)` in `src/DBAIAzure.Web/Pages/ConnectorSettings.razor` — depends on T032, T015
+- [X] T034 [US3] Register `JiraConnectorTester` for the health-checker seam in `src/DBAIAzure.Web/Program.cs` — depends on T032
 
 **Checkpoint**: Both providers have an accurate Test Connection (US1–US3 independently testable).
 
@@ -143,7 +143,7 @@ user stories depend on this phase.**
 
 ### Tests (write first, must FAIL)
 
-- [ ] T035 [P] [US4] Test migration replay idempotency (second run = no-op) and fresh-install path (no ADO row → no migration) in `tests/DBAIAzure.Tests/WorkTracker/WorkTrackerMigrationReplayTests.cs`
+- [X] T035 [P] [US4] Test migration replay idempotency (second run = no-op) and fresh-install path (no ADO row → no migration) in `tests/DBAIAzure.Tests/WorkTracker/WorkTrackerMigrationReplayTests.cs`
 
 ### Implementation
 

@@ -91,7 +91,7 @@ public sealed class SqliteConnectorConfigRepositoryTests : IDisposable
         Assert.Equal(4, all.Count);
         Assert.Contains(all, c => c.Type == ConnectorType.LLM && c.IsConfigured);
         Assert.Contains(all, c => c.Type == ConnectorType.ServiceNow  && !c.IsConfigured);
-        Assert.Contains(all, c => c.Type == ConnectorType.AzureDevOps && !c.IsConfigured);
+        Assert.Contains(all, c => c.Type == ConnectorType.WorkTracker && !c.IsConfigured);
         Assert.Contains(all, c => c.Type == ConnectorType.Messaging        && !c.IsConfigured);
     }
 
