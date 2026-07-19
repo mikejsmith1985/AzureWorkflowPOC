@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added — Work Tracking System config bridge (spec-020)
+
+The connector-settings UI is now bridged to the spec-018 work-tracker adapter layer: the active tracker —
+Azure DevOps or **Jira** — is chosen and configured entirely in the UI, with credentials resolved **per run
+(no restart)**. This finishes the spec-018 seam (which shipped the adapters but left the pipeline/UI unwired).
+
+- **Generic connector**: a single `ConnectorType.WorkTracker` "Work Tracking System" connector with a
+  `provider` discriminator (Azure DevOps / Jira) replaces the vendor-specific Azure DevOps connector; the
+  Settings card shows a provider selector with provider-conditional sub-forms and an empty state.
+- **Per-run resolution**: `IWorkTrackerConfigResolver` reads the active connector (provider + decrypted
+  secret) from the store on every call; `WorkTrackerAdapterProvider` + `ActiveWorkTrackerAdapter` select the
+  active adapter per run, and the Jira adapter's authed client is rebuilt from stored credentials on change
+  (`JiraConnectionFactory`) — so UI edits apply without a restart.
+- **Jira Test Connection**: `JiraConnectorTester` probes auth + project behind the existing health-checker.
+- **Zero-reconfiguration upgrade**: a one-time idempotent migration moves an existing Azure DevOps connector
+  onto the generic connector (secret preserved); onboarding/help copy is generified.
+- Verified end-to-end against a real Jira Cloud instance (field provisioning succeeded over the live API).
 
 ## [2.0.0] - 2026-07-13
 

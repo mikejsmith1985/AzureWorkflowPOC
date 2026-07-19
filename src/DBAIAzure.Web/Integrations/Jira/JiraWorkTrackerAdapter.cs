@@ -1,5 +1,5 @@
-// Jira Cloud implementation of IWorkTrackerAdapter (spec-018, increment 3). Net-new code behind the
-// contract proven by the ADO adapter — the pipeline/cost layers are unchanged.
+// Jira Cloud implementation of IWorkTrackerAdapter (spec-018, increment 3; spec-020 per-run credentials).
+// Net-new code behind the contract proven by the ADO adapter — the pipeline/cost layers are unchanged.
 using System.Net.Http.Json;
 using System.Text.Json;
 using DBAIAzure.Core.Interfaces;
@@ -13,12 +13,13 @@ namespace DBAIAzure.Web.Integrations.Jira;
 /// <summary>
 /// Targets Jira Cloud REST v3: creates issues, sets custom fields (resolved logical→<c>customfield_*</c>
 /// by name), appends comments, and resolves a binding key via the local map (shared with ADO). Work items
-/// are referenced by their issue key (<c>PROJ-123</c>). All operations best-effort (FR-012).
+/// are referenced by their issue key (<c>PROJ-123</c>). All operations best-effort (FR-012). Credentials are
+/// resolved per operation from the connector store via <see cref="IJiraConnectionFactory"/> (spec-020) so
+/// UI-entered changes take effect without an application restart.
 /// </summary>
 public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
 {
-    private readonly HttpClient _http;            // pre-authed; base = the Jira site
-    private readonly JiraOptions _options;
+    private readonly IJiraConnectionFactory _connectionFactory;
     private readonly IBindingWorkItemMap _bindingMap;
     private readonly ILogger<JiraWorkTrackerAdapter> _logger;
 
@@ -26,10 +27,9 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
     private Dictionary<string, string>? _fieldIdByName;   // Jira field display name → customfield id
 
     public JiraWorkTrackerAdapter(
-        HttpClient http, JiraOptions options, IBindingWorkItemMap bindingMap, ILogger<JiraWorkTrackerAdapter> logger)
+        IJiraConnectionFactory connectionFactory, IBindingWorkItemMap bindingMap, ILogger<JiraWorkTrackerAdapter> logger)
     {
-        _http = http;
-        _options = options;
+        _connectionFactory = connectionFactory;
         _bindingMap = bindingMap;
         _logger = logger;
     }
@@ -40,9 +40,11 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
     public async Task<CreatedWorkItemRef> CreateWorkItemAsync(
         WorkItemType type, string title, string description, WorkItemRef? parent, CancellationToken ct = default)
     {
+        var connection = await _connectionFactory.GetConnectionAsync(ct);
+
         var fields = new Dictionary<string, object?>
         {
-            ["project"] = new { key = _options.ProjectKey },
+            ["project"] = new { key = connection.ProjectKey },
             ["summary"] = title,
             ["issuetype"] = new { name = ToJiraIssueType(type) },
             ["description"] = ToAdf(description),
@@ -50,7 +52,7 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
         if (parent is { } p)
             fields["parent"] = new { key = p.Value };
 
-        using var response = await _http.PostAsync("/rest/api/3/issue", JsonContent.Create(new { fields }), ct);
+        using var response = await connection.Client.PostAsync("/rest/api/3/issue", JsonContent.Create(new { fields }), ct);
         response.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
         var key = doc.RootElement.GetProperty("key").GetString() ?? string.Empty;
@@ -59,7 +61,7 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
         {
             WorkItemId = new WorkItemRef(key),
             WorkItemType = ToJiraIssueType(type),
-            Url = $"{_options.SiteUrl.TrimEnd('/')}/browse/{key}",
+            Url = $"{connection.SiteUrl.TrimEnd('/')}/browse/{key}",
             WasUpdated = false,
         };
     }
@@ -68,7 +70,9 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
     public async Task<CreatedWorkItemRef> UpsertWorkItemAsync(
         WorkItemRef item, string title, string description, string appendComment, CancellationToken ct = default)
     {
-        using var editResponse = await _http.PutAsync($"/rest/api/3/issue/{item.Value}",
+        var connection = await _connectionFactory.GetConnectionAsync(ct);
+
+        using var editResponse = await connection.Client.PutAsync($"/rest/api/3/issue/{item.Value}",
             JsonContent.Create(new { fields = new Dictionary<string, object?> { ["summary"] = title, ["description"] = ToAdf(description) } }), ct);
         editResponse.EnsureSuccessStatusCode();
 
@@ -78,7 +82,7 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
         {
             WorkItemId = item,
             WorkItemType = string.Empty,
-            Url = $"{_options.SiteUrl.TrimEnd('/')}/browse/{item.Value}",
+            Url = $"{connection.SiteUrl.TrimEnd('/')}/browse/{item.Value}",
             WasUpdated = true,
         };
     }
@@ -86,7 +90,8 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
     /// <inheritdoc/>
     public async Task AppendCommentAsync(WorkItemRef item, string comment, CancellationToken ct = default)
     {
-        using var response = await _http.PostAsync(
+        var connection = await _connectionFactory.GetConnectionAsync(ct);
+        using var response = await connection.Client.PostAsync(
             $"/rest/api/3/issue/{item.Value}/comment", JsonContent.Create(new { body = ToAdf(comment) }), ct);
         if (!response.IsSuccessStatusCode)
             _logger.LogWarning("Jira comment on {Issue} returned {Status}.", item.Value, response.StatusCode);
@@ -96,10 +101,12 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
     public async Task SetFieldsAsync(
         WorkItemRef item, IReadOnlyDictionary<string, object?> logicalFields, CancellationToken ct = default)
     {
+        var connection = await _connectionFactory.GetConnectionAsync(ct);
+
         var native = new Dictionary<string, object?>();
         foreach (var (logicalName, value) in logicalFields)
         {
-            var fieldId = await ResolveFieldIdAsync(logicalName, ct);
+            var fieldId = await ResolveFieldIdAsync(connection.Client, logicalName, ct);
             if (fieldId is null)
             {
                 _logger.LogWarning("Jira field '{Field}' not found — skipped.", logicalName);
@@ -110,7 +117,7 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
         if (native.Count == 0)
             return;
 
-        using var response = await _http.PutAsync($"/rest/api/3/issue/{item.Value}", JsonContent.Create(new { fields = native }), ct);
+        using var response = await connection.Client.PutAsync($"/rest/api/3/issue/{item.Value}", JsonContent.Create(new { fields = native }), ct);
         if (!response.IsSuccessStatusCode)
             _logger.LogWarning("Jira field update on {Issue} returned {Status}.", item.Value, response.StatusCode);
     }
@@ -122,8 +129,11 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
         _bindingMap.ResolveAsync(bindingKey, ct);
 
     /// <inheritdoc/>
-    public Task<ProvisioningResult> ProvisionFieldsAsync(AdoTelemetryFieldConfig fieldConfig, CancellationToken ct = default)
-        => new JiraFieldProvisioner(_http, _logger).ProvisionAsync(fieldConfig, ct);
+    public async Task<ProvisioningResult> ProvisionFieldsAsync(AdoTelemetryFieldConfig fieldConfig, CancellationToken ct = default)
+    {
+        var connection = await _connectionFactory.GetConnectionAsync(ct);
+        return await new JiraFieldProvisioner(connection.Client, _logger).ProvisionAsync(fieldConfig, ct);
+    }
 
     /// <inheritdoc/>
     public RollupCapability GetRollupCapability() => new(
@@ -133,7 +143,7 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>Resolves a logical field name to its <c>customfield_*</c> id (cached after the first call).</summary>
-    private async Task<string?> ResolveFieldIdAsync(string logicalName, CancellationToken ct)
+    private async Task<string?> ResolveFieldIdAsync(HttpClient client, string logicalName, CancellationToken ct)
     {
         if (_fieldIdByName is null)
         {
@@ -143,7 +153,7 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
                 if (_fieldIdByName is null)
                 {
                     var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    using var response = await _http.GetAsync("/rest/api/3/field", ct);
+                    using var response = await client.GetAsync("/rest/api/3/field", ct);
                     if (response.IsSuccessStatusCode)
                     {
                         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));

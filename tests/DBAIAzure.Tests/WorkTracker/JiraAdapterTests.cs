@@ -58,8 +58,15 @@ public sealed class JiraAdapterTests
     private static JiraWorkTrackerAdapter Build(FakeJiraHandler handler)
     {
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://x.atlassian.net") };
-        var options = new JiraOptions { SiteUrl = "https://x.atlassian.net", ProjectKey = "PROJ", Email = "e", ApiToken = "t" };
-        return new JiraWorkTrackerAdapter(http, options, new StubBindingMap(), NullLogger<JiraWorkTrackerAdapter>.Instance);
+        var connection = new JiraConnection(http, "https://x.atlassian.net", "PROJ");
+        return new JiraWorkTrackerAdapter(new StubConnectionFactory(connection), new StubBindingMap(), NullLogger<JiraWorkTrackerAdapter>.Instance);
+    }
+
+    private sealed class StubConnectionFactory : IJiraConnectionFactory
+    {
+        private readonly JiraConnection _connection;
+        public StubConnectionFactory(JiraConnection connection) => _connection = connection;
+        public Task<JiraConnection> GetConnectionAsync(CancellationToken ct = default) => Task.FromResult(_connection);
     }
 
     private static HttpResponseMessage Json(string body, HttpStatusCode status = HttpStatusCode.OK) =>

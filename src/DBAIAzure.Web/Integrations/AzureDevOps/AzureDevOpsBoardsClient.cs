@@ -270,7 +270,8 @@ public sealed class AzureDevOpsBoardsClient : IBoardsClient, IDisposable
 
         try
         {
-            var configResult = await _configRepo.GetAsync(ConnectorType.AzureDevOps, ct);
+            // spec-020: ADO config now lives on the generic WorkTracker connector (provider=AzureDevOps).
+            var configResult = await _configRepo.GetAsync(ConnectorType.WorkTracker, ct);
             if (configResult?.NonSecretConfig is { } nonSecretJson)
             {
                 var nonSecret = JsonSerializer.Deserialize<AzureDevOpsConnectorConfig>(
@@ -284,7 +285,7 @@ public sealed class AzureDevOpsBoardsClient : IBoardsClient, IDisposable
                 }
             }
 
-            var secretsJson = await _configRepo.GetDecryptedSecretsAsync(ConnectorType.AzureDevOps, ct);
+            var secretsJson = await _configRepo.GetDecryptedSecretsAsync(ConnectorType.WorkTracker, ct);
             if (secretsJson is not null)
             {
                 var secrets = JsonSerializer.Deserialize<AzureDevOpsSecrets>(

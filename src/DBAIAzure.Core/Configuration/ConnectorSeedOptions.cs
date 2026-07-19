@@ -18,11 +18,47 @@ public sealed class ConnectorSeedOptions
     /// <summary>ServiceNow (ticketing intake) seed values, or empty when not provided.</summary>
     public ServiceNowSeed ServiceNow { get; set; } = new();
 
-    /// <summary>Azure DevOps (work-item tracking) seed values, or empty when not provided.</summary>
+    /// <summary>Azure DevOps (work-item tracking) seed values, or empty when not provided. Legacy: mapped
+    /// onto the generic <see cref="WorkTracker"/> connector (provider = Azure DevOps) when the newer
+    /// <see cref="WorkTracker"/> section is not supplied.</summary>
     public AzureDevOpsSeed AzureDevOps { get; set; } = new();
+
+    /// <summary>Generic Work Tracking System (spec-020) seed values — provider plus that provider's fields.</summary>
+    public WorkTrackerSeed WorkTracker { get; set; } = new();
 
     /// <summary>Messaging (Teams/Slack/Discord) seed values, or empty when not provided.</summary>
     public MessagingSeed Messaging { get; set; } = new();
+}
+
+/// <summary>
+/// Seed values for the generic Work Tracking System connector (spec-020). <see cref="Provider"/> selects
+/// which set of fields is used. Secrets: <see cref="PersonalAccessToken"/> (ADO) / <see cref="ApiToken"/> (Jira).
+/// </summary>
+public sealed class WorkTrackerSeed
+{
+    /// <summary>Active provider — <c>AzureDevOps</c> or <c>Jira</c> (non-secret).</summary>
+    public string? Provider { get; set; }
+
+    /// <summary>When true, overwrite an already-configured connector (used to re-point in a live test).</summary>
+    public bool Overwrite { get; set; }
+
+    // Azure DevOps fields.
+    /// <summary>ADO organization URL (non-secret).</summary>
+    public string? OrganizationUrl { get; set; }
+    /// <summary>ADO project name (non-secret).</summary>
+    public string? ProjectName { get; set; }
+    /// <summary>ADO personal access token (secret).</summary>
+    public string? PersonalAccessToken { get; set; }
+
+    // Jira fields.
+    /// <summary>Jira Cloud site URL, e.g. <c>https://your-org.atlassian.net</c> (non-secret).</summary>
+    public string? SiteUrl { get; set; }
+    /// <summary>Jira account email used with the API token (non-secret).</summary>
+    public string? Email { get; set; }
+    /// <summary>Jira project key, e.g. <c>PROJ</c> (non-secret).</summary>
+    public string? ProjectKey { get; set; }
+    /// <summary>Jira API token (secret).</summary>
+    public string? ApiToken { get; set; }
 }
 
 /// <summary>Seed values for the ServiceNow connector. Secret: <see cref="Password"/>.</summary>

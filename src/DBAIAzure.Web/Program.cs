@@ -186,6 +186,13 @@ builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IBindingWorkItemMap,
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.ICostProjection,
     DBAIAzure.Web.Services.CostProjectionService>();
 
+// ── Work Tracking System config resolver (spec-020) ───────────────────────────────────────────
+// Reads the active WorkTracker connector (provider + credentials) from the store per run. Additive:
+// registered ahead of the consumers (adapter provider, Jira connection factory, testers) that the
+// generic-connector increment wires onto it.
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerConfigResolver,
+    DBAIAzure.Web.Services.WorkTrackerConfigResolver>();
+
 // ── Work-tracker adapter (spec-018): tracker-neutral seam + ADO implementation ───────────────
 // Additive — the adapter wraps the existing ADO client/preflight; the pipeline is not yet rewired
 // onto it (that is a later increment), so live ADO behaviour is unchanged. Scoped because the ADO
@@ -194,32 +201,23 @@ builder.Services.AddSingleton<DBAIAzure.Web.Integrations.AzureDevOps.AdoFieldRef
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter,
     DBAIAzure.Web.Integrations.AzureDevOps.AzureDevOpsWorkTrackerAdapter>();
 
-// ── Jira work-tracker adapter (spec-018 increment 3) — registered alongside ADO; the provider selects
-// the active one by WorkTracker:Active. Only exercised when Jira is the configured tracker. ────────────
-builder.Services.AddSingleton(sp =>
-{
-    var jiraOptions = new DBAIAzure.Web.Integrations.Jira.JiraOptions();
-    sp.GetRequiredService<IConfiguration>().GetSection("WorkTracker:Jira").Bind(jiraOptions);
-    return jiraOptions;
-});
-builder.Services.AddHttpClient("Jira", (sp, client) =>
-{
-    var jiraOptions = sp.GetRequiredService<DBAIAzure.Web.Integrations.Jira.JiraOptions>();
-    if (!string.IsNullOrWhiteSpace(jiraOptions.SiteUrl))
-        client.BaseAddress = new Uri(jiraOptions.SiteUrl);
-    var basicToken = Convert.ToBase64String(
-        System.Text.Encoding.ASCII.GetBytes($"{jiraOptions.Email}:{jiraOptions.ApiToken}"));
-    client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", basicToken);
-});
+// ── Jira work-tracker adapter (spec-018 increment 3; spec-020 per-run credentials) ───────────────────
+// The Jira connection factory resolves credentials from the connector store on each call and rebuilds the
+// authed client only when they change (hot-reload — FR-005), replacing the former startup-baked HttpClient.
+builder.Services.AddSingleton<DBAIAzure.Web.Integrations.Jira.IJiraConnectionFactory,
+    DBAIAzure.Web.Integrations.Jira.JiraConnectionFactory>();
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter>(sp =>
     new DBAIAzure.Web.Integrations.Jira.JiraWorkTrackerAdapter(
-        sp.GetRequiredService<IHttpClientFactory>().CreateClient("Jira"),
-        sp.GetRequiredService<DBAIAzure.Web.Integrations.Jira.JiraOptions>(),
+        sp.GetRequiredService<DBAIAzure.Web.Integrations.Jira.IJiraConnectionFactory>(),
         sp.GetRequiredService<DBAIAzure.Core.Interfaces.IBindingWorkItemMap>(),
         sp.GetRequiredService<ILogger<DBAIAzure.Web.Integrations.Jira.JiraWorkTrackerAdapter>>()));
 
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapterProvider,
     DBAIAzure.Web.Services.WorkTrackerAdapterProvider>();
+
+// Routing adapter for components that hold a single adapter for their lifetime (the singleton orchestrator):
+// forwards each call to whichever provider is active now, so a UI provider switch applies without a restart.
+builder.Services.AddSingleton<DBAIAzure.Web.Services.ActiveWorkTrackerAdapter>();
 
 builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
 {
@@ -227,7 +225,8 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
     var artifactReader = sp.GetRequiredService<IArtifactReader>();
     var phaseRepo      = sp.GetRequiredService<IPhaseRunRepository>();
     var bindingKeyMinter   = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IBindingKeyMinter>();
-    var workTrackerAdapter = sp.GetRequiredService<DBAIAzure.Core.Interfaces.IWorkTrackerAdapterProvider>().GetAdapter();
+    // Route board writes through the active-provider adapter so a UI tracker switch applies per run (spec-020).
+    var workTrackerAdapter = sp.GetRequiredService<DBAIAzure.Web.Services.ActiveWorkTrackerAdapter>();
 
     // The board-write dependencies the create executor needs, resolved from DI (the cost/telemetry ones are
     // best-effort and may be absent). Replaces the old per-run SK kernel container.
@@ -252,6 +251,7 @@ builder.Services.AddSingleton<PhaseHandlerOrchestrator>(sp =>
 // ── Connector health checker + per-connector testers (T020) ───────────────────
 builder.Services.AddSingleton<ServiceNowClient>();
 builder.Services.AddSingleton<AdoConnectorTester>();
+builder.Services.AddSingleton<JiraConnectorTester>();
 builder.Services.AddSingleton<LlmConnectorTester>();
 builder.Services.AddSingleton<MessagingConnectorTester>();
 builder.Services.AddSingleton<IConnectorHealthChecker, ConnectorHealthChecker>();
@@ -490,6 +490,11 @@ using (var scope = app.Services.CreateScope())
         CREATE UNIQUE INDEX IF NOT EXISTS IX_ConnectorConfigs_ConnectorType
             ON ConnectorConfigs (ConnectorType);
         """);
+
+    // spec-020 (FR-015): one-time, idempotent migration of an existing Azure DevOps connector onto the
+    // generic Work Tracking System connector. Runs before the app serves traffic and before any adapter/
+    // BoardsClient use, so an existing ADO deployment keeps working with zero reconfiguration.
+    await DBAIAzure.Storage.Migrations.WorkTrackerConnectorMigration.MigrateAsync(db);
 
     // Add WorkflowDefinitions table for databases created before the Visual Workflow Builder was added.
     // CREATE TABLE IF NOT EXISTS is idempotent — safe to run on every startup.

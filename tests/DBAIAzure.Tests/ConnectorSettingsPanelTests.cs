@@ -95,6 +95,8 @@ public sealed class ConnectorSettingsPanelTests : TestContext
         Services.AddSingleton(checker);
         Services.AddSingleton<IAdoTelemetryPreflightService>(new NullPreflightService());
         Services.AddSingleton<DBAIAzure.Web.Integrations.LLM.ILlmModelFetcherService>(new NullLlmModelFetcher());
+        // The InfoTip components in the edit form inject ITooltipService (required once Edit is opened).
+        Services.AddSingleton<DBAIAzure.Web.Services.ITooltipService, DBAIAzure.Web.Services.TooltipService>();
         Services.AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<ConnectorSettings>),
             NullLogger<ConnectorSettings>.Instance);
     }

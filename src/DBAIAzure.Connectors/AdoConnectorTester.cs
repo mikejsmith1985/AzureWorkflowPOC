@@ -89,12 +89,14 @@ public sealed class AdoConnectorTester
     {
         try
         {
-            var configResult = await _configRepo.GetAsync(ConnectorType.AzureDevOps, ct);
+            // spec-020: ADO config now lives on the generic WorkTracker connector (provider=AzureDevOps).
+            // The discriminated JSON's extra "provider" field is ignored when deserializing to the ADO record.
+            var configResult = await _configRepo.GetAsync(ConnectorType.WorkTracker, ct);
             var nonSecret = configResult?.NonSecretConfig is { } nsJson
                 ? JsonSerializer.Deserialize<AzureDevOpsConnectorConfig>(nsJson, JsonOptions)
                 : null;
 
-            var secretsJson = await _configRepo.GetDecryptedSecretsAsync(ConnectorType.AzureDevOps, ct);
+            var secretsJson = await _configRepo.GetDecryptedSecretsAsync(ConnectorType.WorkTracker, ct);
             var secrets = secretsJson is not null
                 ? JsonSerializer.Deserialize<AzureDevOpsSecrets>(secretsJson, JsonOptions)
                 : null;

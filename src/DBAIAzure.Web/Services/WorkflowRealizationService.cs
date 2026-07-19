@@ -112,8 +112,9 @@ public sealed class WorkflowRealizationService : IWorkflowRealizationService
     private static readonly IReadOnlySet<ConnectorType> MessagingConnectors =
         new HashSet<ConnectorType> { ConnectorType.Messaging };
 
+    // spec-020: the work tracker is now the generic WorkTracker connector (provider chosen in the UI).
     private static readonly IReadOnlySet<ConnectorType> DataConnectors =
-        new HashSet<ConnectorType> { ConnectorType.ServiceNow, ConnectorType.AzureDevOps };
+        new HashSet<ConnectorType> { ConnectorType.ServiceNow, ConnectorType.WorkTracker };
 
     /// <summary>
     /// Returns the connector category that must be configured before the LLM may be called for this

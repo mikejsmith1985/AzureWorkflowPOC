@@ -44,9 +44,67 @@ public sealed class DemoConnectorSeeder
     public async Task SeedAsync(CancellationToken cancellationToken = default)
     {
         await SeedServiceNowAsync(cancellationToken);
-        await SeedAzureDevOpsAsync(cancellationToken);
+        await SeedWorkTrackerAsync(cancellationToken);
         await SeedMessagingAsync(cancellationToken);
         // The LLM connector is intentionally never seeded (FR-004 / SC-006).
+    }
+
+    /// <summary>
+    /// Seeds the generic Work Tracking System connector (spec-020). Prefers the <c>WorkTracker</c> seed
+    /// section; when it is absent, falls back to the legacy <c>AzureDevOps</c> section (mapped to
+    /// provider = Azure DevOps). Writes the discriminated non-secret JSON + the provider's secret. Skips
+    /// when already configured unless the seed sets <c>Overwrite</c> (used to re-point in a live test).
+    /// </summary>
+    private async Task SeedWorkTrackerAsync(CancellationToken cancellationToken)
+    {
+        var seed = _options.WorkTracker;
+        var provider = (seed.Provider ?? string.Empty).Trim();
+
+        // Resolve the (nonSecret, secret) pair for whichever provider is configured.
+        (string? nonSecret, string? secret) = provider.Equals("Jira", StringComparison.OrdinalIgnoreCase)
+            ? BuildJiraSeed(seed)
+            : BuildAzureDevOpsSeed(seed);
+
+        if (nonSecret is null || secret is null)
+        {
+            LogSkipped(ConnectorType.WorkTracker);
+            return;
+        }
+
+        if (!seed.Overwrite && await IsAlreadyConfiguredAsync(ConnectorType.WorkTracker, cancellationToken))
+            return;
+
+        await _repository.SaveAsync(ConnectorType.WorkTracker, nonSecret, secret, cancellationToken);
+        LogSeeded(ConnectorType.WorkTracker);
+    }
+
+    /// <summary>Jira non-secret/secret pair, or (null,null) when required Jira fields are missing.</summary>
+    private static (string?, string?) BuildJiraSeed(WorkTrackerSeed seed)
+    {
+        if (IsBlank(seed.SiteUrl) || IsBlank(seed.Email) || IsBlank(seed.ApiToken))
+            return (null, null);
+        var nonSecret = JsonSerializer.Serialize(new
+        {
+            provider = "Jira", siteUrl = seed.SiteUrl, email = seed.Email, projectKey = seed.ProjectKey ?? string.Empty,
+        });
+        var secret = JsonSerializer.Serialize(new { apiToken = seed.ApiToken });
+        return (nonSecret, secret);
+    }
+
+    /// <summary>Azure DevOps non-secret/secret pair from the WorkTracker seed, or the legacy AzureDevOps
+    /// section, or (null,null) when required ADO fields are missing.</summary>
+    private (string?, string?) BuildAzureDevOpsSeed(WorkTrackerSeed seed)
+    {
+        var orgUrl  = IsBlank(seed.OrganizationUrl) ? _options.AzureDevOps.OrganizationUrl : seed.OrganizationUrl;
+        var project = IsBlank(seed.ProjectName) ? _options.AzureDevOps.ProjectName : seed.ProjectName;
+        var pat     = IsBlank(seed.PersonalAccessToken) ? _options.AzureDevOps.PersonalAccessToken : seed.PersonalAccessToken;
+
+        if (IsBlank(orgUrl) || IsBlank(project) || IsBlank(pat))
+            return (null, null);
+
+        var nonSecret = JsonSerializer.Serialize(new { provider = "AzureDevOps", organizationUrl = orgUrl, projectName = project });
+        var secret = JsonSerializer.Serialize(new { personalAccessToken = pat });
+        return (nonSecret, secret);
     }
 
     private async Task SeedServiceNowAsync(CancellationToken cancellationToken)
@@ -65,24 +123,6 @@ public sealed class DemoConnectorSeeder
         var secret = JsonSerializer.Serialize(new { password = seed.Password });
         await _repository.SaveAsync(ConnectorType.ServiceNow, nonSecret, secret, cancellationToken);
         LogSeeded(ConnectorType.ServiceNow);
-    }
-
-    private async Task SeedAzureDevOpsAsync(CancellationToken cancellationToken)
-    {
-        var seed = _options.AzureDevOps;
-        if (IsBlank(seed.OrganizationUrl) || IsBlank(seed.ProjectName) || IsBlank(seed.PersonalAccessToken))
-        {
-            LogSkipped(ConnectorType.AzureDevOps);
-            return;
-        }
-
-        if (await IsAlreadyConfiguredAsync(ConnectorType.AzureDevOps, cancellationToken))
-            return;
-
-        var nonSecret = JsonSerializer.Serialize(new { organizationUrl = seed.OrganizationUrl, projectName = seed.ProjectName });
-        var secret = JsonSerializer.Serialize(new { personalAccessToken = seed.PersonalAccessToken });
-        await _repository.SaveAsync(ConnectorType.AzureDevOps, nonSecret, secret, cancellationToken);
-        LogSeeded(ConnectorType.AzureDevOps);
     }
 
     private async Task SeedMessagingAsync(CancellationToken cancellationToken)

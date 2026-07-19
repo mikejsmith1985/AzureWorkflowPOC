@@ -63,7 +63,7 @@ else
                                        disabled:cursor-not-allowed text-onaccent transition-colors">
                             @(entry.IsChecking ? "Checking…" : "Check Health")
                         </button>
-                        @if (entry.ConnectorType == ConnectorType.AzureDevOps)
+                        @if (entry.ConnectorType == ConnectorType.WorkTracker && entry.StoredProvider == ProviderAzureDevOps)
                         {
                             <button @onclick="RunAdoPreflight"
                                     disabled="@(!entry.IsConfigured || _isPreflightRunning)"
@@ -83,7 +83,7 @@ else
                 }
 
                 <!-- ── ADO preflight result badge ─────────────────────────── -->
-                @if (entry.ConnectorType == ConnectorType.AzureDevOps && _preflightResult is not null)
+                @if (entry.ConnectorType == ConnectorType.WorkTracker && entry.StoredProvider == ProviderAzureDevOps && _preflightResult is not null)
                 {
                     var preflightBadge = _preflightResult.IsSuccess
                         ? "bg-ok-subtle text-ok" : "bg-err-subtle text-err";
@@ -102,28 +102,67 @@ else
                 {
                     <div class="mt-3 space-y-3 border-t border-line pt-3">
 
-                        @if (entry.ConnectorType == ConnectorType.AzureDevOps)
+                        @if (entry.ConnectorType == ConnectorType.WorkTracker)
                         {
+                            <!-- Provider selector — switching provider clears the prior health result. -->
                             <div>
-                                <label class="text-xs text-muted mb-1 flex items-center gap-1.5">Organization URL
-                                    <InfoTip Content="The web address of your Azure DevOps organization." Example="https://dev.azure.com/your-org" /></label>
-                                <input type="url" @bind="entry.DraftUrl"
-                                       placeholder="https://dev.azure.com/your-org"
-                                       class="@InputClass" />
+                                <label class="text-xs text-muted mb-1 flex items-center gap-1.5">Provider
+                                    <InfoTip Content="Which work-tracking system this connector targets. The pipeline creates and updates work items in the selected provider." /></label>
+                                <select @bind="entry.DraftProvider" @bind:after="() => { entry.TestResult = null; }"
+                                        data-testid="worktracker-provider" class="@InputClass">
+                                    <option value="">— select a provider —</option>
+                                    <option value="@ProviderAzureDevOps">Azure DevOps</option>
+                                    <option value="@ProviderJira">Jira</option>
+                                </select>
                             </div>
-                            <div>
-                                <label class="block text-xs text-muted mb-1">Project Name</label>
-                                <input type="text" @bind="entry.DraftUsername"
-                                       placeholder="MyProject"
-                                       class="@InputClass" />
-                            </div>
-                            <div>
-                                <label class="text-xs text-muted mb-1 flex items-center gap-1.5">Personal Access Token
-                                    <InfoTip Content="Authorizes work-item access. In Azure DevOps → User settings → Personal access tokens, create one with Work Items (read & write). Stored encrypted; leave blank to keep the existing one." /></label>
-                                <input type="password" @bind="entry.DraftSecret"
-                                       placeholder="Leave blank to keep existing"
-                                       autocomplete="new-password" class="@InputClass" />
-                            </div>
+
+                            @if (entry.DraftProvider == ProviderAzureDevOps)
+                            {
+                                <div>
+                                    <label class="text-xs text-muted mb-1 flex items-center gap-1.5">Organization URL
+                                        <InfoTip Content="The web address of your Azure DevOps organization." Example="https://dev.azure.com/your-org" /></label>
+                                    <input type="url" @bind="entry.DraftUrl" placeholder="https://dev.azure.com/your-org" class="@InputClass" />
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-muted mb-1">Project Name</label>
+                                    <input type="text" @bind="entry.DraftUsername" placeholder="MyProject" class="@InputClass" />
+                                </div>
+                                <div>
+                                    <label class="text-xs text-muted mb-1 flex items-center gap-1.5">Personal Access Token
+                                        <InfoTip Content="Authorizes work-item access. In Azure DevOps → User settings → Personal access tokens, create one with Work Items (read & write). Stored encrypted; leave blank to keep the existing one." /></label>
+                                    <input type="password" @bind="entry.DraftSecret" placeholder="Leave blank to keep existing"
+                                           autocomplete="new-password" class="@InputClass" />
+                                </div>
+                            }
+                            else if (entry.DraftProvider == ProviderJira)
+                            {
+                                <div>
+                                    <label class="text-xs text-muted mb-1 flex items-center gap-1.5">Site URL
+                                        <InfoTip Content="Your Jira Cloud site base URL." Example="https://your-org.atlassian.net" /></label>
+                                    <input type="url" @bind="entry.DraftUrl" placeholder="https://your-org.atlassian.net" class="@InputClass" />
+                                </div>
+                                <div>
+                                    <label class="text-xs text-muted mb-1 flex items-center gap-1.5">Account Email
+                                        <InfoTip Content="The Atlassian account email that owns the API token — used with the token for authentication." /></label>
+                                    <input type="email" @bind="entry.DraftEmail" placeholder="you@your-org.com" class="@InputClass" />
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-muted mb-1">Project Key</label>
+                                    <input type="text" @bind="entry.DraftProjectKey" placeholder="PROJ" class="@InputClass" />
+                                </div>
+                                <div>
+                                    <label class="text-xs text-muted mb-1 flex items-center gap-1.5">API Token
+                                        <InfoTip Content="A Jira Cloud API token (id.atlassian.com → Security → API tokens). Stored encrypted; leave blank to keep the existing one." /></label>
+                                    <input type="password" @bind="entry.DraftSecret" placeholder="Leave blank to keep existing"
+                                           autocomplete="new-password" class="@InputClass" />
+                                </div>
+                            }
+                            else
+                            {
+                                <p class="text-xs text-muted" data-testid="worktracker-empty-state">
+                                    Select a provider above to enter its connection details.
+                                </p>
+                            }
                         }
                         else if (entry.ConnectorType == ConnectorType.LLM)
                         {
@@ -467,12 +506,17 @@ else
 
     private static string ConnectorDisplayName(ConnectorType type) => type switch
     {
+        ConnectorType.WorkTracker => "Work Tracking System",
         ConnectorType.AzureDevOps => "Azure DevOps",
         ConnectorType.LLM         => "LLM Provider",
         ConnectorType.ServiceNow  => "ServiceNow",
         ConnectorType.Messaging   => "Messaging",
         _                         => type.ToString(),
     };
+
+    // Provider names for the generic Work Tracking System connector (match each adapter's TrackerKey).
+    private const string ProviderAzureDevOps = "AzureDevOps";
+    private const string ProviderJira        = "Jira";
 
     private static string FormatAge(DateTimeOffset at)
     {
@@ -508,6 +552,12 @@ else
         public string DraftUsername { get; set; } = string.Empty;
         public string DraftSecret   { get; set; } = string.Empty;
 
+        // Work Tracking System (generic connector): provider selector + Jira-only fields.
+        // DraftUrl doubles as Site URL when the provider is Jira; DraftUsername stays the ADO project.
+        public string DraftProvider   { get; set; } = string.Empty;
+        public string DraftEmail      { get; set; } = string.Empty;
+        public string DraftProjectKey { get; set; } = string.Empty;
+
         // Messaging-only draft fields (MCP path). DraftMcpAuthToken is a secret.
         public string DraftMcpServerUrl  { get; set; } = string.Empty;
         public string DraftMcpToolName   { get; set; } = string.Empty;
@@ -526,6 +576,24 @@ else
             IsConfigured    = config.IsConfigured;
             NonSecretConfig = config.NonSecretConfig;
             TestResult      = config.LastTestResult;
+        }
+
+        /// <summary>The provider stored on the Work Tracking System connector ("AzureDevOps"/"Jira"), or
+        /// empty when not a work-tracker connector or unconfigured. Drives provider-specific UI (e.g. the ADO
+        /// preflight button) outside the edit form.</summary>
+        public string StoredProvider
+        {
+            get
+            {
+                if (ConnectorType != ConnectorType.WorkTracker || string.IsNullOrWhiteSpace(NonSecretConfig))
+                    return string.Empty;
+                try
+                {
+                    using var doc = JsonDocument.Parse(NonSecretConfig);
+                    return doc.RootElement.TryGetProperty("provider", out var p) ? p.GetString() ?? string.Empty : string.Empty;
+                }
+                catch { return string.Empty; }
+            }
         }
 
         /// <summary>Friendly platform name for the Messaging connector, parsed from the stored config;
@@ -551,6 +619,7 @@ else
         public void LoadDraftFromJson()
         {
             DraftUrl = DraftUsername = string.Empty;
+            DraftProvider = DraftEmail = DraftProjectKey = string.Empty;
             DraftMcpServerUrl = DraftMcpToolName = DraftMcpArgTemplate = DraftTarget = string.Empty;
             AvailableModels = [];
 
@@ -564,9 +633,27 @@ else
             {
                 using var doc = JsonDocument.Parse(NonSecretConfig);
                 var root = doc.RootElement;
+
+                // Work Tracking System: the provider discriminator drives which fields are read.
+                if (ConnectorType == ConnectorType.WorkTracker)
+                {
+                    DraftProvider = Str(root, "provider");
+                    if (DraftProvider == ProviderJira)
+                    {
+                        DraftUrl        = Str(root, "siteUrl");
+                        DraftEmail      = Str(root, "email");
+                        DraftProjectKey = Str(root, "projectKey");
+                    }
+                    else
+                    {
+                        DraftUrl      = Str(root, "organizationUrl");
+                        DraftUsername = Str(root, "projectName");
+                    }
+                    return;
+                }
+
                 (DraftUrl, DraftUsername) = ConnectorType switch
                 {
-                    ConnectorType.AzureDevOps => (Str(root, "organizationUrl"), Str(root, "projectName")),
                     ConnectorType.LLM         => (Str(root, "provider"),        Str(root, "modelName")),
                     ConnectorType.ServiceNow  => (Str(root, "instanceUrl"),     Str(root, "username")),
                     ConnectorType.Messaging   => (Str(root, "platform"),        string.Empty),
@@ -596,8 +683,10 @@ else
         {
             var nonSecret = ConnectorType switch
             {
-                ConnectorType.AzureDevOps =>
-                    JsonSerializer.Serialize(new { organizationUrl = DraftUrl, projectName = DraftUsername }),
+                // Work Tracking System: discriminated by provider — ADO fields or Jira fields.
+                ConnectorType.WorkTracker => DraftProvider == ProviderJira
+                    ? JsonSerializer.Serialize(new { provider = ProviderJira, siteUrl = DraftUrl, email = DraftEmail, projectKey = DraftProjectKey })
+                    : JsonSerializer.Serialize(new { provider = ProviderAzureDevOps, organizationUrl = DraftUrl, projectName = DraftUsername }),
                 ConnectorType.LLM =>
                     JsonSerializer.Serialize(new { provider = DraftUrl, modelName = DraftUsername }),
                 ConnectorType.ServiceNow =>
@@ -619,7 +708,10 @@ else
                 ? SerializeMessagingSecret()
                 : string.IsNullOrWhiteSpace(DraftSecret) ? null : ConnectorType switch
                 {
-                    ConnectorType.AzureDevOps => JsonSerializer.Serialize(new { personalAccessToken = DraftSecret }),
+                    // Work Tracking System secret name depends on the selected provider.
+                    ConnectorType.WorkTracker => DraftProvider == ProviderJira
+                        ? JsonSerializer.Serialize(new { apiToken = DraftSecret })
+                        : JsonSerializer.Serialize(new { personalAccessToken = DraftSecret }),
                     ConnectorType.LLM         => JsonSerializer.Serialize(new { apiKey = DraftSecret }),
                     ConnectorType.ServiceNow  => JsonSerializer.Serialize(new { password = DraftSecret }),
                     _                         => null,
