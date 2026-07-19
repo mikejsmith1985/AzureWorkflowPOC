@@ -17,6 +17,9 @@ public sealed class JiraConnectorTester
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    /// <summary>How long a single probe waits before reporting a connectivity timeout.</summary>
+    private const int ProbeTimeoutSeconds = 30;
+
     private readonly IConnectorConfigRepository _configRepo;
     private readonly IHttpClientFactory _httpClientFactory;
 
@@ -32,62 +35,25 @@ public sealed class JiraConnectorTester
     /// </summary>
     public async Task<ConnectorTestResult> TestConnectionAsync(CancellationToken ct = default)
     {
-        ConnectorTestResult Fail(string message) =>
-            new(ConnectorType.WorkTracker, false, message, DateTimeOffset.UtcNow);
-
         var (siteUrl, email, projectKey, apiToken) = await ResolveCredentialsAsync(ct);
 
         if (string.IsNullOrEmpty(siteUrl) || string.IsNullOrEmpty(email) || string.IsNullOrEmpty(apiToken))
             return Fail("Jira is not fully configured — site URL, account email, and API token are required.");
 
-        var http = _httpClientFactory.CreateClient();
-        http.Timeout = TimeSpan.FromSeconds(30);
-        var encoded = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{email}:{apiToken}"));
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", encoded);
-
+        using var http = CreateAuthedClient(email, apiToken);
         try
         {
-            // 1) Authentication + reachability.
-            var myselfUrl = $"{siteUrl.TrimEnd('/')}/rest/api/3/myself";
-            var authResponse = await http.GetAsync(myselfUrl, ct);
-            if (!authResponse.IsSuccessStatusCode)
-            {
-                return (int)authResponse.StatusCode switch
-                {
-                    401 or 403 => Fail("Authentication failed — API token or email rejected (check the token value and that it belongs to this account)."),
-                    _          => Fail($"Unexpected response from Jira sign-in: {(int)authResponse.StatusCode} {authResponse.StatusCode}."),
-                };
-            }
+            // Step 1 — authenticate; on failure return immediately, otherwise capture the account label.
+            var (authFailure, accountLabel) = await ProbeAuthAsync(http, siteUrl, email, ct);
+            if (authFailure is not null)
+                return authFailure;
 
-            // Jira returns HTTP 200 with an HTML sign-in page for some misconfigurations — require JSON.
-            var authBody = await authResponse.Content.ReadAsStringAsync(ct);
-            var accountLabel = TryReadString(authBody, "displayName") ?? TryReadString(authBody, "emailAddress") ?? email;
-
-            // 2) Project existence / access.
-            if (!string.IsNullOrEmpty(projectKey))
-            {
-                var projectUrl = $"{siteUrl.TrimEnd('/')}/rest/api/3/project/{Uri.EscapeDataString(projectKey)}";
-                var projectResponse = await http.GetAsync(projectUrl, ct);
-                if (!projectResponse.IsSuccessStatusCode)
-                {
-                    return (int)projectResponse.StatusCode == 404
-                        ? Fail($"Authenticated as {accountLabel}, but project '{projectKey}' was not found or is not accessible.")
-                        : Fail($"Authenticated as {accountLabel}, but the project check returned {(int)projectResponse.StatusCode} {projectResponse.StatusCode}.");
-                }
-                return new ConnectorTestResult(
-                    ConnectorType.WorkTracker, true,
-                    $"Authenticated as {accountLabel} — project '{projectKey}' confirmed in {siteUrl}.",
-                    DateTimeOffset.UtcNow);
-            }
-
-            return new ConnectorTestResult(
-                ConnectorType.WorkTracker, true,
-                $"Authenticated as {accountLabel} in {siteUrl} (no project key set — project not verified).",
-                DateTimeOffset.UtcNow);
+            // Step 2 — confirm the project exists (or report auth-only success when no project key is set).
+            return await ProbeProjectAsync(http, siteUrl, projectKey, accountLabel, ct);
         }
         catch (TaskCanceledException)
         {
-            return Fail("Test timed out after 30 seconds — check network connectivity to Jira.");
+            return Fail($"Test timed out after {ProbeTimeoutSeconds} seconds — check network connectivity to Jira.");
         }
         catch (HttpRequestException ex)
         {
@@ -96,6 +62,58 @@ public sealed class JiraConnectorTester
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /// <summary>Builds a Basic-authed client for the probe (short timeout, no shared state).</summary>
+    private HttpClient CreateAuthedClient(string email, string apiToken)
+    {
+        var http = _httpClientFactory.CreateClient();
+        http.Timeout = TimeSpan.FromSeconds(ProbeTimeoutSeconds);
+        var encoded = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{email}:{apiToken}"));
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", encoded);
+        return http;
+    }
+
+    /// <summary>Authenticates against <c>/myself</c>. Returns a failure result (or null) plus the account label.</summary>
+    private async Task<(ConnectorTestResult? Failure, string AccountLabel)> ProbeAuthAsync(
+        HttpClient http, string siteUrl, string email, CancellationToken ct)
+    {
+        var response = await http.GetAsync($"{siteUrl.TrimEnd('/')}/rest/api/3/myself", ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var failure = (int)response.StatusCode switch
+            {
+                401 or 403 => Fail("Authentication failed — API token or email rejected (check the token value and that it belongs to this account)."),
+                _          => Fail($"Unexpected response from Jira sign-in: {(int)response.StatusCode} {response.StatusCode}."),
+            };
+            return (failure, email);
+        }
+
+        var body = await response.Content.ReadAsStringAsync(ct);
+        var accountLabel = TryReadString(body, "displayName") ?? TryReadString(body, "emailAddress") ?? email;
+        return (null, accountLabel);
+    }
+
+    /// <summary>Confirms the project exists (when a key is set), returning the final pass/fail result.</summary>
+    private async Task<ConnectorTestResult> ProbeProjectAsync(
+        HttpClient http, string siteUrl, string projectKey, string accountLabel, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(projectKey))
+            return Pass($"Authenticated as {accountLabel} in {siteUrl} (no project key set — project not verified).");
+
+        var response = await http.GetAsync($"{siteUrl.TrimEnd('/')}/rest/api/3/project/{Uri.EscapeDataString(projectKey)}", ct);
+        if (response.IsSuccessStatusCode)
+            return Pass($"Authenticated as {accountLabel} — project '{projectKey}' confirmed in {siteUrl}.");
+
+        return (int)response.StatusCode == 404
+            ? Fail($"Authenticated as {accountLabel}, but project '{projectKey}' was not found or is not accessible.")
+            : Fail($"Authenticated as {accountLabel}, but the project check returned {(int)response.StatusCode} {response.StatusCode}.");
+    }
+
+    private static ConnectorTestResult Pass(string message) =>
+        new(ConnectorType.WorkTracker, true, message, DateTimeOffset.UtcNow);
+
+    private static ConnectorTestResult Fail(string message) =>
+        new(ConnectorType.WorkTracker, false, message, DateTimeOffset.UtcNow);
 
     private async Task<(string SiteUrl, string Email, string ProjectKey, string ApiToken)> ResolveCredentialsAsync(
         CancellationToken ct)

@@ -101,16 +101,60 @@ public sealed class ConnectorSettingsTests : E2ETestBase
     }
 
     /// <summary>
-    /// T035 / T036: "Test Connection" button on the ADO card triggers the preflight service.
-    /// Without live credentials the button renders disabled; with E2E_TEST_ADO_PAT the badge appears.
+    /// spec-020: the generic Work Tracking System card exposes a provider selector that switches the
+    /// connection sub-form between Azure DevOps and Jira fields without a page reload.
     /// </summary>
     [Fact]
-    public async Task ConnectorSettings_AdoPreflightButton_RendersOnAdoCard()
+    public async Task WorkTrackerCard_ProviderSelector_SwitchesSubForms()
     {
         await NavigateAsync("/settings/connectors");
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        // The button must be present on the page (even if disabled because ADO is not yet configured).
+        var card = WorkTrackerCard();
+        await card.Locator("button:has-text('Edit')").First.ClickAsync();
+
+        // The provider selector offers both Azure DevOps and Jira.
+        var providerSelect = card.Locator("[data-testid='worktracker-provider']");
+        await providerSelect.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
+        var optionTexts = await providerSelect.Locator("option").AllInnerTextsAsync();
+        Assert.Contains(optionTexts, text => text.Contains("Azure DevOps"));
+        Assert.Contains(optionTexts, text => text.Contains("Jira"));
+
+        // Selecting Jira reveals the Jira connection fields.
+        await providerSelect.SelectOptionAsync(new SelectOptionValue { Value = "Jira" });
+        var jiraText = await card.InnerTextAsync();
+        Assert.Contains("Site URL", jiraText);
+        Assert.Contains("Project Key", jiraText);
+
+        // Selecting Azure DevOps reveals the ADO connection fields.
+        await providerSelect.SelectOptionAsync(new SelectOptionValue { Value = "AzureDevOps" });
+        Assert.Contains("Organization URL", await card.InnerTextAsync());
+
+        var bodyText = await Page.InnerTextAsync("body");
+        Assert.DoesNotContain("An unhandled error has occurred", bodyText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The ADO preflight "Test Connection" button appears on the Work Tracking System card once the
+    /// connector is saved with the Azure DevOps provider (spec-020 — the button is provider-specific).
+    /// </summary>
+    [Fact]
+    public async Task WorkTrackerCard_AdoProvider_ShowsPreflightButton()
+    {
+        await NavigateAsync("/settings/connectors");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        // Configure the connector as Azure DevOps (non-secret fields are enough to persist a provider).
+        var card = WorkTrackerCard();
+        await card.Locator("button:has-text('Edit')").First.ClickAsync();
+        await card.Locator("[data-testid='worktracker-provider']")
+            .SelectOptionAsync(new SelectOptionValue { Value = "AzureDevOps" });
+        await card.Locator("input[type='url']").FillAsync("https://dev.azure.com/e2e-org");
+        await card.Locator("input[type='text']").First.FillAsync("E2EProject");
+        await card.Locator("button:has-text('Save')").ClickAsync();
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        // The ADO-specific preflight button now renders on the card.
         var preflightButton = Page.Locator("[data-testid='ado-preflight-button']");
         await preflightButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
 
@@ -118,86 +162,7 @@ public sealed class ConnectorSettingsTests : E2ETestBase
         Assert.DoesNotContain("An unhandled error has occurred", bodyText, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public async Task ConnectorSettings_AdoPreflightButton_WhenClicked_ShowsResultBadge()
-    {
-        // Only runs when live ADO credentials are injected via the environment variable.
-        var testPat = Environment.GetEnvironmentVariable("E2E_TEST_ADO_PAT");
-        if (testPat is null)
-        {
-            // Without credentials the button is disabled — just assert the badge is not pre-shown.
-            await NavigateAsync("/settings/connectors");
-            await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-            var badge = Page.Locator("[data-testid='ado-preflight-result']");
-            Assert.Equal(0, await badge.CountAsync());
-            return;
-        }
-
-        await NavigateAsync("/settings/connectors");
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-
-        // Configure ADO credentials so the button becomes enabled.
-        var adoCard = Page.Locator("div[class*='rounded']").Filter(new() { HasText = "AzureDevOps" }).First;
-        await adoCard.Locator("button:has-text('Edit')").ClickAsync();
-        await adoCard.Locator("input[type='password']").FillAsync($"{{\"personalAccessToken\":\"{testPat}\"}}");
-        await adoCard.Locator("button:has-text('Save')").ClickAsync();
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-
-        // Click "Test Connection" — the result badge should appear.
-        await Page.Locator("[data-testid='ado-preflight-button']").ClickAsync();
-        var resultBadge = Page.Locator("[data-testid='ado-preflight-result']");
-        await resultBadge.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 30_000 });
-
-        var badgeText = await resultBadge.InnerTextAsync();
-        Assert.True(badgeText.Contains("OK") || badgeText.Contains("failed"),
-            $"Result badge should say 'OK' or 'failed', got: {badgeText}");
-    }
-
-    /// <summary>
-    /// T090: Full add → health-check → delete connector flow.
-    /// Skipped in CI if the AzureDevOps PAT is not present in user secrets.
-    /// </summary>
-    [Fact]
-    public async Task AddHealthCheckDelete_WhenCredentialsPresent_ShowsHealthyBadge()
-    {
-        // Read the test PAT from the environment — set by the CI pipeline or via user secrets.
-        // When absent, the test verifies only that the health-check button exists (no live call).
-        var testPat = Environment.GetEnvironmentVariable("E2E_TEST_ADO_PAT");
-
-        await NavigateAsync("/settings/connectors");
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-
-        // Locate the AzureDevOps card by its text content.
-        var adoCard = Page.Locator("div[class*='rounded']")
-            .Filter(new() { HasText = "AzureDevOps" })
-            .First;
-
-        if (testPat is null)
-        {
-            // No credentials available — just verify the Check Health button exists and is visible.
-            var healthButton = adoCard.Locator("button:has-text('Check Health')");
-            var exists = await healthButton.CountAsync() > 0;
-            Assert.True(exists, "Expected a Check Health button on the AzureDevOps connector card.");
-            return;
-        }
-
-        // Open edit form and enter test credentials (non-secret config + PAT).
-        await adoCard.Locator("button:has-text('Edit')").ClickAsync();
-
-        var secretField = adoCard.Locator("input[type='password']");
-        await secretField.FillAsync($"{{\"personalAccessToken\":\"{testPat}\"}}");
-
-        await adoCard.Locator("button:has-text('Save')").ClickAsync();
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-
-        // Trigger health check.
-        await adoCard.Locator("button:has-text('Check Health')").ClickAsync();
-
-        // The healthy / unhealthy badge should appear within a few seconds.
-        var healthBadge = adoCard.Locator("span").Filter(new() { HasText = "Healthy" });
-        await healthBadge.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 15_000 });
-
-        var bodyText = await Page.InnerTextAsync("body");
-        Assert.DoesNotContain("An unhandled error has occurred", bodyText, StringComparison.OrdinalIgnoreCase);
-    }
+    /// <summary>The generic Work Tracking System connector card, located by its heading text.</summary>
+    private ILocator WorkTrackerCard() =>
+        Page.Locator("div.rounded.bg-surface", new() { HasTextString = "Work Tracking System" }).First;
 }

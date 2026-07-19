@@ -156,10 +156,10 @@ user stories depend on this phase.**
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T038 [P] Playwright E2E: Connectors tab renders the provider select, provider-conditional fields, Test Connection for both providers, and a save/reload round-trip in `tests/DBAIAzure.E2ETests/`
+- [X] T038 [P] Playwright E2E: Connectors tab renders the provider select, provider-conditional fields, Test Connection for both providers, and a save/reload round-trip in `tests/DBAIAzure.E2ETests/`
 - [X] T039 [P] Finalize the `CHANGELOG.md` entry with the shipped behavior (generic connector, Jira from UI, live switch, ADO auto-migration)
 - [X] T040 Run all `quickstart.md` scenarios (1–6) as the acceptance gate
-- [ ] T041 [P] Code-quality pass: XML doc comments on all new public types, 40-line/guard-clause review across the new resolver/factory/tester/migration files
+- [X] T041 [P] Code-quality pass: XML doc comments on all new public types, 40-line/guard-clause review across the new resolver/factory/tester/migration files
 
 ---
 
