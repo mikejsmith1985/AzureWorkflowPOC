@@ -193,6 +193,35 @@ builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.ICostProjection,
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerConfigResolver,
     DBAIAzure.Web.Services.WorkTrackerConfigResolver>();
 
+// ── DoR Validation Workflow (spec-021): per-run config resolver + durable instance store ──────
+// Reads the DorWorkflow connector row (six namespaces + secrets) on every call so operator changes apply
+// without a restart; the instance store persists the queryable lifecycle/SLA record the sweeper reads.
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IDorConfigResolver,
+    DBAIAzure.Web.Services.Dor.DorConfigResolver>();
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IDorWorkflowInstanceStore,
+    DBAIAzure.Storage.Repositories.EfDorWorkflowInstanceStore>();
+builder.Services.AddHttpClient(nameof(DBAIAzure.Web.Services.Dor.DorDocumentSource));
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IDorDocumentSource,
+    DBAIAzure.Web.Services.Dor.DorDocumentSource>();
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IDorReviewService,
+    DBAIAzure.Processes.Executors.Dor.DorReviewService>();
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IDorConversationService,
+    DBAIAzure.Processes.Executors.Dor.DorConversationService>();
+// The orchestrator lives in the Processes layer, so it takes IWorkTrackerAdapter; we pass the ActiveWorkTracker
+// adapter (resolved per run) explicitly here so the active provider (Jira) is used without leaking a Web type.
+// The CheckpointManager (when present) makes a paused conversation resumable after a restart.
+builder.Services.AddSingleton<DBAIAzure.Processes.Pipeline.DorWorkflowOrchestrator>(sp =>
+    new DBAIAzure.Processes.Pipeline.DorWorkflowOrchestrator(
+        sp.GetRequiredService<DBAIAzure.Core.Interfaces.IDorReviewService>(),
+        sp.GetRequiredService<DBAIAzure.Core.Interfaces.IDorConversationService>(),
+        sp.GetRequiredService<DBAIAzure.Web.Services.ActiveWorkTrackerAdapter>(),
+        sp.GetRequiredService<DBAIAzure.Core.Interfaces.IDorDocumentSource>(),
+        sp.GetRequiredService<DBAIAzure.Core.Interfaces.IDorConfigResolver>(),
+        sp.GetRequiredService<DBAIAzure.Core.Interfaces.IMessageDelivery>(),
+        sp.GetRequiredService<DBAIAzure.Core.Interfaces.IDorWorkflowInstanceStore>(),
+        sp.GetRequiredService<ILogger<DBAIAzure.Processes.Pipeline.DorWorkflowOrchestrator>>(),
+        sp.GetService<Microsoft.Agents.AI.Workflows.CheckpointManager>()));
+
 // ── Work-tracker adapter (spec-018): tracker-neutral seam + ADO implementation ───────────────
 // Additive — the adapter wraps the existing ADO client/preflight; the pipeline is not yet rewired
 // onto it (that is a later increment), so live ADO behaviour is unchanged. Scoped because the ADO
@@ -254,6 +283,7 @@ builder.Services.AddSingleton<AdoConnectorTester>();
 builder.Services.AddSingleton<JiraConnectorTester>();
 builder.Services.AddSingleton<LlmConnectorTester>();
 builder.Services.AddSingleton<MessagingConnectorTester>();
+builder.Services.AddSingleton<DorWorkflowTester>();   // spec-021 DoR workflow health
 builder.Services.AddSingleton<IConnectorHealthChecker, ConnectorHealthChecker>();
 
 // ── Admin Console UX (spec-009) ───────────────────────────────────────────────
@@ -387,6 +417,20 @@ builder.Services.AddHostedService<WorkflowRunRehydrationService>();
 // Resumes intake runs left awaiting-human from their durable checkpoints after a restart (MAF flag only).
 builder.Services.AddHostedService<PausedRunRehydrationService>();
 
+// ── Startup rehydration of paused DoR conversations (spec-021 SC-003) ─────────
+// Resumes DoR runs left awaiting a human reply from their durable checkpoints after a restart.
+builder.Services.AddHostedService<DBAIAzure.Web.Services.Dor.DorRunRehydrationService>();
+
+// ── DoR conversation reply pump (spec-021 US2) ────────────────────────────────
+// Polls awaiting-human DoR instances and feeds new Slack thread replies into the orchestrator.
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IChatReplyReader,
+    DBAIAzure.Web.Integrations.Messaging.SlackMcpReplyReader>();
+builder.Services.AddHostedService<DBAIAzure.Web.Services.Dor.DorReplyPumpService>();
+
+// ── DoR SLA sweeper (spec-021 US3) ────────────────────────────────────────────
+// Enforces the primary/escalation SLAs on a durable schedule: escalates or hands off on breach.
+builder.Services.AddHostedService<DBAIAzure.Web.Services.Dor.DorSlaSweeperService>();
+
 // ── Application Insights (FR-21, US4) ─────────────────────────────────────────
 builder.Services.AddApplicationInsightsTelemetry(builder.Configuration);
 
@@ -516,6 +560,35 @@ using (var scope = app.Services.CreateScope())
             ON WorkflowDefinitions (OwnerId, Name);
         CREATE INDEX IF NOT EXISTS IX_WorkflowDefinitions_OwnerId
             ON WorkflowDefinitions (OwnerId);
+        """);
+
+    // DoR workflow instances (spec-021) — lifecycle + SLA record for existing databases. The filtered unique
+    // index enforces idempotency (one active instance per ticket); State ordinal 9 is DorState.Done.
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS DorWorkflowInstances (
+            RunId               TEXT    NOT NULL PRIMARY KEY,
+            TicketKey           TEXT    NOT NULL,
+            State               INTEGER NOT NULL DEFAULT 0,
+            OutstandingGapsJson TEXT    NOT NULL DEFAULT '[]',
+            PrimaryIterations   INTEGER NOT NULL DEFAULT 0,
+            EscalationIterations INTEGER NOT NULL DEFAULT 0,
+            SlaClockStartedAt   TEXT,
+            SlaDeadlineAt       TEXT,
+            SlaTier             INTEGER NOT NULL DEFAULT 0,
+            ActiveChannelId     TEXT    NOT NULL DEFAULT '',
+            ThreadRef           TEXT    NOT NULL DEFAULT '',
+            LastSeenReplyRef    TEXT,
+            IsDryRun            INTEGER NOT NULL DEFAULT 0,
+            Outcome             INTEGER,
+            StartedAt           TEXT    NOT NULL DEFAULT '0001-01-01T00:00:00+00:00',
+            UpdatedAt           TEXT    NOT NULL DEFAULT '0001-01-01T00:00:00+00:00',
+            CompletedAt         TEXT,
+            FailureReason       TEXT
+        );
+        CREATE INDEX IF NOT EXISTS IX_DorWorkflowInstances_SlaDeadlineAt
+            ON DorWorkflowInstances (SlaDeadlineAt);
+        CREATE UNIQUE INDEX IF NOT EXISTS UX_DorWorkflowInstances_ActiveTicket
+            ON DorWorkflowInstances (TicketKey) WHERE State <> 9;
         """);
 
     // Workflow builder run records and execution event audit log (FR-18, FR-21, US1, US4).

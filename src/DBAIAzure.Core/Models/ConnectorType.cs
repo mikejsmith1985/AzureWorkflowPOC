@@ -26,4 +26,11 @@ public enum ConnectorType
     /// Replaces the vendor-specific <see cref="AzureDevOps"/> connector identity.
     /// </summary>
     WorkTracker,
+
+    /// <summary>
+    /// DoR Validation Workflow (spec-021) — the single connector row holding all six configuration namespaces
+    /// (Jira, DoR document, AI, comms, SLA, audit) plus the dry-run flag for the Definition-of-Ready workflow.
+    /// Resolved per run so changes take effect without a restart.
+    /// </summary>
+    DorWorkflow,
 }

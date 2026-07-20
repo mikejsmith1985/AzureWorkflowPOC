@@ -46,7 +46,37 @@ public sealed class DemoConnectorSeeder
         await SeedServiceNowAsync(cancellationToken);
         await SeedWorkTrackerAsync(cancellationToken);
         await SeedMessagingAsync(cancellationToken);
+        await SeedDorWorkflowAsync(cancellationToken);
         // The LLM connector is intentionally never seeded (FR-004 / SC-006).
+    }
+
+    /// <summary>
+    /// Seeds the DoR Validation Workflow connector (spec-021) from the full config JSON + its secrets. Skips
+    /// when the config JSON is absent, or when already configured unless the seed sets <c>Overwrite</c>. The
+    /// secret tokens are written to the encrypted secret store, never into the non-secret config.
+    /// </summary>
+    private async Task SeedDorWorkflowAsync(CancellationToken cancellationToken)
+    {
+        var seed = _options.DorWorkflow;
+        if (IsBlank(seed.ConfigJson))
+        {
+            LogSkipped(ConnectorType.DorWorkflow);
+            return;
+        }
+
+        if (!seed.Overwrite && await IsAlreadyConfiguredAsync(ConnectorType.DorWorkflow, cancellationToken))
+            return;
+
+        var secret = JsonSerializer.Serialize(new
+        {
+            jiraApiToken = NullIfBlank(seed.JiraApiToken),
+            jiraWebhookSecret = NullIfBlank(seed.JiraWebhookSecret),
+            slackToken = NullIfBlank(seed.SlackToken),
+            aiApiKey = NullIfBlank(seed.AiApiKey),
+        });
+
+        await _repository.SaveAsync(ConnectorType.DorWorkflow, seed.ConfigJson, secret, cancellationToken);
+        LogSeeded(ConnectorType.DorWorkflow);
     }
 
     /// <summary>

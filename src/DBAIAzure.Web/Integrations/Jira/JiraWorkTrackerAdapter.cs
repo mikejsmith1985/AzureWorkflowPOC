@@ -1,6 +1,7 @@
 // Jira Cloud implementation of IWorkTrackerAdapter (spec-018, increment 3; spec-020 per-run credentials).
 // Net-new code behind the contract proven by the ADO adapter — the pipeline/cost layers are unchanged.
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
@@ -140,7 +141,102 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
         RollupKind.RequiresAddOn, "Jira Advanced Roadmaps",
         "Hierarchical cost rollup on Jira requires Advanced Roadmaps (or a marketplace aggregation); the per-item cost fields are still populated.");
 
+    /// <inheritdoc/>
+    public async Task<WorkItemFields> ReadWorkItemAsync(
+        WorkItemRef item, IReadOnlyCollection<string> watchFields, CancellationToken ct = default)
+    {
+        var connection = await _connectionFactory.GetConnectionAsync(ct);
+
+        // Request only the watched fields when specified; otherwise let Jira return its default field set.
+        var fieldsQuery = watchFields.Count > 0
+            ? "?fields=" + Uri.EscapeDataString(string.Join(",", watchFields))
+            : string.Empty;
+        using var response = await connection.Client.GetAsync($"/rest/api/3/issue/{item.Value}{fieldsQuery}", ct);
+        response.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        var root = doc.RootElement;
+
+        var key = root.TryGetProperty("key", out var k) ? k.GetString() ?? item.Value : item.Value;
+        var flattened = new Dictionary<string, string?>();
+        if (root.TryGetProperty("fields", out var fieldsEl) && fieldsEl.ValueKind == JsonValueKind.Object)
+        {
+            // When specific watch fields were requested, project exactly those (so the review payload is stable
+            // and the field_labels mapping lines up); otherwise include everything Jira returned.
+            if (watchFields.Count > 0)
+            {
+                foreach (var name in watchFields)
+                    if (fieldsEl.TryGetProperty(name, out var value))
+                        flattened[name] = FlattenJiraFieldValue(value);
+            }
+            else
+            {
+                foreach (var prop in fieldsEl.EnumerateObject())
+                    flattened[prop.Name] = FlattenJiraFieldValue(prop.Value);
+            }
+        }
+
+        return new WorkItemFields(key, $"{connection.SiteUrl.TrimEnd('/')}/browse/{key}", flattened);
+    }
+
+    /// <inheritdoc/>
+    public async Task<string> TransitionAsync(WorkItemRef item, string transitionId, CancellationToken ct = default)
+    {
+        var connection = await _connectionFactory.GetConnectionAsync(ct);
+        using var response = await connection.Client.PostAsync(
+            $"/rest/api/3/issue/{item.Value}/transitions",
+            JsonContent.Create(new { transition = new { id = transitionId } }), ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new WorkTrackerTransitionException(
+                $"Jira transition '{transitionId}' on {item.Value} failed with {(int)response.StatusCode} {response.StatusCode}.");
+        }
+        return transitionId;
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>Flattens a Jira field value (string, number, option object, array, or ADF doc) to plain text.</summary>
+    private static string? FlattenJiraFieldValue(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Null or JsonValueKind.Undefined => null,
+        JsonValueKind.String => value.GetString(),
+        JsonValueKind.Number => value.ToString(),
+        JsonValueKind.True => "true",
+        JsonValueKind.False => "false",
+        JsonValueKind.Array => string.Join(", ",
+            value.EnumerateArray().Select(FlattenJiraFieldValue).Where(s => !string.IsNullOrEmpty(s))),
+        JsonValueKind.Object => FlattenJiraObject(value),
+        _ => value.ToString(),
+    };
+
+    /// <summary>Renders an object field: ADF document → text; option/user object → its display label.</summary>
+    private static string? FlattenJiraObject(JsonElement obj)
+    {
+        if (obj.TryGetProperty("type", out var typeEl) && typeEl.GetString() == "doc")
+            return RenderAdf(obj).Trim();
+        foreach (var labelKey in new[] { "displayName", "name", "value" })
+            if (obj.TryGetProperty(labelKey, out var label) && label.ValueKind == JsonValueKind.String)
+                return label.GetString();
+        return obj.ToString();
+    }
+
+    /// <summary>Walks an Atlassian Document Format node tree collecting its text, paragraph by paragraph.</summary>
+    private static string RenderAdf(JsonElement node)
+    {
+        var builder = new StringBuilder();
+        if (node.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+            builder.Append(text.GetString());
+        if (node.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var child in content.EnumerateArray())
+            {
+                builder.Append(RenderAdf(child));
+                if (child.TryGetProperty("type", out var childType) && childType.GetString() == "paragraph")
+                    builder.Append('\n');
+            }
+        }
+        return builder.ToString();
+    }
 
     /// <summary>Resolves a logical field name to its <c>customfield_*</c> id (cached after the first call).</summary>
     private async Task<string?> ResolveFieldIdAsync(HttpClient client, string logicalName, CancellationToken ct)

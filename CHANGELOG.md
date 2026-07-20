@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Intelligent DoR Validation Workflow (spec-021)
+
+A config-driven Definition-of-Ready validation workflow, now the Workflow Builder's default. On Jira
+ticket-created (HMAC-validated webhook) it AI-reviews the ticket against a configurable DoR document and
+auto-advances ready tickets; when not ready it opens a durable human-in-the-loop chat conversation that
+enforces business-hours SLAs with escalation before a clean, audited manual handoff. Reuses the MAF engine +
+native HITL/checkpointing, the Jira adapter, the Slack MCP gateway, the connector-config store, and the
+append-only audit logs — a global dry-run flag gates every external write.
+
+- **AI review + auto-advance**: structured DoR verdict (criteria from the loadable DoR document, not code);
+  ready tickets transition to the configured status via the new Jira transition/read adapter methods.
+- **Durable HITL resolution**: not-ready tickets open a chat conversation (MAF `RequestPort`); each reply is
+  re-evaluated, and a resolution writes **only whitelisted** fields (enforced in code) + transitions. Paused
+  conversations survive restarts via MAF checkpoints + startup rehydration, and replies are fed by a pump over
+  the Slack MCP.
+- **SLA + escalation + manual handoff**: a durable business-hours SLA sweeper escalates a primary breach to the
+  escalation tier (fresh clock + budget) and, on a second breach, ends with a manual handoff that tags/comments
+  the ticket **without** transitioning it. Outcomes (PASSED / RESOLVED_AUTO / MANUAL_REQUIRED) and the metrics
+  are derivable from the append-only instance records.
+- **Config-over-code**: six configuration namespaces + three AI prompt templates under
+  `ConnectorType.DorWorkflow`, resolved per run (change without restart), secrets by reference; health-checked
+  via `DorWorkflowTester` and seedable from the vault.
+- **Builder default**: the DoR workflow graph replaces the "Support Request Flow" example for new workflows.
+- Reuse-first (Article VII): only five documented gaps are net-new (Jira read/transition, Slack thread-read,
+  DoR-document source, durable SLA/escalation, the DoR config namespace). Remaining: the in-UI config card, the
+  live Slack `conversations.replies` read tool, and richer builder node panels.
+
 ### Added — Work Tracking System config bridge (spec-020)
 
 The connector-settings UI is now bridged to the spec-018 work-tracker adapter layer: the active tracker —

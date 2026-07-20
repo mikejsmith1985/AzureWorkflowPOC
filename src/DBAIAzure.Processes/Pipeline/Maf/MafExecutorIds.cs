@@ -36,4 +36,28 @@ public static class MafExecutorIds
     public const string ApprovalHitl = "approval-hitl";
     /// <summary>Terminal step that creates the phase work item (was <c>CreateWorkItemStep</c>).</summary>
     public const string CreateWorkItem = "create-work-item";
+
+    // ── DoR Validation Workflow (MafDorWorkflowFactory — spec-021) ──────────────────────
+    /// <summary>Reads the ticket and loads the DoR document into the review payload.</summary>
+    public const string DorHydrate = "dor-hydrate";
+    /// <summary>AI structured DoR review (and reply re-evaluation on the loop back).</summary>
+    public const string DorReview = "dor-review";
+    /// <summary>Transitions a passing ticket to the ready status.</summary>
+    public const string DorPass = "dor-pass";
+    /// <summary>Posts the gap message and starts the primary SLA clock.</summary>
+    public const string DorOutreach = "dor-outreach";
+    /// <summary>The human-in-the-loop conversation gate (a RequestPort).</summary>
+    public const string DorHitl = "dor-hitl";
+    /// <summary>Pass-through that routes the resumed state (reply / escalate / manual-exit) off the gate.</summary>
+    public const string DorDispatch = "dor-dispatch";
+    /// <summary>Evaluates a human reply against the outstanding DoR gaps.</summary>
+    public const string DorReplyEval = "dor-reply-eval";
+    /// <summary>Second-tier escalation outreach with its own SLA/iteration budget.</summary>
+    public const string DorEscalate = "dor-escalate";
+    /// <summary>Applies the whitelisted field updates and transitions the resolved ticket.</summary>
+    public const string DorUpdate = "dor-update";
+    /// <summary>Tags the ticket for manual intervention without transitioning it.</summary>
+    public const string DorManualExit = "dor-manual-exit";
+    /// <summary>Terminal audit record for the DoR workflow instance.</summary>
+    public const string DorAudit = "dor-audit";
 }
