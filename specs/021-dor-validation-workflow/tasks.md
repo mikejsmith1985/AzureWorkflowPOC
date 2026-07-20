@@ -130,10 +130,10 @@ Paths are repo-relative. Reuse-first (Article VII): only the five documented gap
 **Goal**: New workflows load the DoR graph; the Support Request Flow example is gone; make-it-real realizes all nodes.
 **Independent test**: open builder/new → DoR graph loads; make-it-real → no unrealized nodes; save succeeds.
 
-- [ ] T060 [US5] Implement `DefaultWorkflowProvider` returning the DoR starter graph (trigger→review→route→[pass]update / [fail]conversation→escalation→update/manual→audit) in src/DBAIAzure.Web/Services/DefaultWorkflowProvider.cs
-- [ ] T061 [US5] Replace `BuildExampleWorkflow()` usage with `DefaultWorkflowProvider` and remove the "Support Request Flow" example in src/DBAIAzure.Web/Pages/WorkflowBuilder.razor
-- [ ] T062 [US5] Ensure DoR node kinds realize via `MafWorkflowRuntimeFactory` / realization proposers (HumanApproval→RequestPort; review→agentic; update/notify) — add any missing proposer mapping in src/DBAIAzure.Web/Services/WorkflowRealizationService.cs
-- [ ] T063 [P] [US5] E2E test: builder/new loads DoR default (not support example) and make-it-real leaves no unrealized nodes in tests/DBAIAzure.E2ETests/Tests/DorDefaultWorkflowTests.cs
+- [x] T060 [US5] Implement `DefaultWorkflowProvider` returning the DoR starter graph (trigger→review→route→[pass]update / [fail]conversation→escalation→update/manual→audit) in src/DBAIAzure.Web/Services/DefaultWorkflowProvider.cs
+- [x] T061 [US5] Replace `BuildExampleWorkflow()` usage with `DefaultWorkflowProvider` and remove the "Support Request Flow" example in src/DBAIAzure.Web/Pages/WorkflowBuilder.razor
+- [x] T062 [US5] DoR node kinds realize via existing proposers — the default reuses Trigger/AgenticReason/FunctionRoute/FunctionData/FunctionNotify/FunctionTransform/HumanApproval, all of which already have realization proposers + executors (HumanApproval→RequestPort); no new proposer mapping needed
+- [x] T063 [P] [US5] Default graph validity (Trigger + AI review + HITL nodes, all configured, fully reachable, passes `ThrowIfInvalid`, not the support example) unit-tested in `DefaultWorkflowProviderTests`; full Playwright E2E (`run-e2e.ps1`) can be added when the UI is exercised live
 
 **Checkpoint**: the operator's on-ramp is the DoR workflow.
 

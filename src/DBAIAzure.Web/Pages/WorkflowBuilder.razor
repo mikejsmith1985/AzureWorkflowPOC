@@ -276,7 +276,7 @@
         else if (string.Equals(Id, "new", StringComparison.OrdinalIgnoreCase))
         {
             // Explicit "start a new workflow" entry point (Gallery → New Workflow).
-            _workflow = BuildExampleWorkflow() with { Name = MakeNameUnique("Example: Support Request Flow", existingNames) };
+            _workflow = BuildExampleWorkflow() with { Name = MakeNameUnique(DBAIAzure.Web.Services.DefaultWorkflowProvider.DefaultName, existingNames) };
         }
         else if (Guid.TryParse(Id, out var workflowId))
         {
@@ -291,12 +291,12 @@
             else
             {
                 // Unknown id: fall back to a fresh, uniquely-named example treated as a new workflow.
-                _workflow = BuildExampleWorkflow() with { Name = MakeNameUnique("Example: Support Request Flow", existingNames) };
+                _workflow = BuildExampleWorkflow() with { Name = MakeNameUnique(DBAIAzure.Web.Services.DefaultWorkflowProvider.DefaultName, existingNames) };
             }
         }
         else
         {
-            _workflow = BuildExampleWorkflow() with { Name = MakeNameUnique("Example: Support Request Flow", existingNames) };
+            _workflow = BuildExampleWorkflow() with { Name = MakeNameUnique(DBAIAzure.Web.Services.DefaultWorkflowProvider.DefaultName, existingNames) };
         }
 
         // Subscribe to auto-save events so the toolbar shows the timestamp.
@@ -400,94 +400,12 @@
     // ── Example workflow ─────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Pre-loaded 4-node example (Trigger → Summarise → Approve → Notify) that helps
-    /// first-time users understand the workflow concept. All nodes are fully configured
-    /// so no amber badges appear and the Run button is immediately enabled.
+    /// The default starter workflow loaded for a new/unknown workflow — the Intelligent DoR Validation
+    /// Workflow (spec-021 US5), which replaces the old "Support Request Flow" example. All nodes ship
+    /// configured so no amber badges appear and the Run button is immediately enabled.
     /// </summary>
-    private static WorkflowDefinition BuildExampleWorkflow()
-    {
-        // Helper to create a standard single-input / single-output port pair.
-        static (WorkflowPort input, WorkflowPort output) StandardPorts(string inputLabel, string outputLabel) =>
-            (new WorkflowPort(Guid.NewGuid().ToString("N")[..8], inputLabel, PortDirection.Input),
-             new WorkflowPort(Guid.NewGuid().ToString("N")[..8], outputLabel, PortDirection.Output));
-
-        // Trigger node — entry point; always must be present for Run to be enabled (FR-01.3).
-        var trigOut = new WorkflowPort(Guid.NewGuid().ToString("N")[..8], "Support request text", PortDirection.Output);
-        var triggerNode = WorkflowNode.CreateNew(WorkflowNodeType.Trigger, "Receive Request") with
-        {
-            GoalPrompt    = "Receive an incoming customer support request and pass it to the AI step.",
-            OutputLabel   = trigOut.Label,
-            OutputPorts   = new[] { trigOut }.ToList().AsReadOnly(),
-            IsConfigured  = true,
-            PositionX     = 80,
-            PositionY     = 150,
-        };
-
-        var (sumIn, sumOut) = StandardPorts("Support request text", "3-bullet summary");
-        var summarizeNode = WorkflowNode.CreateNew(WorkflowNodeType.AgenticReason, "Summarise Request") with
-        {
-            GoalPrompt   = "Read the incoming support request and write a 3-bullet summary.",
-            InputLabel   = sumIn.Label,
-            OutputLabel  = sumOut.Label,
-            InputPorts   = new[] { sumIn }.ToList().AsReadOnly(),
-            OutputPorts  = new[] { sumOut }.ToList().AsReadOnly(),
-            IsConfigured = true,
-            PositionX    = 320,
-            PositionY    = 150,
-        };
-
-        var (appIn, appOut) = StandardPorts("Summary from AI", "Approved / Rejected");
-        var approveNode = WorkflowNode.CreateNew(WorkflowNodeType.HumanApproval, "Manager Approves") with
-        {
-            InputLabel   = appIn.Label,
-            OutputLabel  = appOut.Label,
-            InputPorts   = new[] { appIn }.ToList().AsReadOnly(),
-            OutputPorts  = new[] { appOut }.ToList().AsReadOnly(),
-            IsConfigured = true,
-            PositionX    = 560,
-            PositionY    = 150,
-        };
-
-        var (notIn, notOut) = StandardPorts("Approval decision", "Email sent confirmation");
-        var notifyNode = WorkflowNode.CreateNew(WorkflowNodeType.FunctionNotify, "Notify Customer") with
-        {
-            InputLabel   = notIn.Label,
-            OutputLabel  = notOut.Label,
-            InputPorts   = new[] { notIn }.ToList().AsReadOnly(),
-            OutputPorts  = new[] { notOut }.ToList().AsReadOnly(),
-            IsConfigured = true,
-            PositionX    = 800,
-            PositionY    = 150,
-        };
-
-        var edgeTriggerToSummarise = WorkflowEdge.CreateNew(
-            sourceNodeId: triggerNode.Id, sourcePortId: trigOut.Id,
-            targetNodeId: summarizeNode.Id, targetPortId: sumIn.Id,
-            label: "Request received");
-
-        var edge1 = WorkflowEdge.CreateNew(
-            summarizeNode.Id, sumOut.Id,
-            approveNode.Id,   appIn.Id,
-            "Summary ready");
-
-        var edge2 = WorkflowEdge.CreateNew(
-            approveNode.Id, appOut.Id,
-            notifyNode.Id,  notIn.Id,
-            "Approved");
-
-        return new WorkflowDefinition
-        {
-            Id             = Guid.NewGuid(),
-            Name           = "Example: Support Request Flow",
-            OwnerId        = "demo",
-            Nodes          = new[] { triggerNode, summarizeNode, approveNode, notifyNode }.ToList().AsReadOnly(),
-            Edges          = new[] { edgeTriggerToSummarise, edge1, edge2 }.ToList().AsReadOnly(),
-            Settings       = new WorkflowSettings(),
-            ChatHistory    = Array.Empty<WorkflowChatMessage>(),
-            CreatedAt      = DateTimeOffset.UtcNow,
-            LastModifiedAt = DateTimeOffset.UtcNow,
-        };
-    }
+    private static WorkflowDefinition BuildExampleWorkflow() =>
+        DBAIAzure.Web.Services.DefaultWorkflowProvider.BuildDorValidationWorkflow();
 
     // ── Event handlers ───────────────────────────────────────────────────────────
 
