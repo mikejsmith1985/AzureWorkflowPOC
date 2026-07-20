@@ -82,6 +82,12 @@ public sealed record DorRunState
     public IReadOnlyDictionary<string, string> ResolvedFieldUpdates { get; init; } =
         new Dictionary<string, string>();
 
+    /// <summary>Set on the HITL-gate response by the SLA sweeper to escalate a breached conversation.</summary>
+    public bool EscalateRequested { get; init; }
+
+    /// <summary>Set on the HITL-gate response by the SLA sweeper to force a manual exit (limits exhausted).</summary>
+    public bool ManualExitRequested { get; init; }
+
     /// <summary>The terminal outcome, set when <see cref="State"/> reaches <see cref="DorState.Done"/>.</summary>
     public DorOutcome? Outcome { get; init; }
 

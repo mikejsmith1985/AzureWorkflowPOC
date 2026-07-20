@@ -30,12 +30,15 @@ public static class MafDorWorkflowFactory
         var review = new DorReviewExecutor(reviewService, configResolver, instanceStore).BindExecutor();
         var pass = new PassTransitionExecutor(activeAdapter, messageDelivery, configResolver, instanceStore).BindExecutor();
         var outreach = new GapOutreachExecutor(messageDelivery, configResolver, instanceStore).BindExecutor();
+        var dispatch = new ResumeDispatchExecutor().BindExecutor();
         var replyEval = new ReplyEvalExecutor(conversationService, configResolver, instanceStore).BindExecutor();
+        var escalate = new EscalationExecutor(messageDelivery, configResolver, instanceStore).BindExecutor();
         var update = new TicketUpdateExecutor(activeAdapter, configResolver, instanceStore).BindExecutor();
+        var manualExit = new ManualExitExecutor(activeAdapter, messageDelivery, configResolver, instanceStore).BindExecutor();
         var audit = new AuditExecutor(instanceStore).BindExecutor();
 
-        // The HITL gate: a request carrying the paused run state, resolved by the host with the same state
-        // carrying the human reply. The run suspends here (RequestInfoEvent) until the orchestrator responds.
+        // The HITL gate: a request carrying the paused run state, resolved by the host (a human reply, an
+        // escalation, or a manual exit). The run suspends here (RequestInfoEvent) until the orchestrator responds.
         var hitl = RequestPort.Create<DorRunState, DorRunState>(MafExecutorIds.DorHitl).BindAsExecutor(allowWrappedRequests: false);
 
         return new WorkflowBuilder(hydrate)
@@ -43,12 +46,18 @@ public static class MafDorWorkflowFactory
             .AddEdge(review, pass, (DorRunState state) => state.ReviewPassed)           // ready → transition
             .AddEdge(review, outreach, (DorRunState state) => !state.ReviewPassed)       // not ready → conversation
             .AddEdge(outreach, hitl)                                                     // post gaps → suspend for a human
-            .AddEdge(hitl, replyEval)                                                    // resume with the reply
+            .AddEdge(hitl, dispatch)                                                     // gate resumes → dispatcher (RequestPort → single edge)
+            // The dispatcher's conditional edges route on how the gate was answered:
+            .AddEdge(dispatch, replyEval, (DorRunState s) => !s.EscalateRequested && !s.ManualExitRequested) // a human reply
+            .AddEdge(dispatch, escalate, (DorRunState s) => s.EscalateRequested)         // SLA breach → escalate
+            .AddEdge(dispatch, manualExit, (DorRunState s) => s.ManualExitRequested)     // limits exhausted → manual exit
+            .AddEdge(escalate, hitl)                                                     // escalation-tier suspend
             .AddEdge(replyEval, update, (DorRunState state) => state.JustResolved)        // resolved → write + transition
             .AddEdge(replyEval, outreach, (DorRunState state) => state.ContinueConversation) // partial → focused follow-up
-            .AddEdge(replyEval, audit, (DorRunState state) => !state.JustResolved && !state.ContinueConversation) // exhausted → manual exit
+            .AddEdge(replyEval, manualExit, (DorRunState state) => !state.JustResolved && !state.ContinueConversation) // exhausted → manual exit
             .AddEdge(pass, audit)
             .AddEdge(update, audit)
+            .AddEdge(manualExit, audit)
             .WithOutputFrom(audit)
             .Build(validateOrphans: true);
     }

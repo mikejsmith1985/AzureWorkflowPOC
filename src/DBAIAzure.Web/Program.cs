@@ -427,6 +427,10 @@ builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IChatReplyReader,
     DBAIAzure.Web.Integrations.Messaging.SlackMcpReplyReader>();
 builder.Services.AddHostedService<DBAIAzure.Web.Services.Dor.DorReplyPumpService>();
 
+// ── DoR SLA sweeper (spec-021 US3) ────────────────────────────────────────────
+// Enforces the primary/escalation SLAs on a durable schedule: escalates or hands off on breach.
+builder.Services.AddHostedService<DBAIAzure.Web.Services.Dor.DorSlaSweeperService>();
+
 // ── Application Insights (FR-21, US4) ─────────────────────────────────────────
 builder.Services.AddApplicationInsightsTelemetry(builder.Configuration);
 

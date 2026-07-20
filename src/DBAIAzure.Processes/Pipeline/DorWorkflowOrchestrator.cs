@@ -61,7 +61,21 @@ public sealed class DorWorkflowOrchestrator
     public void SubmitReply(string runId, string reply)
     {
         if (_runs.TryGetValue(runId, out var run))
-            run.ProvideReply(reply);
+            run.Provide(new HumanReplyResumption(reply));
+    }
+
+    /// <summary>Escalates a suspended run whose primary SLA has breached (driven by the SLA sweeper).</summary>
+    public void SubmitEscalation(string runId)
+    {
+        if (_runs.TryGetValue(runId, out var run))
+            run.Provide(new EscalateResumption());
+    }
+
+    /// <summary>Forces a clean manual exit on a suspended run whose limits are exhausted (driven by the sweeper).</summary>
+    public void SubmitManualExit(string runId, string reason)
+    {
+        if (_runs.TryGetValue(runId, out var run))
+            run.Provide(new ManualExitResumption(reason));
     }
 
     /// <summary>
@@ -151,12 +165,18 @@ public sealed class DorWorkflowOrchestrator
                 }
 
                 var paused = ExtractPaused(segment.PendingRequest!, seed);
-                run.State = DorState.AwaitingResponse;
-                run.ArmReply();
+                run.State = paused.State; // AwaitingResponse (primary) or Escalated
+                run.ArmResumption();
                 run.SignalSuspended();
 
-                var reply = await run.WaitForReplyAsync();
-                var responded = paused with { HumanReply = reply };
+                var resumption = await run.WaitForResumptionAsync();
+                var responded = resumption switch
+                {
+                    HumanReplyResumption reply => paused with { HumanReply = reply.Reply, EscalateRequested = false, ManualExitRequested = false },
+                    EscalateResumption => paused with { EscalateRequested = true },
+                    ManualExitResumption manual => paused with { ManualExitRequested = true, FailureReason = manual.Reason },
+                    _ => paused,
+                };
                 await session.RespondAsync(segment.PendingRequest!.Request, responded, CancellationToken.None);
             }
         }

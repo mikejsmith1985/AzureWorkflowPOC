@@ -98,14 +98,14 @@ Paths are repo-relative. Reuse-first (Article VII): only the five documented gap
 **Goal**: Durable SLA clock (business-hours) → escalate to escalation channel with fresh clock/counter.
 **Independent test**: short SLA, no reply → escalation message + new clock; reply after reply-timeout but before SLA still processed.
 
-- [ ] T049 [P] [US3] Unit test `BusinessHoursSlaCalculator` (wall-clock vs business-hours, timezone, working days/hours, deadline from clock start) in tests/DBAIAzure.Tests/Dor/BusinessHoursSlaCalculatorTests.cs
-- [ ] T050 [US3] Implement `BusinessHoursSlaCalculator` (pure; deadline computation) in src/DBAIAzure.Connectors/DorWorkflow/BusinessHoursSlaCalculator.cs
-- [ ] T051 [US3] Compute + persist `SlaDeadlineAt`/`SlaTier` on outreach in `GapOutreachExecutor` + instance store
-- [ ] T052 [US3] Implement `EscalationExecutor` (post summary to escalation channel, reset counter, new clock/tier) with dry-run gate in src/DBAIAzure.Processes/Executors/Dor/EscalationExecutor.cs
-- [ ] T052a [P] [US3] Unit test `EscalationExecutor` (escalation summary, counter reset, new tier/clock, dry-run gate) in tests/DBAIAzure.Tests/Dor/EscalationExecutorTests.cs
-- [ ] T053 [US3] Implement SLA sweep pass in `DorSlaSweeperService` (query `ListDueSla`, drive SlaBreach→Escalated / ManualExit; independent of reply-timeout) in src/DBAIAzure.Web/Services/Dor/DorSlaSweeperService.cs
-- [ ] T054 [US3] Add escalation edges/routing to orchestrator + factory (Escalated loop, second-tier limits) per contracts/state-machine.md
-- [ ] T055 [US3] Integration test escalation trigger at deadline, counter reset, and reply-after-timeout-before-SLA still processed in tests/DBAIAzure.Tests/Dor/Integration/DorEscalationTests.cs
+- [x] T049 [P] [US3] Unit test `BusinessHoursSlaCalculator` (wall-clock vs business-hours, timezone, working days/hours, deadline from clock start) in tests/DBAIAzure.Tests/Dor/BusinessHoursSlaCalculatorTests.cs
+- [x] T050 [US3] Implement `BusinessHoursSlaCalculator` (pure; deadline computation) in src/DBAIAzure.Connectors/DorWorkflow/BusinessHoursSlaCalculator.cs
+- [x] T051 [US3] Compute + persist `SlaDeadlineAt`/`SlaTier` on outreach in `GapOutreachExecutor` + instance store
+- [x] T052 [US3] Implement `EscalationExecutor` (post summary to escalation channel, reset counter, new clock/tier) with dry-run gate in src/DBAIAzure.Processes/Executors/Dor/EscalationExecutor.cs
+- [x] T052a [P] [US3] Unit test `EscalationExecutor` (escalation summary, counter reset, new tier/clock, dry-run gate) in tests/DBAIAzure.Tests/Dor/EscalationExecutorTests.cs
+- [x] T053 [US3] Implement SLA sweep pass in `DorSlaSweeperService` (query `ListDueSla`, drive SlaBreach→Escalated / ManualExit; independent of reply-timeout) in src/DBAIAzure.Web/Services/Dor/DorSlaSweeperService.cs
+- [x] T054 [US3] Add escalation edges/routing to orchestrator + factory (Escalated loop, second-tier limits) per contracts/state-machine.md
+- [x] T055 [US3] Integration test escalation trigger at deadline, counter reset, and reply-after-timeout-before-SLA still processed in tests/DBAIAzure.Tests/Dor/Integration/DorEscalationTests.cs
 
 **Checkpoint**: unattended tickets escalate on a durable, business-hours schedule.
 
@@ -116,10 +116,10 @@ Paths are repo-relative. Reuse-first (Article VII): only the five documented gap
 **Goal**: On any exhausted limit, tag + comment, do NOT transition, audit MANUAL_REQUIRED.
 **Independent test**: exhaust limits → final message, manual label, summary comment, status unchanged, MANUAL_EXIT audit.
 
-- [ ] T056 [P] [US4] Unit test manual-exit builds summary (attempts, outstanding gaps) and never transitions in tests/DBAIAzure.Tests/Dor/ManualExitExecutorTests.cs
-- [ ] T057 [US4] Implement `ManualExitExecutor` (final channel message, apply `manual_label`, internal summary comment, MANUAL_REQUIRED tag, no transition) with dry-run gate in src/DBAIAzure.Processes/Executors/Dor/ManualExitExecutor.cs
-- [ ] T058 [US4] Wire manual-exit routing at primary + escalation tiers in orchestrator/factory
-- [ ] T059 [US4] Integration test manual exit from primary iterations and from escalation SLA in tests/DBAIAzure.Tests/Dor/Integration/DorManualExitTests.cs
+- [x] T056 [P] [US4] Unit test manual-exit builds summary (attempts, outstanding gaps) and never transitions in tests/DBAIAzure.Tests/Dor/ManualExitExecutorTests.cs
+- [x] T057 [US4] Implement `ManualExitExecutor` (final channel message, apply `manual_label`, internal summary comment, MANUAL_REQUIRED tag, no transition) with dry-run gate in src/DBAIAzure.Processes/Executors/Dor/ManualExitExecutor.cs
+- [x] T058 [US4] Wire manual-exit routing at primary + escalation tiers in orchestrator/factory
+- [x] T059 [US4] Integration test manual exit from primary iterations and from escalation SLA in tests/DBAIAzure.Tests/Dor/Integration/DorManualExitTests.cs
 
 **Checkpoint**: every non-happy path ends in a clean, audited human handoff.
 

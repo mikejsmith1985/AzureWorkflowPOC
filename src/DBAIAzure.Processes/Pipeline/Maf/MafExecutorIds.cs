@@ -48,6 +48,8 @@ public static class MafExecutorIds
     public const string DorOutreach = "dor-outreach";
     /// <summary>The human-in-the-loop conversation gate (a RequestPort).</summary>
     public const string DorHitl = "dor-hitl";
+    /// <summary>Pass-through that routes the resumed state (reply / escalate / manual-exit) off the gate.</summary>
+    public const string DorDispatch = "dor-dispatch";
     /// <summary>Evaluates a human reply against the outstanding DoR gaps.</summary>
     public const string DorReplyEval = "dor-reply-eval";
     /// <summary>Second-tier escalation outreach with its own SLA/iteration budget.</summary>

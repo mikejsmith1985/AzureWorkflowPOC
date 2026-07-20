@@ -34,24 +34,29 @@ public sealed class ReplyEvalExecutor : Executor<DorRunState>
     public override async ValueTask HandleAsync(DorRunState state, IWorkflowContext context, CancellationToken cancellationToken)
     {
         var config = await _configResolver.ResolveActiveAsync(cancellationToken);
-        var iteration = state.PrimaryIterations + 1; // this answered exchange
+
+        // The escalation tier has its own iteration counter and budget (FR-017).
+        var isEscalation = state.SlaTier == SlaTier.Escalation;
+        var iteration = (isEscalation ? state.EscalationIterations : state.PrimaryIterations) + 1;
+        var maxIterations = isEscalation ? config.Comms.Escalation.MaxIterations : config.Comms.Primary.MaxIterations;
 
         var evaluation = await _conversationService.EvaluateReplyAsync(
             state.OutstandingGaps, state.HumanReply ?? string.Empty, iteration, config.Ai, cancellationToken);
 
-        var maxIterations = config.Comms.Primary.MaxIterations;
         var canContinue = !evaluation.Resolved && iteration < maxIterations;
 
         var next = state with
         {
-            PrimaryIterations = iteration,
+            PrimaryIterations = isEscalation ? state.PrimaryIterations : iteration,
+            EscalationIterations = isEscalation ? iteration : state.EscalationIterations,
             HumanReply = null,
             JustResolved = evaluation.Resolved,
             ContinueConversation = canContinue,
             OutstandingGaps = evaluation.Resolved ? Array.Empty<string>() : evaluation.RemainingGaps,
             ResolvedFieldUpdates = evaluation.Resolved ? evaluation.FieldUpdates : state.ResolvedFieldUpdates,
             PendingOutreachMessage = canContinue ? evaluation.ReplyMessage : null,
-            State = evaluation.Resolved ? DorState.Updating : DorState.Reviewing,
+            // Resolved → update; still resolvable → loop; otherwise → manual exit.
+            State = evaluation.Resolved ? DorState.Updating : (canContinue ? DorState.Reviewing : DorState.ManualExit),
             FailureReason = (!evaluation.Resolved && !canContinue)
                 ? "Conversation iteration limit reached without resolution."
                 : state.FailureReason,

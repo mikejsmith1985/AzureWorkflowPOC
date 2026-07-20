@@ -32,17 +32,25 @@ public sealed class GapOutreachExecutor : Executor<DorRunState>
     /// <inheritdoc/>
     public override async ValueTask HandleAsync(DorRunState state, IWorkflowContext context, CancellationToken cancellationToken)
     {
-        _ = await _configResolver.ResolveActiveAsync(cancellationToken); // resolved per run; channel targeting refined in the SLA increment
+        var config = await _configResolver.ResolveActiveAsync(cancellationToken);
 
         var message = !string.IsNullOrWhiteSpace(state.PendingOutreachMessage)
             ? state.PendingOutreachMessage!
             : BuildGapMessage(state);
 
+        // The SLA clock starts at the first outreach and does NOT reset on follow-ups (FR-016).
+        var clockStart = state.SlaClockStartedAt ?? DateTimeOffset.UtcNow;
+        var deadline = state.SlaDeadlineAt
+            ?? BusinessHoursSlaCalculator.ComputeDeadline(clockStart, config.Sla.PrimarySlaHours, config.Sla);
+
         var next = state with
         {
             State = DorState.AwaitingResponse,
             ThreadRef = string.IsNullOrEmpty(state.ThreadRef) ? state.RunId : state.ThreadRef,
-            SlaClockStartedAt = state.SlaClockStartedAt ?? DateTimeOffset.UtcNow,
+            ActiveChannelId = string.IsNullOrEmpty(state.ActiveChannelId) ? config.Comms.Primary.ChannelId : state.ActiveChannelId,
+            SlaClockStartedAt = clockStart,
+            SlaDeadlineAt = deadline,
+            SlaTier = SlaTier.Primary,
             PendingOutreachMessage = null,
         };
 
