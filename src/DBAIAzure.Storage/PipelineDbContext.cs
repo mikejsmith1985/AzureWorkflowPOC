@@ -45,6 +45,9 @@ public class PipelineDbContext : DbContext
     /// <summary>MAF workflow checkpoints — durable HITL pause/resume across restart (spec-019 T030).</summary>
     public DbSet<WorkflowCheckpointEntity> WorkflowCheckpoints { get; set; } = null!;
 
+    /// <summary>DoR workflow instances — lifecycle + SLA record, one per ticket run (spec-021).</summary>
+    public DbSet<DorWorkflowInstanceEntity> DorWorkflowInstances { get; set; } = null!;
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<RunRecord>(entity =>
@@ -174,6 +177,19 @@ public class PipelineDbContext : DbContext
             // Indexes: fetch a session's checkpoints filtered by parent, and find the latest by sequence.
             entity.HasIndex(e => new { e.SessionId, e.ParentCheckpointId });
             entity.HasIndex(e => new { e.SessionId, e.Sequence });
+        });
+
+        modelBuilder.Entity<DorWorkflowInstanceEntity>(entity =>
+        {
+            entity.ToTable("DorWorkflowInstances");
+            entity.HasKey(e => e.RunId);
+            entity.Property(e => e.RunId).ValueGeneratedNever();
+            // The SLA sweeper queries by deadline.
+            entity.HasIndex(e => e.SlaDeadlineAt);
+            // Idempotency (FR-004): at most one active instance per ticket. The filter excludes the terminal
+            // Done state (ordinal 9) so a completed ticket can be re-triggered later. Kept in sync with the
+            // raw-SQL DDL in Program.cs for databases that pre-date this table.
+            entity.HasIndex(e => e.TicketKey).IsUnique().HasFilter("State <> 9");
         });
     }
 }

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Intelligent DoR Validation Workflow (spec-021, in progress)
+
+A config-driven Definition-of-Ready validation workflow becoming the Workflow Builder's default: on Jira
+ticket-created it AI-reviews the ticket against a configurable DoR document, auto-advances ready tickets, and —
+when not ready — opens a durable human-in-the-loop Slack conversation that enforces business-hours SLAs with
+escalation before a clean, audited manual handoff. Reuses the MAF engine + native HITL/checkpointing, the Jira
+adapter, the Slack MCP gateway, the connector-config store, and append-only audit logs; a global dry-run flag
+gates every write. _Foundational layer landed: `ConnectorType.DorWorkflow`, the `DorState`/`DorOutcome`/`SlaTier`
+enums, the `DorRunState` payload + `DorWorkflowInstance` record, the six-namespace `DorWorkflowConfig`, and the
+`IDorConfigResolver` / `IDorWorkflowInstanceStore` seams._
+
 ### Added — Work Tracking System config bridge (spec-020)
 
 The connector-settings UI is now bridged to the spec-018 work-tracker adapter layer: the active tracker —

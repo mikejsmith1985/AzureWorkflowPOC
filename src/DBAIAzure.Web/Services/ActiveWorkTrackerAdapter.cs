@@ -59,6 +59,16 @@ public sealed class ActiveWorkTrackerAdapter : IWorkTrackerAdapter
     /// <inheritdoc/>
     public RollupCapability GetRollupCapability() => ResolveActive().GetRollupCapability();
 
+    /// <inheritdoc/>
+    public async Task<WorkItemFields> ReadWorkItemAsync(
+        WorkItemRef item, IReadOnlyCollection<string> watchFields, CancellationToken cancellationToken = default) =>
+        await (await ResolveActiveAsync(cancellationToken)).ReadWorkItemAsync(item, watchFields, cancellationToken);
+
+    /// <inheritdoc/>
+    public async Task<string> TransitionAsync(
+        WorkItemRef item, string transitionId, CancellationToken cancellationToken = default) =>
+        await (await ResolveActiveAsync(cancellationToken)).TransitionAsync(item, transitionId, cancellationToken);
+
     private async Task<IWorkTrackerAdapter> ResolveActiveAsync(CancellationToken ct)
     {
         var resolved = await _resolver.ResolveActiveAsync(ct);
