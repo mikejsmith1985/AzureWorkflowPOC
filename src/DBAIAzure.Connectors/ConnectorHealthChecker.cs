@@ -35,6 +35,7 @@ public sealed class ConnectorHealthChecker : IConnectorHealthChecker
         JiraConnectorTester jiraTester,
         LlmConnectorTester llmTester,
         MessagingConnectorTester messagingTester,
+        DorWorkflowTester dorTester,
         IWorkTrackerConfigResolver workTrackerResolver,
         IConnectorConfigRepository configRepo,
         ILogger<ConnectorHealthChecker> logger,
@@ -50,6 +51,8 @@ public sealed class ConnectorHealthChecker : IConnectorHealthChecker
             [ConnectorType.WorkTracker] = ct => TestActiveWorkTrackerAsync(workTrackerResolver, adoTester, jiraTester, ct),
             [ConnectorType.LLM]         = llmTester.TestConnectionAsync,
             [ConnectorType.Messaging]   = messagingTester.TestConnectionAsync,
+            // spec-021: the DoR workflow's own configuration + DoR-document health.
+            [ConnectorType.DorWorkflow] = dorTester.TestConnectionAsync,
         };
     }
 

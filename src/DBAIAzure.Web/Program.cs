@@ -283,6 +283,7 @@ builder.Services.AddSingleton<AdoConnectorTester>();
 builder.Services.AddSingleton<JiraConnectorTester>();
 builder.Services.AddSingleton<LlmConnectorTester>();
 builder.Services.AddSingleton<MessagingConnectorTester>();
+builder.Services.AddSingleton<DorWorkflowTester>();   // spec-021 DoR workflow health
 builder.Services.AddSingleton<IConnectorHealthChecker, ConnectorHealthChecker>();
 
 // ── Admin Console UX (spec-009) ───────────────────────────────────────────────

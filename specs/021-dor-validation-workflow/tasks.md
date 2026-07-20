@@ -144,12 +144,12 @@ Paths are repo-relative. Reuse-first (Article VII): only the five documented gap
 **Goal**: Full DoR config editable in the UI, hot-reloaded per run; secrets by reference; health check.
 **Independent test**: change ready-status/SLA/DoR-doc in config → next ticket uses it, no restart; secrets never plaintext.
 
-- [ ] T064 [P] [US6] Unit test `DorWorkflowTester` health (Jira reachable + transition id exists, Slack channel, DoR loads, AI key) in tests/DBAIAzure.Tests/Dor/DorWorkflowTesterTests.cs
-- [ ] T065 [US6] Implement `DorWorkflowTester` on `IConnectorHealthChecker` seam in src/DBAIAzure.Connectors/DorWorkflow/DorWorkflowTester.cs and register in src/DBAIAzure.Connectors/ConnectorHealthChecker.cs
+- [x] T064 [P] [US6] Unit test `DorWorkflowTester` health (Jira reachable + transition id exists, Slack channel, DoR loads, AI key) in tests/DBAIAzure.Tests/Dor/DorWorkflowTesterTests.cs
+- [x] T065 [US6] Implement `DorWorkflowTester` on `IConnectorHealthChecker` seam in src/DBAIAzure.Connectors/DorWorkflow/DorWorkflowTester.cs and register in src/DBAIAzure.Connectors/ConnectorHealthChecker.cs
 - [ ] T066 [US6] Add "DoR Workflow" config card (six namespaces, secret-by-reference inputs, Check Health) to src/DBAIAzure.Web/Pages/ConnectorSettings.razor
 - [ ] T067 [P] [US6] bUnit test the DoR config card renders/saves/validates (inline-vs-url, business-hours) in tests/DBAIAzure.Tests/Dor/DorConfigCardTests.cs
-- [ ] T068 [US6] Add DoR seed to `DemoConnectorSeeder` (first-run seed from env; UI/DB authoritative) in src/DBAIAzure.Web/Services/DemoConnectorSeeder.cs and `ConnectorSeedOptions`
-- [ ] T069 [US6] Integration test config hot-reload: change ready-status/DoR-doc between runs, next run uses new value; assert no secret in serialized config/logs in tests/DBAIAzure.Tests/Dor/Integration/DorConfigHotReloadTests.cs
+- [x] T068 [US6] Add DoR seed to `DemoConnectorSeeder` (first-run seed from env; UI/DB authoritative) in src/DBAIAzure.Web/Services/DemoConnectorSeeder.cs and `ConnectorSeedOptions`
+- [x] T069 [US6] Integration test config hot-reload: change ready-status/DoR-doc between runs, next run uses new value; assert no secret in serialized config/logs in tests/DBAIAzure.Tests/Dor/Integration/DorConfigHotReloadTests.cs
 
 **Checkpoint**: the workflow is fully operator-tunable at runtime.
 

@@ -28,6 +28,32 @@ public sealed class ConnectorSeedOptions
 
     /// <summary>Messaging (Teams/Slack/Discord) seed values, or empty when not provided.</summary>
     public MessagingSeed Messaging { get; set; } = new();
+
+    /// <summary>DoR Validation Workflow (spec-021) seed values — the full non-secret config JSON + its secrets.</summary>
+    public DorWorkflowSeed DorWorkflow { get; set; } = new();
+}
+
+/// <summary>
+/// Seed values for the DoR Validation Workflow connector (spec-021). The non-secret config is the whole
+/// six-namespace JSON document (<see cref="ConfigJson"/>); the secrets are supplied separately and never appear
+/// in that JSON. Lets the deployed app be pre-wired from the vault exactly like the other connectors.
+/// </summary>
+public sealed class DorWorkflowSeed
+{
+    /// <summary>The full non-secret six-namespace configuration as a JSON object (non-secret).</summary>
+    public string? ConfigJson { get; set; }
+
+    /// <summary>When true, overwrite an already-configured DoR connector (used to re-point in a live test).</summary>
+    public bool Overwrite { get; set; }
+
+    /// <summary>Jira API token (secret).</summary>
+    public string? JiraApiToken { get; set; }
+    /// <summary>Jira webhook HMAC secret (secret).</summary>
+    public string? JiraWebhookSecret { get; set; }
+    /// <summary>Slack token for the conversation channels (secret).</summary>
+    public string? SlackToken { get; set; }
+    /// <summary>AI provider API key (secret).</summary>
+    public string? AiApiKey { get; set; }
 }
 
 /// <summary>
