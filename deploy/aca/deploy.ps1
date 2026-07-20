@@ -22,7 +22,10 @@ param(
     [string] $ImageTag      = 'latest',
     [string] $Cpu           = '0.25',
     [string] $Memory        = '0.5Gi',
-    [int]    $TargetPort    = 8080
+    [int]    $TargetPort    = 8080,
+    # The DoR Validation Workflow (spec-021) runs a durable SLA/reply-poll BackgroundService, which cannot fire
+    # while the app is scaled to zero — so the default is 1. Set to 0 only if the DoR workflow is not in use.
+    [int]    $MinReplicas   = 1
 )
 
 $ErrorActionPreference = 'Stop'
@@ -121,7 +124,7 @@ if (-not $exists) {
         --name $AppName --resource-group $ResourceGroup --environment $EnvironmentName `
         --image $image --registry-server $acrServer --registry-username $acrUser --registry-password $acrPassword `
         --target-port $TargetPort --ingress external `
-        --min-replicas 0 --max-replicas 1 --cpu $Cpu --memory $Memory `
+        --min-replicas $MinReplicas --max-replicas 1 --cpu $Cpu --memory $Memory `
         --secrets $secretArgs --env-vars $envArgs `
         --output none
     if ($LASTEXITCODE -ne 0) { throw "az containerapp create failed for '$AppName'." }
@@ -134,7 +137,7 @@ if (-not $exists) {
 }
 
 # ── 6. Re-assert scale-to-zero (idempotent guard, as the reference does) ─────────
-az containerapp update --name $AppName --resource-group $ResourceGroup --min-replicas 0 --max-replicas 1 --output none
+az containerapp update --name $AppName --resource-group $ResourceGroup --min-replicas $MinReplicas --max-replicas 1 --output none
 
 # ── 7. Feed the public FQDN back to the app for correct deep links, then print it ─
 $fqdn = az containerapp show --name $AppName --resource-group $ResourceGroup --query 'properties.configuration.ingress.fqdn' --output tsv

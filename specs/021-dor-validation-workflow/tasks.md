@@ -168,13 +168,13 @@ Paths are repo-relative. Reuse-first (Article VII): only the five documented gap
 
 ## Phase 10: Polish & Cross-Cutting Concerns
 
-- [ ] T073 [P] Ensure audit/metric fields (outcome source, duration, iterations, fields changed, per-criterion fail, AI latency/cost, **DoR document version in effect** at review time — L1/traceability) are emitted so all eight FR-024 metrics are derivable; test derivability in tests/DBAIAzure.Tests/Dor/DorMetricsDerivationTests.cs
-- [ ] T074 [P] Failure-mode integration tests: Jira/AI/DoR-doc/Slack unavailable → bounded retry → manual-exit, no partial write (FR-030) in tests/DBAIAzure.Tests/Dor/Integration/DorResilienceTests.cs
-- [ ] T075 [P] Confirm dry-run gate covers every write executor (pass/update/outreach/escalation/manual) via a single test matrix in tests/DBAIAzure.Tests/Dor/DryRunGateTests.cs
-- [ ] T076 [P] Update CHANGELOG.md with the spec-021 feature summary (Article VI)
+- [x] T073 [P] Ensure audit/metric fields (outcome source, duration, iterations, fields changed, per-criterion fail, AI latency/cost, **DoR document version in effect** at review time — L1/traceability) are emitted so all eight FR-024 metrics are derivable; test derivability in tests/DBAIAzure.Tests/Dor/DorMetricsDerivationTests.cs
+- [x] T074 [P] Failure-mode integration tests: Jira/AI/DoR-doc/Slack unavailable → bounded retry → manual-exit, no partial write (FR-030) in tests/DBAIAzure.Tests/Dor/Integration/DorResilienceTests.cs
+- [x] T075 [P] Confirm dry-run gate covers every write executor (pass/update/outreach/escalation/manual) via a single test matrix in tests/DBAIAzure.Tests/Dor/DryRunGateTests.cs
+- [x] T076 [P] Update CHANGELOG.md with the spec-021 feature summary (Article VI)
 - [ ] T077 Run full quickstart.md scenarios A–E against real Jira + Slack (dry-run then live); capture evidence (Article X)
 - [ ] T078 Run `scripts/run-e2e.ps1` (Playwright) and full `dotnet test`; all green before PR
-- [ ] T079a Set the DoR deployment to **`min-replicas ≥ 1`** (analyze A1) in deploy/aca/deploy.ps1 params/docs so the SLA/reply-poll BackgroundService keeps running (scale-to-zero would stall SLA timers)
+- [x] T079a Set the DoR deployment to **`min-replicas ≥ 1`** (analyze A1) in deploy/aca/deploy.ps1 params/docs so the SLA/reply-poll BackgroundService keeps running (scale-to-zero would stall SLA timers)
 - [ ] T079 Run `/speckit-analyze` consistency gate, then open the PR to `main`
 
 ---
