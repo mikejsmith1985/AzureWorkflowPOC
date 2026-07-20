@@ -1,6 +1,7 @@
 // Integration test for the conversational HITL path (spec-021 US2 / T048): a not-ready ticket suspends at the
 // human gate, a reply resolves the gaps (writing only whitelisted fields + transitioning), and a partial reply
 // drives a focused follow-up before resolution. Drives the real MAF graph with fakes + in-memory SQLite.
+using System.Text.Json;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
 using DBAIAzure.Core.Models.AdoTelemetry;
@@ -9,7 +10,10 @@ using DBAIAzure.Core.Models.DorWorkflow.Config;
 using DBAIAzure.Core.Models.WorkTracker;
 using DBAIAzure.Processes.Pipeline;
 using DBAIAzure.Storage;
+using DBAIAzure.Storage.Checkpointing;
 using DBAIAzure.Storage.Repositories;
+using DBAIAzure.Web.Services.Dor;
+using Microsoft.Agents.AI.Workflows;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -83,6 +87,88 @@ public sealed class DorConversationTests : IDisposable
         Assert.True(messaging.Count >= 2);      // initial gap + focused follow-up
         Assert.Equal(new[] { "31" }, adapter.Transitions);
     }
+
+    [Fact]
+    public async Task Conversation_SurvivesRestart_AndResolvesOnLaterReply()
+    {
+        var factory = new SharedFactory(_options);
+        var checkpointStore = new EfCheckpointStore(factory);
+        var checkpointManager = CheckpointManager.CreateJson(checkpointStore, new JsonSerializerOptions());
+
+        // First "process": start the run; it reviews (fail), posts gaps, and suspends — checkpointed. No reply.
+        var orchestrator1 = BuildCheckpointingOrchestrator(new RecordingAdapter(), ResolvingConversation(), checkpointManager);
+        var run1 = await orchestrator1.StartAsync("SBRO-1");
+        await run1!.WaitSuspendedAsync().WaitAsync(Timeout);
+
+        var paused = await LoadInstanceAsync("SBRO-1");
+        Assert.Equal(DorState.AwaitingResponse, paused.State);
+        var checkpoint = await WaitForCheckpointAsync(checkpointStore, run1.RunId);
+
+        // Second "process" (simulated restart): a fresh orchestrator resumes the run from its checkpoint.
+        var adapter2 = new RecordingAdapter();
+        var orchestrator2 = BuildCheckpointingOrchestrator(adapter2, ResolvingConversation(), checkpointManager);
+        var run2 = await orchestrator2.RehydrateAsync(paused, checkpoint);
+        await run2!.WaitSuspendedAsync().WaitAsync(Timeout);      // resumed → back in AwaitingResponse
+
+        orchestrator2.SubmitReply(run2.RunId, "here are the acceptance criteria");
+        await run2.Completion.WaitAsync(Timeout);
+
+        var final = await LoadInstanceAsync("SBRO-1");
+        Assert.Equal(DorState.Done, final.State);
+        Assert.Equal(DorOutcome.ResolvedAuto, final.Outcome);      // the later reply still resolved it
+        Assert.Equal(new[] { "31" }, adapter2.Transitions);
+    }
+
+    [Fact]
+    public async Task ReplyPump_DeliversThreadReply_ResumingTheConversation()
+    {
+        var adapter = new RecordingAdapter();
+        var orchestrator = BuildOrchestrator(adapter, ResolvingConversation());
+        var run = await orchestrator.StartAsync("SBRO-1");
+        await run!.WaitSuspendedAsync().WaitAsync(Timeout);
+
+        // The pump reads a new thread reply and submits it to the orchestrator, resuming the run.
+        var pump = new DorReplyPumpService(
+            _store, orchestrator, new FakeReplyReader("here are the acceptance criteria"),
+            new StubConfigResolver(), NullLogger<DorReplyPumpService>.Instance);
+        var delivered = await pump.RunOnceAsync();
+
+        Assert.Equal(1, delivered);
+        await run.Completion.WaitAsync(Timeout);
+
+        var instance = await LoadInstanceAsync("SBRO-1");
+        Assert.Equal(DorState.Done, instance.State);
+        Assert.Equal(DorOutcome.ResolvedAuto, instance.Outcome);
+    }
+
+    private sealed class FakeReplyReader : IChatReplyReader
+    {
+        private readonly string _text;
+        public FakeReplyReader(string text) => _text = text;
+        public Task<IReadOnlyList<ChatReply>> ReadNewRepliesAsync(
+            string channelId, string threadRef, string? afterCursor, IReadOnlyCollection<string> ignoreUserIds, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<ChatReply>>(new[] { new ChatReply("r1", "user", _text, DateTimeOffset.UtcNow) });
+    }
+
+    private static QueueConversation ResolvingConversation() => new(new ReplyEvaluation(
+        true, Array.Empty<string>(), new Dictionary<string, string> { ["acceptance_criteria"] = "AC" }, "Thanks!"));
+
+    private static async Task<CheckpointInfo> WaitForCheckpointAsync(EfCheckpointStore store, string runId)
+    {
+        for (var attempt = 0; attempt < 60; attempt++)
+        {
+            if (await store.GetLatestCheckpointAsync(runId) is { } checkpoint)
+                return checkpoint;
+            await Task.Delay(50);
+        }
+        throw new Xunit.Sdk.XunitException($"No checkpoint was written for paused run {runId}.");
+    }
+
+    private DorWorkflowOrchestrator BuildCheckpointingOrchestrator(
+        RecordingAdapter adapter, QueueConversation conversation, CheckpointManager checkpointManager) =>
+        new(
+            new FailReviewService(), conversation, adapter, new StubDocumentSource(), new StubConfigResolver(),
+            new CountingMessageDelivery(), _store, NullLogger<DorWorkflowOrchestrator>.Instance, checkpointManager);
 
     // ── Wiring ──────────────────────────────────────────────────────────────────
 

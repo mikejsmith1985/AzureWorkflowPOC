@@ -105,6 +105,33 @@ public sealed class DorWorkflowOrchestrator
     }
 
     /// <summary>
+    /// Resumes a paused run from its latest checkpoint after a restart (SC-003). The resumed run re-emits its
+    /// outstanding human request, so it lands back in AwaitingResponse ready for the (possibly much later)
+    /// reply. Returns null when checkpointing is disabled. The checkpoint is supplied by the rehydration
+    /// service (which owns the checkpoint store).
+    /// </summary>
+    public async Task<DorWorkflowRun?> RehydrateAsync(
+        DorWorkflowInstance instance, CheckpointInfo checkpoint, CancellationToken cancellationToken = default)
+    {
+        if (_checkpointManager is null)
+            return null;
+
+        var seed = new DorRunState
+        {
+            RunId = instance.RunId, TicketKey = instance.TicketKey, State = instance.State, IsDryRun = instance.IsDryRun,
+        };
+        var workflow = MafDorWorkflowFactory.Build(
+            _reviewService, _conversationService, _activeAdapter, _documentSource, _configResolver, _messageDelivery, _instanceStore);
+
+        var session = await MafWorkflowSession<DorRunState>.ResumeAsync(workflow, checkpoint, _checkpointManager, cancellationToken);
+        var run = new DorWorkflowRun(instance.RunId) { State = instance.State };
+        _runs[instance.RunId] = run;
+
+        _ = Task.Run(() => DriveLoopAsync(run, session, seed), cancellationToken);
+        return run;
+    }
+
+    /// <summary>
     /// Drives a run across its human-in-the-loop suspensions until it completes. At each suspension the paused
     /// state is recovered from the request, AwaitingResponse is already persisted by the outreach step, and the
     /// loop awaits the human reply before resuming with it.

@@ -416,6 +416,16 @@ builder.Services.AddHostedService<WorkflowRunRehydrationService>();
 // Resumes intake runs left awaiting-human from their durable checkpoints after a restart (MAF flag only).
 builder.Services.AddHostedService<PausedRunRehydrationService>();
 
+// ── Startup rehydration of paused DoR conversations (spec-021 SC-003) ─────────
+// Resumes DoR runs left awaiting a human reply from their durable checkpoints after a restart.
+builder.Services.AddHostedService<DBAIAzure.Web.Services.Dor.DorRunRehydrationService>();
+
+// ── DoR conversation reply pump (spec-021 US2) ────────────────────────────────
+// Polls awaiting-human DoR instances and feeds new Slack thread replies into the orchestrator.
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IChatReplyReader,
+    DBAIAzure.Web.Integrations.Messaging.SlackMcpReplyReader>();
+builder.Services.AddHostedService<DBAIAzure.Web.Services.Dor.DorReplyPumpService>();
+
 // ── Application Insights (FR-21, US4) ─────────────────────────────────────────
 builder.Services.AddApplicationInsightsTelemetry(builder.Configuration);
 

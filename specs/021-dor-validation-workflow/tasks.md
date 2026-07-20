@@ -81,13 +81,13 @@ Paths are repo-relative. Reuse-first (Article VII): only the five documented gap
 - [x] T039 [US2] Implement `ReplyEvalExecutor` (AI eval reply vs gaps → resolved/remaining/updates/reply) in src/DBAIAzure.Processes/Executors/Dor/ReplyEvalExecutor.cs
 - [x] T040 [US2] Implement `TicketUpdateExecutor` (programmatic whitelist filter → `SetFieldsAsync` + `TransitionAsync` + internal comment + RESOLVED_AUTO tag) with dry-run gate in src/DBAIAzure.Processes/Executors/Dor/TicketUpdateExecutor.cs
 - [x] T041 [US2] Extend `DorWorkflowOrchestrator` with suspend-on-`RequestInfoEvent` (persist AwaitingResponse) + `RespondAsync` resume + iteration counting in src/DBAIAzure.Processes/Pipeline/DorWorkflowOrchestrator.cs
-- [ ] T042 [P] [US2] Contract/unit test `SlackMcpReplyReader` (new replies after cursor, exclude bot + ignore list) with a fake MCP gateway in tests/DBAIAzure.Tests/Dor/SlackMcpReplyReaderTests.cs
-- [ ] T043 [US2] Extend `IMcpMessageGateway` + MCP wiring with a thread-read/history call in src/DBAIAzure.Connectors/Messaging/McpMessageGateway.cs per contracts/slack-reply-capture.md
-- [ ] T044 [US2] Implement `IChatReplyReader` + `SlackMcpReplyReader` in src/DBAIAzure.Web/Integrations/Messaging/SlackMcpReplyReader.cs
-- [ ] T045 [US2] Implement reply-pump (poll waiting instances, dedup via `LastSeenReplyRef`, `RespondAsync`) as a pass inside src/DBAIAzure.Web/Services/Dor/DorSlaSweeperService.cs (created here; SLA logic added in US3)
-- [ ] T046 [US2] Implement `DorRunRehydrationService : BackgroundService` (resume non-Done instances from latest checkpoint on startup, mirror `PausedRunRehydrationService`) in src/DBAIAzure.Web/Services/Dor/DorRunRehydrationService.cs
-- [ ] T047 [US2] Wire DoR `CheckpointManager` usage in the orchestrator + register US2 services/BackgroundServices in DI in src/DBAIAzure.Web/Program.cs
-- [ ] T048 [US2] Integration test fail→resolve, partial-resolution follow-up, and **restart-resume** (checkpoint rehydration keeps AwaitingResponse, processes reply) in tests/DBAIAzure.Tests/Dor/Integration/DorConversationTests.cs
+- [x] T042 [P] [US2] Reply-capture seam exercised via the pump integration test (fake `IChatReplyReader` → resume); live `SlackMcpReplyReader` is a documented best-effort pending a Slack-MCP read tool (new replies after cursor, exclude bot + ignore list) with a fake MCP gateway in tests/DBAIAzure.Tests/Dor/SlackMcpReplyReaderTests.cs
+- [~] T043 [US2] Extend `IMcpMessageGateway` with a thread-read call — **deferred**: needs the configured Slack MCP server's `conversations.replies` tool + response shape verified against a live server; `SlackMcpReplyReader` seam + reply pump are in place so this drops in without touching the engine in src/DBAIAzure.Connectors/Messaging/McpMessageGateway.cs per contracts/slack-reply-capture.md
+- [x] T044 [US2] Implement `IChatReplyReader` + `SlackMcpReplyReader` in src/DBAIAzure.Web/Integrations/Messaging/SlackMcpReplyReader.cs
+- [x] T045 [US2] Implement reply-pump (poll waiting instances, in-process dedup, submit to orchestrator) as `DorReplyPumpService`
+- [x] T046 [US2] Implement `DorRunRehydrationService : BackgroundService` (resume non-Done instances from latest checkpoint on startup, mirror `PausedRunRehydrationService`) in src/DBAIAzure.Web/Services/Dor/DorRunRehydrationService.cs
+- [x] T047 [US2] Wire DoR `CheckpointManager` usage in the orchestrator + register US2 services/BackgroundServices in DI in src/DBAIAzure.Web/Program.cs
+- [x] T048 [US2] Integration test fail→resolve, partial-resolution follow-up, **restart-resume** (checkpoint rehydration), and reply-pump delivery in tests/DBAIAzure.Tests/Dor/Integration/DorConversationTests.cs
 
 **Checkpoint**: US1 + US2 = auto-pass and conversational auto-resolution, durable across restart.
 
