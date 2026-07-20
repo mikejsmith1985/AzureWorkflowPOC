@@ -69,6 +69,19 @@ public sealed record DorRunState
     /// <summary>Set by the reply-eval step when a human reply resolved every outstanding gap.</summary>
     public bool JustResolved { get; init; }
 
+    /// <summary>The latest human reply text, carried on the RequestPort response into the reply-eval step.</summary>
+    public string? HumanReply { get; init; }
+
+    /// <summary>Set by reply-eval: continue the conversation (unresolved, within the iteration budget).</summary>
+    public bool ContinueConversation { get; init; }
+
+    /// <summary>A focused follow-up message the outreach step should post next (from a partial reply).</summary>
+    public string? PendingOutreachMessage { get; init; }
+
+    /// <summary>The whitelisted-candidate field updates a resolution implies (filtered again before any write).</summary>
+    public IReadOnlyDictionary<string, string> ResolvedFieldUpdates { get; init; } =
+        new Dictionary<string, string>();
+
     /// <summary>The terminal outcome, set when <see cref="State"/> reaches <see cref="DorState.Done"/>.</summary>
     public DorOutcome? Outcome { get; init; }
 

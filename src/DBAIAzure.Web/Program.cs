@@ -205,17 +205,22 @@ builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IDorDocumentSource,
     DBAIAzure.Web.Services.Dor.DorDocumentSource>();
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IDorReviewService,
     DBAIAzure.Processes.Executors.Dor.DorReviewService>();
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IDorConversationService,
+    DBAIAzure.Processes.Executors.Dor.DorConversationService>();
 // The orchestrator lives in the Processes layer, so it takes IWorkTrackerAdapter; we pass the ActiveWorkTracker
 // adapter (resolved per run) explicitly here so the active provider (Jira) is used without leaking a Web type.
+// The CheckpointManager (when present) makes a paused conversation resumable after a restart.
 builder.Services.AddSingleton<DBAIAzure.Processes.Pipeline.DorWorkflowOrchestrator>(sp =>
     new DBAIAzure.Processes.Pipeline.DorWorkflowOrchestrator(
         sp.GetRequiredService<DBAIAzure.Core.Interfaces.IDorReviewService>(),
+        sp.GetRequiredService<DBAIAzure.Core.Interfaces.IDorConversationService>(),
         sp.GetRequiredService<DBAIAzure.Web.Services.ActiveWorkTrackerAdapter>(),
         sp.GetRequiredService<DBAIAzure.Core.Interfaces.IDorDocumentSource>(),
         sp.GetRequiredService<DBAIAzure.Core.Interfaces.IDorConfigResolver>(),
         sp.GetRequiredService<DBAIAzure.Core.Interfaces.IMessageDelivery>(),
         sp.GetRequiredService<DBAIAzure.Core.Interfaces.IDorWorkflowInstanceStore>(),
-        sp.GetRequiredService<ILogger<DBAIAzure.Processes.Pipeline.DorWorkflowOrchestrator>>()));
+        sp.GetRequiredService<ILogger<DBAIAzure.Processes.Pipeline.DorWorkflowOrchestrator>>(),
+        sp.GetService<Microsoft.Agents.AI.Workflows.CheckpointManager>()));
 
 // ── Work-tracker adapter (spec-018): tracker-neutral seam + ADO implementation ───────────────
 // Additive — the adapter wraps the existing ADO client/preflight; the pipeline is not yet rewired

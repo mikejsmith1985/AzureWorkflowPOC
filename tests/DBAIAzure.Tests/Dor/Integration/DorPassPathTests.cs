@@ -42,7 +42,8 @@ public sealed class DorPassPathTests : IDisposable
         var messaging = new RecordingMessageDelivery();
         var orchestrator = BuildOrchestrator(adapter, messaging, dryRun: false);
 
-        await orchestrator.StartAsync("SBRO-1");
+        var run = await orchestrator.StartAsync("SBRO-1");
+        await run!.Completion;
 
         var instance = await LoadInstanceAsync("SBRO-1");
         Assert.Equal(DorState.Done, instance.State);
@@ -58,7 +59,8 @@ public sealed class DorPassPathTests : IDisposable
         var messaging = new RecordingMessageDelivery();
         var orchestrator = BuildOrchestrator(adapter, messaging, dryRun: true);
 
-        await orchestrator.StartAsync("SBRO-1");
+        var run = await orchestrator.StartAsync("SBRO-1");
+        await run!.Completion;
 
         var instance = await LoadInstanceAsync("SBRO-1");
         Assert.Equal(DorState.Done, instance.State);
@@ -75,8 +77,10 @@ public sealed class DorPassPathTests : IDisposable
         var messaging = new RecordingMessageDelivery();
         var orchestrator = BuildOrchestrator(adapter, messaging, dryRun: true);
 
-        await orchestrator.StartAsync("SBRO-1");
-        await orchestrator.StartAsync("SBRO-1"); // second trigger — first already completed (Done), so re-trigger allowed
+        var run1 = await orchestrator.StartAsync("SBRO-1");
+        await run1!.Completion;
+        var run2 = await orchestrator.StartAsync("SBRO-1"); // second trigger — first completed (Done), so re-trigger allowed
+        await run2!.Completion;
 
         // After completion the ticket is Done, so a later trigger is permitted (filtered index excludes Done).
         // The idempotency guard itself is unit-tested in DorWorkflowInstanceStoreTests; here we assert no crash
@@ -91,12 +95,20 @@ public sealed class DorPassPathTests : IDisposable
         PassFakeAdapter adapter, RecordingMessageDelivery messaging, bool dryRun) =>
         new(
             new PassReviewService(),
+            new StubConversationService(),
             adapter,
             new StubDocumentSource(),
             new StubConfigResolver(dryRun),
             messaging,
             _store,
             NullLogger<DorWorkflowOrchestrator>.Instance);
+
+    private sealed class StubConversationService : IDorConversationService
+    {
+        public Task<ReplyEvaluation> EvaluateReplyAsync(
+            IReadOnlyList<string> outstandingGaps, string humanReply, int iteration, DorAiConfig ai, CancellationToken ct = default) =>
+            Task.FromResult(new ReplyEvaluation(true, Array.Empty<string>(), new Dictionary<string, string>(), "resolved"));
+    }
 
     private async Task<DorWorkflowInstance> LoadInstanceAsync(string ticketKey)
     {

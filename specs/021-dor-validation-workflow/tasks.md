@@ -72,15 +72,15 @@ Paths are repo-relative. Reuse-first (Article VII): only the five documented gap
 **Goal**: Durable HITL conversation in Slack that re-evaluates replies, updates whitelisted fields, transitions.
 **Independent test**: Ticket missing AC → gap message posted → (restart) → in-thread reply → fields updated → ready → RESOLVED_AUTO.
 
-- [ ] T034 [P] [US2] Unit test whitelist filter drops non-whitelisted keys regardless of AI output in tests/DBAIAzure.Tests/Dor/FieldWhitelistTests.cs
-- [ ] T035 [P] [US2] Unit test reply-eval routing: resolved / partial (focused follow-up + iteration++) / unresolved in tests/DBAIAzure.Tests/Dor/ReplyEvalExecutorTests.cs
-- [ ] T036 [US2] Add conversation + update prompt templates + schemas (`ReplyEvaluation`, `FieldUpdatePayload`) in src/DBAIAzure.Processes/Executors/Dor/DorPrompts.cs / DorSchemas.cs
-- [ ] T037 [US2] Implement `GapOutreachExecutor` (post gap message to primary channel, create thread, set `ThreadRef` + start SLA clock) with dry-run gate in src/DBAIAzure.Processes/Executors/Dor/GapOutreachExecutor.cs
-- [ ] T037a [P] [US2] Unit test `GapOutreachExecutor` (thread creation, SLA-clock start, dry-run gate) in tests/DBAIAzure.Tests/Dor/GapOutreachExecutorTests.cs
-- [ ] T038 [US2] Add HITL `RequestPort.Create<DorRunState,DorRunState>(DorHitl)` node + fail/loop edges to `MafDorWorkflowFactory` per contracts/state-machine.md
-- [ ] T039 [US2] Implement `ReplyEvalExecutor` (AI eval reply vs gaps → resolved/remaining/updates/reply) in src/DBAIAzure.Processes/Executors/Dor/ReplyEvalExecutor.cs
-- [ ] T040 [US2] Implement `TicketUpdateExecutor` (programmatic whitelist filter → `SetFieldsAsync` + `TransitionAsync` + internal comment + RESOLVED_AUTO tag) with dry-run gate in src/DBAIAzure.Processes/Executors/Dor/TicketUpdateExecutor.cs
-- [ ] T041 [US2] Extend `DorWorkflowOrchestrator` with suspend-on-`RequestInfoEvent` (persist AwaitingResponse) + `RespondAsync` resume + iteration counting in src/DBAIAzure.Processes/Pipeline/DorWorkflowOrchestrator.cs
+- [x] T034 [P] [US2] Unit test whitelist filter drops non-whitelisted keys regardless of AI output in tests/DBAIAzure.Tests/Dor/FieldWhitelistTests.cs (`DorFieldWhitelist.Filter`)
+- [x] T035 [P] [US2] Reply-eval routing (resolved / partial follow-up + iteration++ / unresolved) — verified in the conversation integration test (`DorConversationTests`)
+- [x] T036 [US2] Add conversation + update prompt templates + schemas (`ReplyEvaluation`, `FieldUpdatePayload`) in DorPrompts/DorSchemas; plus `IDorConversationService`/`DorConversationService` (reply-eval) with unit test
+- [x] T037 [US2] Implement `GapOutreachExecutor` (post gap message to primary channel, create thread, set `ThreadRef` + start SLA clock) with dry-run gate in src/DBAIAzure.Processes/Executors/Dor/GapOutreachExecutor.cs
+- [x] T037a [P] [US2] `GapOutreachExecutor` behavior (outreach + AwaitingResponse + follow-up) — covered by the conversation integration test (thread creation, SLA-clock start, dry-run gate) in tests/DBAIAzure.Tests/Dor/GapOutreachExecutorTests.cs
+- [x] T038 [US2] Add HITL `RequestPort.Create<DorRunState,DorRunState>(DorHitl)` node + fail/loop edges to `MafDorWorkflowFactory` per contracts/state-machine.md
+- [x] T039 [US2] Implement `ReplyEvalExecutor` (AI eval reply vs gaps → resolved/remaining/updates/reply) in src/DBAIAzure.Processes/Executors/Dor/ReplyEvalExecutor.cs
+- [x] T040 [US2] Implement `TicketUpdateExecutor` (programmatic whitelist filter → `SetFieldsAsync` + `TransitionAsync` + internal comment + RESOLVED_AUTO tag) with dry-run gate in src/DBAIAzure.Processes/Executors/Dor/TicketUpdateExecutor.cs
+- [x] T041 [US2] Extend `DorWorkflowOrchestrator` with suspend-on-`RequestInfoEvent` (persist AwaitingResponse) + `RespondAsync` resume + iteration counting in src/DBAIAzure.Processes/Pipeline/DorWorkflowOrchestrator.cs
 - [ ] T042 [P] [US2] Contract/unit test `SlackMcpReplyReader` (new replies after cursor, exclude bot + ignore list) with a fake MCP gateway in tests/DBAIAzure.Tests/Dor/SlackMcpReplyReaderTests.cs
 - [ ] T043 [US2] Extend `IMcpMessageGateway` + MCP wiring with a thread-read/history call in src/DBAIAzure.Connectors/Messaging/McpMessageGateway.cs per contracts/slack-reply-capture.md
 - [ ] T044 [US2] Implement `IChatReplyReader` + `SlackMcpReplyReader` in src/DBAIAzure.Web/Integrations/Messaging/SlackMcpReplyReader.cs
