@@ -321,6 +321,10 @@ else
                 }
             </div>
         }
+
+        <!-- DoR Validation Workflow (spec-021 US6): a dedicated card, rendered outside the connector loop
+             because DorWorkflow is intentionally excluded from GetAllAsync. Purely additive. -->
+        <DorWorkflowCard />
     </div>
 }
 

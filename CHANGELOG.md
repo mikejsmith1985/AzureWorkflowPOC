@@ -30,8 +30,12 @@ append-only audit logs — a global dry-run flag gates every external write.
   `ConnectorType.DorWorkflow`, resolved per run (change without restart), secrets by reference; health-checked
   via `DorWorkflowTester` and seedable from the vault.
 - **Builder default**: the DoR workflow graph replaces the "Support Request Flow" example for new workflows.
+- **In-UI config card**: the DoR workflow is now configured from the Connector Settings page — a dedicated
+  card (`DorWorkflowCard`) with a raw-markdown DoR-document editor (inline or URL), a dry-run safety toggle
+  defaulted on, an editable JSON block for the remaining namespaces with a starter template, and write-only
+  encrypted secret fields. Health-checked in place via `DorWorkflowTester`; no deploy-time seed edit required.
 - Reuse-first (Article VII): only five documented gaps are net-new (Jira read/transition, Slack thread-read,
-  DoR-document source, durable SLA/escalation, the DoR config namespace). Remaining: the in-UI config card, the
+  DoR-document source, durable SLA/escalation, the DoR config namespace). Remaining: the
   live Slack `conversations.replies` read tool, and richer builder node panels.
 
 ### Added — Work Tracking System config bridge (spec-020)

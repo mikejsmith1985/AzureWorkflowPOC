@@ -1,0 +1,280 @@
+@* Configuration card for the DoR Validation Workflow (spec-021 US6). Lets an operator load their DoR document
+   and the workflow's settings from the UI, replacing deploy-time seed-only configuration. Self-contained and
+   additive — it does not participate in the shared connector loop, so the other cards and the Workflow Builder
+   are untouched. *@
+@inject IConnectorConfigRepository ConfigRepository
+@inject IConnectorHealthChecker HealthChecker
+@inject ILogger<DorWorkflowCard> Logger
+@using DBAIAzure.Core.Interfaces
+@using DBAIAzure.Core.Models
+@using DBAIAzure.Web.Services.Dor
+
+<div class="rounded bg-surface border border-line p-5" data-testid="dor-workflow-card">
+    <!-- ── Header ──────────────────────────────────────────────── -->
+    <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+            <span class="text-sm font-semibold text-fg">DoR Validation Workflow</span>
+            @if (_isConfigured)
+            {
+                <span class="text-xs px-2 py-0.5 rounded-full bg-accent-subtle text-accent">Configured</span>
+            }
+            else
+            {
+                <span class="text-xs px-2 py-0.5 rounded-full bg-warn-subtle text-warn">Not configured</span>
+            }
+            @if (_testResult is not null)
+            {
+                var badgeClass = _testResult.IsSuccess ? "bg-ok-subtle text-ok" : "bg-err-subtle text-err";
+                <span class="text-xs px-2 py-0.5 rounded-full @badgeClass">
+                    @(_testResult.IsSuccess ? "Healthy" : "Unhealthy")
+                </span>
+            }
+        </div>
+        <div class="flex gap-2">
+            <button @onclick="ToggleEdit"
+                    class="px-3 py-1.5 text-xs rounded bg-raised hover:bg-surface text-fg transition-colors">
+                @(_isEditing ? "Cancel" : "Edit")
+            </button>
+            <button @onclick="RunHealthCheck"
+                    disabled="@(!_isConfigured || _isChecking)"
+                    class="px-3 py-1.5 text-xs rounded bg-accent hover:opacity-90 disabled:opacity-40
+                           disabled:cursor-not-allowed text-onaccent transition-colors">
+                @(_isChecking ? "Checking…" : "Check Health")
+            </button>
+        </div>
+    </div>
+
+    <!-- ── Last health-check message ──────────────────────────── -->
+    @if (_testResult is { Message: { Length: > 0 } healthMessage })
+    {
+        <p class="text-xs text-muted mb-3">@healthMessage · @FormatAge(_testResult.TestedAt)</p>
+    }
+    else
+    {
+        <p class="text-xs text-muted mb-3">
+            Load your Definition-of-Ready document and point the workflow at your Jira project, channels, and SLAs.
+        </p>
+    }
+
+    <!-- ── Edit form ──────────────────────────────────────────── -->
+    @if (_isEditing)
+    {
+        <div class="mt-3 space-y-3 border-t border-line pt-3">
+
+            <!-- DoR document — the reason this card exists: paste raw markdown, no JSON escaping. -->
+            <div>
+                <label class="text-xs text-muted mb-1 flex items-center gap-1.5">DoR Document Source
+                    <InfoTip Content="Where the Definition-of-Ready document comes from. 'Inline' stores the document with the config; 'URL' fetches a published page." /></label>
+                <select @bind="_form.SourceType" class="@InputClass" data-testid="dor-source-type">
+                    <option value="inline">Inline (paste the document)</option>
+                    <option value="url">URL (fetch a published document)</option>
+                </select>
+            </div>
+
+            @if (_form.SourceType == "url")
+            {
+                <div>
+                    <label class="block text-xs text-muted mb-1">DoR Document URL</label>
+                    <input type="url" @bind="_form.SourceUri"
+                           placeholder="https://your-wiki/definition-of-ready" class="@InputClass" />
+                </div>
+                <div>
+                    <label class="text-xs text-muted mb-1 flex items-center gap-1.5">Cache (minutes)
+                        <InfoTip Content="How long a fetched document is reused before re-fetching. 0 means always fetch the latest." /></label>
+                    <input type="number" min="0" @bind="_form.CacheTtlMinutes" class="@InputClass" />
+                </div>
+            }
+            else
+            {
+                <div>
+                    <label class="block text-xs text-muted mb-1">DoR Document (markdown)</label>
+                    <textarea @bind="_form.InlineMarkdown" rows="10" data-testid="dor-inline-markdown"
+                              placeholder="# Definition of Ready&#10;1. Summary is clear&#10;2. Acceptance criteria present…"
+                              class="@TextareaClass"></textarea>
+                </div>
+            }
+
+            <!-- Dry run — a safety gate so a new config never writes to live Jira until deliberately enabled. -->
+            <label class="flex items-center gap-2 text-xs text-fg">
+                <input type="checkbox" @bind="_form.DryRun" data-testid="dor-dry-run" />
+                Dry run — log intended Jira writes and messages without performing them
+            </label>
+
+            <!-- The remaining namespaces as editable snake_case JSON, kept whole so nothing is lost. -->
+            <div>
+                <div class="flex items-center justify-between mb-1">
+                    <label class="text-xs text-muted flex items-center gap-1.5">Workflow configuration (Jira, AI, channels, SLA, audit)
+                        <InfoTip Content="The rest of the workflow settings as JSON. Edit project keys, ready transition id, channels, and SLA here. Secrets go in the fields below, never here." /></label>
+                    <button type="button" @onclick="LoadStarterTemplate"
+                            class="text-xs px-2 py-0.5 rounded bg-raised hover:bg-surface text-fg transition-colors">
+                        Load starter template
+                    </button>
+                </div>
+                <textarea @bind="_form.OtherConfigJson" rows="14" data-testid="dor-other-config"
+                          class="@TextareaClass font-mono"></textarea>
+            </div>
+
+            <!-- Secrets — write-only; a blank field keeps the stored value (Article IX). -->
+            <div class="border-t border-line pt-3 space-y-3">
+                <p class="text-[11px] text-muted">Secrets are stored encrypted and never displayed. Leave any field blank to keep the existing value.</p>
+                <div>
+                    <label class="block text-xs text-muted mb-1">Jira API Token</label>
+                    <input type="password" @bind="_draftJiraApiToken" autocomplete="new-password"
+                           placeholder="Leave blank to keep existing" class="@InputClass" />
+                </div>
+                <div>
+                    <label class="block text-xs text-muted mb-1">Jira Webhook Secret (HMAC)</label>
+                    <input type="password" @bind="_draftJiraWebhookSecret" autocomplete="new-password"
+                           placeholder="Leave blank to keep existing" class="@InputClass" />
+                </div>
+                <div>
+                    <label class="block text-xs text-muted mb-1">Slack Token</label>
+                    <input type="password" @bind="_draftSlackToken" autocomplete="new-password"
+                           placeholder="Leave blank to keep existing" class="@InputClass" />
+                </div>
+                <div>
+                    <label class="block text-xs text-muted mb-1">AI API Key</label>
+                    <input type="password" @bind="_draftAiApiKey" autocomplete="new-password"
+                           placeholder="Leave blank to keep existing" class="@InputClass" />
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_saveError))
+            {
+                <p class="text-xs text-err" data-testid="dor-save-error">@_saveError</p>
+            }
+
+            <div class="flex gap-2 pt-1">
+                <button @onclick="Save" disabled="@_isSaving"
+                        class="px-4 py-1.5 text-xs rounded bg-accent hover:opacity-90 disabled:opacity-40 text-onaccent transition-colors">
+                    @(_isSaving ? "Saving…" : "Save")
+                </button>
+                <button @onclick="ToggleEdit"
+                        class="px-3 py-1.5 text-xs rounded bg-raised hover:bg-surface text-fg transition-colors">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private const string InputClass =
+        "w-full bg-raised border border-line rounded px-3 py-2 text-sm text-fg " +
+        "placeholder-muted focus:outline-none focus:border-accent";
+    private const string TextareaClass =
+        "w-full bg-raised border border-line rounded px-3 py-2 text-sm text-fg " +
+        "placeholder-muted focus:outline-none focus:border-accent";
+
+    private bool _isConfigured;
+    private bool _isEditing;
+    private bool _isSaving;
+    private bool _isChecking;
+    private string _saveError = string.Empty;
+    private string? _storedConfigJson;
+    private ConnectorTestResult? _testResult;
+
+    private DorConfigCardForm _form = new();
+
+    // Secret drafts — never pre-populated from storage (Article IX); blank means "keep existing".
+    private string _draftJiraApiToken = string.Empty;
+    private string _draftJiraWebhookSecret = string.Empty;
+    private string _draftSlackToken = string.Empty;
+    private string _draftAiApiKey = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var config = await ConfigRepository.GetAsync(ConnectorType.DorWorkflow);
+        _isConfigured = config?.IsConfigured == true;
+        _storedConfigJson = config?.NonSecretConfig;
+        _testResult = config?.LastTestResult;
+    }
+
+    /// <summary>Opens or closes the edit form. Opening loads the stored config (or a starter when unconfigured).</summary>
+    private void ToggleEdit()
+    {
+        _isEditing = !_isEditing;
+        if (!_isEditing)
+            return;
+
+        _form = _isConfigured
+            ? DorConfigCardForm.Parse(_storedConfigJson)
+            : DorConfigCardForm.CreateStarter();
+        ClearSecretDrafts();
+        _saveError = string.Empty;
+    }
+
+    /// <summary>Replaces the current form with the ready-to-edit starter template.</summary>
+    private void LoadStarterTemplate() => _form = DorConfigCardForm.CreateStarter();
+
+    /// <summary>Serializes the form to the six-namespace blob + encrypted secrets and persists them.</summary>
+    private async Task Save()
+    {
+        _isSaving = true;
+        _saveError = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            var nonSecretJson = _form.ToConfigJson();
+            var secretJson = DorConfigCardForm.BuildSecretsJson(
+                _draftJiraApiToken, _draftJiraWebhookSecret, _draftSlackToken, _draftAiApiKey);
+
+            await ConfigRepository.SaveAsync(ConnectorType.DorWorkflow, nonSecretJson, secretJson);
+
+            _isConfigured = true;
+            _storedConfigJson = nonSecretJson;
+            _isEditing = false;
+            _testResult = null; // a save invalidates the prior health result.
+        }
+        catch (FormatException ex)
+        {
+            _saveError = ex.Message; // actionable JSON error from ToConfigJson.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to save DoR workflow configuration");
+            _saveError = $"Save failed: {ex.Message}";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    /// <summary>Runs the DoR-specific health check (config valid + DoR document loads).</summary>
+    private async Task RunHealthCheck()
+    {
+        _isChecking = true;
+        StateHasChanged();
+        try
+        {
+            _testResult = await HealthChecker.TestAsync(ConnectorType.DorWorkflow);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "DoR workflow health check threw");
+        }
+        finally
+        {
+            _isChecking = false;
+        }
+    }
+
+    private void ClearSecretDrafts()
+    {
+        _draftJiraApiToken = string.Empty;
+        _draftJiraWebhookSecret = string.Empty;
+        _draftSlackToken = string.Empty;
+        _draftAiApiKey = string.Empty;
+    }
+
+    private static string FormatAge(DateTimeOffset at)
+    {
+        var age = DateTimeOffset.UtcNow - at;
+        if (age.TotalMinutes < 1) return "just now";
+        if (age.TotalHours < 1) return $"{(int)age.TotalMinutes}m ago";
+        if (age.TotalDays < 1) return $"{(int)age.TotalHours}h ago";
+        return $"{(int)age.TotalDays}d ago";
+    }
+}
