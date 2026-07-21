@@ -58,6 +58,23 @@
                      ReadinessBlockingSummary="@ReadinessBlockingSummary"
                      IsRunning="@(_activeRunId is not null)" />
 
+    @* Config bridge: the DoR workflow is config-driven, so point the operator at where its behaviour is set
+       (statuses, DoR document, channels, SLAs) instead of leaving that a mystery on another tab (spec-021). *@
+    @if (IsDorWorkflow)
+    {
+        <div class="bg-accent-subtle border-b border-line px-4 py-2 flex items-center justify-between gap-3 text-sm"
+             data-testid="dor-config-bridge">
+            <span class="text-fg">
+                ⚙ This workflow is <span class="font-semibold">config-driven</span> — its DoR document, Jira project,
+                channels, and SLAs are set in <span class="font-semibold">Configuration → DoR Validation Workflow</span>.
+            </span>
+            <a href="/settings/connectors"
+               class="px-3 py-1 rounded bg-accent text-onaccent hover:opacity-90 transition-opacity whitespace-nowrap">
+                Open configuration →
+            </a>
+        </div>
+    }
+
     @* ── Body row ──────────────────────────────────────────────────────────────── *@
     <div class="flex flex-1 overflow-hidden">
 
@@ -242,6 +259,11 @@
 
     // Constant owner id used throughout the demo build (single-tenant MVP).
     private const string DemoOwnerId = "demo";
+
+    /// <summary>True when the loaded workflow is the DoR Validation Workflow (or a name-unique variant), so the
+    /// canvas shows the bridge to its configuration. Config-driven behaviour lives in the DoR connector, not here.</summary>
+    private bool IsDorWorkflow =>
+        _workflow?.Name?.StartsWith(DBAIAzure.Web.Services.DefaultWorkflowProvider.DefaultName, StringComparison.Ordinal) ?? false;
 
     protected override async Task OnInitializedAsync()
     {

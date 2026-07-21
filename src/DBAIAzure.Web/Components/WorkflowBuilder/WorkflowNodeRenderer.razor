@@ -2,7 +2,7 @@
    Z.Blazor.Diagrams passes the WorkflowNodeModel as a CascadingParameter.
    Warm amber = AgenticReason; cool blue/teal = function nodes; purple = HumanApproval. *@
 
-<div class="workflow-node @GetBorderClass() @GetBackgroundClass() @GetExecutionRingClass() rounded-lg border-2 shadow-lg min-w-[140px] select-none relative transition-shadow"
+<div class="workflow-node @GetBorderClass() @GetBackgroundClass() @GetExecutionRingClass() rounded-lg border-2 shadow-lg w-[240px] select-none relative transition-shadow"
      @ondblclick="OnDoubleClick"
      @oncontextmenu:preventDefault
      @oncontextmenu="OnContextMenu"
@@ -49,12 +49,12 @@
     }
 
     @* Node type icon + label header (label span double-click enters inline edit; stopPropagation prevents config panel open) *@
-    <div class="@GetHeaderClass() rounded-t-md px-3 py-2 flex items-center gap-2">
-        <span class="text-lg" role="img" aria-label="@Node.WorkflowNode.NodeType.ToString()">@GetIcon()</span>
-        <div class="flex flex-col min-w-0" @ondblclick:stopPropagation="true">
+    <div class="@GetHeaderClass() rounded-t-md px-3 py-2 flex items-start gap-2">
+        <span class="text-lg leading-none mt-0.5" role="img" aria-label="@Node.WorkflowNode.NodeType.ToString()">@GetIcon()</span>
+        <div class="flex flex-col min-w-0 flex-1" @ondblclick:stopPropagation="true">
             @if (_isEditingLabel)
             {
-                <input class="node-label-input text-white text-sm font-semibold bg-transparent border-b border-white/60 outline-none max-w-[110px] min-w-0"
+                <input class="node-label-input text-white text-sm font-semibold bg-transparent border-b border-white/60 outline-none w-full min-w-0"
                        value="@_labelBuffer"
                        @oninput="OnLabelInput"
                        @onkeydown="OnLabelKeyDown"
@@ -65,16 +65,15 @@
             }
             else
             {
-                <span class="node-label-text text-white text-sm font-semibold truncate max-w-[110px]"
+                @* Full title — wraps instead of clipping so the whole node name is always readable. *@
+                <span class="node-label-text text-white text-sm font-semibold leading-tight break-words"
                       data-testid="node-label"
                       @ondblclick="StartLabelEdit"
                       tabindex="0"
                       aria-label="@DisplayLabel() — double-click to rename">@DisplayLabel()</span>
             }
-            @if (Node.WorkflowNode.NodeType == WorkflowNodeType.Trigger)
-            {
-                <span class="text-xs text-emerald-200 mt-0.5">Start here</span>
-            }
+            @* Node-kind label so the step's role is obvious at a glance. *@
+            <span class="text-[10px] uppercase tracking-wide text-white/70 mt-0.5">@GetKindLabel()</span>
         </div>
     </div>
 
@@ -88,7 +87,8 @@
         }
         @if (!string.IsNullOrWhiteSpace(Node.WorkflowNode.GoalPrompt))
         {
-            <span class="text-xs text-gray-300 line-clamp-2 italic opacity-75">@TruncateGoal()</span>
+            @* What this step does — the goal, shown up to three lines so its intent is clear. *@
+            <span class="text-xs text-gray-300 line-clamp-3 leading-snug">@TruncateGoal()</span>
         }
         @if (!string.IsNullOrWhiteSpace(Node.WorkflowNode.OutputLabel))
         {
@@ -253,10 +253,24 @@
 
     private string TruncateGoal()
     {
-        const int maxLen = 60;
+        const int maxLen = 160;
         var goal = Node.WorkflowNode.GoalPrompt ?? string.Empty;
         return goal.Length > maxLen ? goal[..maxLen] + "…" : goal;
     }
+
+    /// <summary>A short, plain-language label for the node's kind, shown under the title so a reader knows
+    /// what role the step plays without opening it.</summary>
+    private string GetKindLabel() => Node.WorkflowNode.NodeType switch
+    {
+        WorkflowNodeType.Trigger           => "Trigger · starts the workflow",
+        WorkflowNodeType.AgenticReason     => "AI step",
+        WorkflowNodeType.HumanApproval     => "Human step",
+        WorkflowNodeType.FunctionRoute     => "Decision · routes the flow",
+        WorkflowNodeType.FunctionTransform => "Transform",
+        WorkflowNodeType.FunctionNotify    => "Notification",
+        WorkflowNodeType.FunctionData      => "Data",
+        _                                  => "Step",
+    };
 
     private string GetExecutionRingClass() => ExecutionState?.Status switch
     {
