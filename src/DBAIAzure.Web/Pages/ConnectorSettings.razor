@@ -289,6 +289,20 @@ else
                                        autocomplete="new-password" class="@InputClass" />
                             </div>
 
+                            <!-- ── Reply capture (DoR conversation loop) ────────────────── -->
+                            <div>
+                                <label class="text-xs text-muted mb-1 flex items-center gap-1.5">MCP Reply Tool <span class="text-muted">(optional)</span>
+                                    <InfoTip Content="Name of the MCP tool that reads thread replies (Slack: conversations.replies or slack_read_thread). Set this to let the DoR workflow capture human replies. Leave blank to disable reply reading." /></label>
+                                <input type="text" @bind="entry.DraftMcpReplyToolName"
+                                       placeholder="e.g. conversations.replies" class="@InputClass" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-muted mb-1">MCP Reply Argument Template <span class="text-muted">(optional)</span></label>
+                                <input type="text" @bind="entry.DraftMcpReplyArgTemplate"
+                                       placeholder='Blank uses a Slack default ({"channel_id":"{{channel}}","thread_ts":"{{thread}}"})'
+                                       class="@InputClass" />
+                            </div>
+
                             <!-- ── Webhook fallback ─────────────────────────────────────── -->
                             <div>
                                 <label class="text-xs text-muted mb-1 flex items-center gap-1.5">Webhook URL <span class="text-muted">(fallback)</span>
@@ -568,6 +582,9 @@ else
         public string DraftMcpArgTemplate { get; set; } = string.Empty;
         public string DraftTarget        { get; set; } = string.Empty;
         public string DraftMcpAuthToken  { get; set; } = string.Empty;
+        // Messaging reply-capture (DoR conversation loop) — the thread-read tool + its argument template.
+        public string DraftMcpReplyToolName  { get; set; } = string.Empty;
+        public string DraftMcpReplyArgTemplate { get; set; } = string.Empty;
 
         // LLM-only: live model list state
         public List<string> AvailableModels  { get; set; } = [];
@@ -625,6 +642,7 @@ else
             DraftUrl = DraftUsername = string.Empty;
             DraftProvider = DraftEmail = DraftProjectKey = string.Empty;
             DraftMcpServerUrl = DraftMcpToolName = DraftMcpArgTemplate = DraftTarget = string.Empty;
+            DraftMcpReplyToolName = DraftMcpReplyArgTemplate = string.Empty;
             AvailableModels = [];
 
             // Messaging defaults to the Teams platform when no config is stored yet.
@@ -671,6 +689,8 @@ else
                     DraftMcpToolName    = Str(root, "mcpToolName");
                     DraftMcpArgTemplate = Str(root, "mcpArgumentTemplate");
                     DraftTarget         = Str(root, "target");
+                    DraftMcpReplyToolName  = Str(root, "mcpReplyToolName");
+                    DraftMcpReplyArgTemplate = Str(root, "mcpReplyArgumentTemplate");
                 }
 
                 static string Str(JsonElement el, string key) =>
@@ -703,6 +723,8 @@ else
                         mcpToolName         = NullIfBlank(DraftMcpToolName),
                         mcpArgumentTemplate = NullIfBlank(DraftMcpArgTemplate),
                         target              = NullIfBlank(DraftTarget),
+                        mcpReplyToolName    = NullIfBlank(DraftMcpReplyToolName),
+                        mcpReplyArgumentTemplate = NullIfBlank(DraftMcpReplyArgTemplate),
                     }),
                 _ => null,
             };

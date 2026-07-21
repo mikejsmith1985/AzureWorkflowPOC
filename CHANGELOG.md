@@ -34,9 +34,14 @@ append-only audit logs — a global dry-run flag gates every external write.
   card (`DorWorkflowCard`) with a raw-markdown DoR-document editor (inline or URL), a dry-run safety toggle
   defaulted on, an editable JSON block for the remaining namespaces with a starter template, and write-only
   encrypted secret fields. Health-checked in place via `DorWorkflowTester`; no deploy-time seed edit required.
-- Reuse-first (Article VII): only five documented gaps are net-new (Jira read/transition, Slack thread-read,
-  DoR-document source, durable SLA/escalation, the DoR config namespace). Remaining: the
-  live Slack `conversations.replies` read tool, and richer builder node panels.
+- **Live Slack reply capture**: `SlackMcpReplyReader` now performs a real MCP thread-read — `IMcpMessageGateway`
+  gained a `ReadAsync` call, and the reader resolves the Messaging connector (server URL + token, hot-reloaded)
+  and parses a Slack `conversations.replies` response into human replies (skips bot/ignored authors, honours the
+  exclusive cursor, oldest-first). The read tool + argument template are operator-configurable on the Messaging
+  card (defaulting to Slack's shape), so the DoR reply pump feeds real human replies into paused conversations.
+- **Seeder secret fix**: `DemoConnectorSeeder` now writes the DoR workflow's seeded secrets with snake_case keys
+  (`jira_api_token`…) matching the resolver — previously camelCase keys resolved to null on the seed path.
+- Reuse-first (Article VII): the documented gaps are now closed; remaining polish is richer builder node panels.
 
 ### Added — Work Tracking System config bridge (spec-020)
 
