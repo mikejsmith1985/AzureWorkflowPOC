@@ -41,9 +41,14 @@ public sealed class ConnectorSettingsPanelTests : TestContext
         var cut = RenderComponent<ConnectorSettings>();
         await cut.InvokeAsync(() => Task.CompletedTask);
 
-        // Three Edit buttons — one per connector card. Select by text rather than the colour class,
-        // which is now a semantic token after the spec-014 restyle.
-        var editButtons = cut.FindAll("button").Where(b => b.TextContent.Trim() == "Edit").ToList();
+        // The DoR workflow card (spec-021 US6) is always rendered, separate from the connector loop.
+        Assert.Single(cut.FindAll("[data-testid='dor-workflow-card']"));
+
+        // Three Edit buttons for the connector loop — one per connector card — excluding the DoR card's own
+        // Edit button. Select by text rather than the colour class, which is now a semantic token (spec-014).
+        var editButtons = cut.FindAll("button")
+            .Where(b => b.TextContent.Trim() == "Edit" && b.Closest("[data-testid='dor-workflow-card']") is null)
+            .ToList();
         Assert.Equal(3, editButtons.Count);
     }
 
