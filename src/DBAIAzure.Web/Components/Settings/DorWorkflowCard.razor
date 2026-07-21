@@ -114,27 +114,16 @@
                           class="@TextareaClass font-mono"></textarea>
             </div>
 
-            <!-- Secrets — write-only; a blank field keeps the stored value (Article IX). -->
+            <!-- Secret — only the one the DoR workflow actually uses. Jira/Slack/AI credentials are reused from
+                 the Work-Tracker, Messaging, and LLM connectors above, so they are not re-collected here. -->
             <div class="border-t border-line pt-3 space-y-3">
-                <p class="text-[11px] text-muted">Secrets are stored encrypted and never displayed. Leave any field blank to keep the existing value.</p>
-                <div>
-                    <label class="block text-xs text-muted mb-1">Jira API Token</label>
-                    <input type="password" @bind="_draftJiraApiToken" autocomplete="new-password"
-                           placeholder="Leave blank to keep existing" class="@InputClass" />
-                </div>
+                <p class="text-[11px] text-muted">
+                    Jira, Slack, and AI credentials come from the connectors above — they are not re-entered here.
+                    Only the Jira <em>webhook</em> secret is DoR-specific. Stored encrypted; blank keeps the existing value.
+                </p>
                 <div>
                     <label class="block text-xs text-muted mb-1">Jira Webhook Secret (HMAC)</label>
                     <input type="password" @bind="_draftJiraWebhookSecret" autocomplete="new-password"
-                           placeholder="Leave blank to keep existing" class="@InputClass" />
-                </div>
-                <div>
-                    <label class="block text-xs text-muted mb-1">Slack Token</label>
-                    <input type="password" @bind="_draftSlackToken" autocomplete="new-password"
-                           placeholder="Leave blank to keep existing" class="@InputClass" />
-                </div>
-                <div>
-                    <label class="block text-xs text-muted mb-1">AI API Key</label>
-                    <input type="password" @bind="_draftAiApiKey" autocomplete="new-password"
                            placeholder="Leave blank to keep existing" class="@InputClass" />
                 </div>
             </div>
@@ -176,11 +165,8 @@
 
     private DorConfigCardForm _form = new();
 
-    // Secret drafts — never pre-populated from storage (Article IX); blank means "keep existing".
-    private string _draftJiraApiToken = string.Empty;
+    // The one DoR-specific secret — never pre-populated from storage (Article IX); blank means "keep existing".
     private string _draftJiraWebhookSecret = string.Empty;
-    private string _draftSlackToken = string.Empty;
-    private string _draftAiApiKey = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -217,8 +203,7 @@
         try
         {
             var nonSecretJson = _form.ToConfigJson();
-            var secretJson = DorConfigCardForm.BuildSecretsJson(
-                _draftJiraApiToken, _draftJiraWebhookSecret, _draftSlackToken, _draftAiApiKey);
+            var secretJson = DorConfigCardForm.BuildSecretsJson(_draftJiraWebhookSecret);
 
             await ConfigRepository.SaveAsync(ConnectorType.DorWorkflow, nonSecretJson, secretJson);
 
@@ -261,13 +246,7 @@
         }
     }
 
-    private void ClearSecretDrafts()
-    {
-        _draftJiraApiToken = string.Empty;
-        _draftJiraWebhookSecret = string.Empty;
-        _draftSlackToken = string.Empty;
-        _draftAiApiKey = string.Empty;
-    }
+    private void ClearSecretDrafts() => _draftJiraWebhookSecret = string.Empty;
 
     private static string FormatAge(DateTimeOffset at)
     {
