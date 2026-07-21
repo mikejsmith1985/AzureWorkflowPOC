@@ -20,6 +20,10 @@ Completes the builder so the DoR workflow is what you see, read, and configure:
 - **Config bridge**: when the DoR workflow is open, a banner links straight to **Configuration → DoR Validation
   Workflow**, so its config-driven behaviour (DoR document, Jira project, channels, SLAs) isn't a mystery on
   another tab.
+- **No duplicated config**: the DoR card no longer re-asks for what the connectors already hold. The workflow
+  reuses the Work-Tracker, LLM, and Messaging connectors at runtime, so the dead Jira/Slack/AI secret fields and
+  the `base_url`/`account_email`/`ai.provider`/`ai.model` JSON keys are gone — only the DoR-specific Jira webhook
+  secret is collected.
 
 ### Added — Intelligent DoR Validation Workflow (spec-021)
 

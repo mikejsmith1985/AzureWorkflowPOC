@@ -122,23 +122,23 @@ public sealed class DorConfigCardFormTests
     }
 
     [Fact]
-    public void BuildSecretsJson_OnlyIncludesEnteredSecrets_AsSnakeCase()
+    public void BuildSecretsJson_WritesOnlyWebhookSecret_AsSnakeCase()
     {
-        var json = DorConfigCardForm.BuildSecretsJson(
-            jiraApiToken: "tok", jiraWebhookSecret: null, slackToken: "  ", aiApiKey: "key");
+        var json = DorConfigCardForm.BuildSecretsJson("hook-sec");
 
         Assert.NotNull(json);
         var secrets = JsonSerializer.Deserialize<DorWorkflowSecrets>(json!, ResolverOptions)!;
-        Assert.Equal("tok", secrets.JiraApiToken);
-        Assert.Equal("key", secrets.AiApiKey);
-        // Blank / whitespace fields are omitted so an existing stored secret is preserved (Article IX).
-        Assert.Null(secrets.JiraWebhookSecret);
+        Assert.Equal("hook-sec", secrets.JiraWebhookSecret);
+        // The workflow reuses the Work-Tracker / Messaging / LLM connectors, so these are never collected here.
+        Assert.Null(secrets.JiraApiToken);
         Assert.Null(secrets.SlackToken);
+        Assert.Null(secrets.AiApiKey);
+        Assert.Contains("jira_webhook_secret", json);
     }
 
     [Fact]
-    public void BuildSecretsJson_AllBlank_ReturnsNull()
+    public void BuildSecretsJson_Blank_ReturnsNull()
     {
-        Assert.Null(DorConfigCardForm.BuildSecretsJson(null, "", "   ", null));
+        Assert.Null(DorConfigCardForm.BuildSecretsJson("   "));
     }
 }

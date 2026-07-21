@@ -146,25 +146,16 @@ public sealed class DorConfigCardForm
     }
 
     /// <summary>
-    /// Builds the encrypted-secret blob from whichever secret fields the operator entered, using the snake_case
-    /// keys the resolver expects. Returns null when every field is blank so an existing secret is preserved
-    /// (Article IX — a blank field never clears a stored secret).
+    /// Builds the encrypted-secret blob for the one secret the DoR workflow actually consumes: the Jira webhook
+    /// HMAC secret (used to validate inbound Jira webhooks). Jira, Slack, and AI credentials are deliberately NOT
+    /// collected here — the workflow reuses the Work-Tracker, Messaging, and LLM connectors for those. Returns
+    /// null when blank so an existing secret is preserved (Article IX — a blank field never clears a stored one).
     /// </summary>
-    public static string? BuildSecretsJson(
-        string? jiraApiToken, string? jiraWebhookSecret, string? slackToken, string? aiApiKey)
+    public static string? BuildSecretsJson(string? jiraWebhookSecret)
     {
-        var secrets = new JsonObject();
-        AddIfPresent(secrets, "jira_api_token", jiraApiToken);
-        AddIfPresent(secrets, "jira_webhook_secret", jiraWebhookSecret);
-        AddIfPresent(secrets, "slack_token", slackToken);
-        AddIfPresent(secrets, "ai_api_key", aiApiKey);
-        return secrets.Count == 0 ? null : secrets.ToJsonString();
-    }
-
-    private static void AddIfPresent(JsonObject secrets, string key, string? value)
-    {
-        if (!string.IsNullOrWhiteSpace(value))
-            secrets[key] = value;
+        if (string.IsNullOrWhiteSpace(jiraWebhookSecret))
+            return null;
+        return new JsonObject { ["jira_webhook_secret"] = jiraWebhookSecret }.ToJsonString();
     }
 
     /// <summary>
@@ -195,12 +186,13 @@ public sealed class DorConfigCardForm
         5. **Dependencies** — any blocking work or external dependency is named.
         """;
 
-    /// <summary>The non-DoR namespaces of the starter config, snake_case, with placeholders the operator edits.</summary>
+    /// <summary>The non-DoR namespaces of the starter config, snake_case, with placeholders the operator edits.
+    /// Jira auth (base URL / email), the AI provider/model, and Slack/AI/Jira credentials are intentionally
+    /// absent — the workflow reuses the Work-Tracker, LLM, and Messaging connectors, so only DoR-specific
+    /// behaviour lives here.</summary>
     public const string StarterOtherJson = """
         {
           "jira": {
-            "base_url": "https://your-org.atlassian.net",
-            "account_email": "bot@your-org.com",
             "project_keys": ["SBRO"],
             "issue_types": ["Story"],
             "watch_fields": ["summary", "description", "acceptance_criteria"],
@@ -211,8 +203,6 @@ public sealed class DorConfigCardForm
             "manual_label": "dor-manual-required"
           },
           "ai": {
-            "provider": "anthropic",
-            "model": "claude-sonnet-5",
             "temperature": 0.1,
             "max_tokens": 2000
           },
