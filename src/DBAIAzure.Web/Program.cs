@@ -81,6 +81,7 @@ builder.Services.AddSingleton<IConnectorConfigRepository, SqliteConnectorConfigR
 // back-office connectors (ServiceNow/AzureDevOps/Messaging) on each cold start. Never seeds the LLM.
 builder.Services.Configure<ConnectorSeedOptions>(builder.Configuration.GetSection(ConnectorSeedOptions.SectionName));
 builder.Services.AddSingleton<DemoConnectorSeeder>();
+builder.Services.AddSingleton<LegacyExampleWorkflowPurger>();
 
 // ── Workflow persistence ────────────────────────────────────────────────────
 builder.Services.AddSingleton<IWorkflowRepository, SqliteWorkflowRepository>();
@@ -687,6 +688,11 @@ using (var scope = app.Services.CreateScope())
     // cold start (research Decision 4); locally it is a no-op when no seed env vars are present.
     var demoSeeder = scope.ServiceProvider.GetRequiredService<DemoConnectorSeeder>();
     await demoSeeder.SeedAsync();
+
+    // Remove the pre-spec-021 "Support Request Flow" example so the DoR workflow is the only starter and the
+    // builder never resumes the removed demo (spec-021).
+    var legacyExamplePurger = scope.ServiceProvider.GetRequiredService<LegacyExampleWorkflowPurger>();
+    await legacyExamplePurger.PurgeAsync();
 }
 
 // ── Field provisioning auto-run on startup (spec-009 T034; spec-018 T025) ──────

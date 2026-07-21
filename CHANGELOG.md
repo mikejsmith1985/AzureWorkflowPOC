@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Workflow Builder UX for the DoR workflow (spec-021)
+
+Completes the builder so the DoR workflow is what you see, read, and configure:
+
+- **Readable node cards**: uniform width, full **wrapping** titles (no more "Summarise R…" clipping), a
+  plain-language node-kind label (Trigger · AI step · Human step · Decision · …), and a 3-line goal so each
+  step's intent is clear at a glance.
+- **The example is gone**: a startup purge removes the pre-spec-021 "Example: Support Request Flow" demo (and its
+  name-unique variants) so the builder no longer resumes it — the DoR workflow is the only starter. New Workflow
+  (Gallery) loads the DoR graph.
+- **Config bridge**: when the DoR workflow is open, a banner links straight to **Configuration → DoR Validation
+  Workflow**, so its config-driven behaviour (DoR document, Jira project, channels, SLAs) isn't a mystery on
+  another tab.
+
 ### Added — Intelligent DoR Validation Workflow (spec-021)
 
 A config-driven Definition-of-Ready validation workflow, now the Workflow Builder's default. On Jira
