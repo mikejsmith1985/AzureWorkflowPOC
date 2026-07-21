@@ -4,6 +4,7 @@
 // the demo works out of the box — while deliberately never seeding the LLM connector, which each
 // visitor configures with their own key (FR-004 / SC-006).
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using DBAIAzure.Core.Configuration;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
@@ -20,6 +21,15 @@ namespace DBAIAzure.Web.Services;
 /// </summary>
 public sealed class DemoConnectorSeeder
 {
+    // The DoR workflow's secrets are read back by DorConfigResolver with a snake_case naming policy, so they
+    // must be written with snake_case keys (jira_api_token, …). Nulls are omitted so a blank seed value never
+    // writes an empty secret. This is why the DoR secret blob uses these options and not the default serializer.
+    private static readonly JsonSerializerOptions DorSecretJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
     private readonly IConnectorConfigRepository _repository;
     private readonly ConnectorSeedOptions _options;
     private readonly ILogger<DemoConnectorSeeder> _logger;
@@ -73,7 +83,7 @@ public sealed class DemoConnectorSeeder
             jiraWebhookSecret = NullIfBlank(seed.JiraWebhookSecret),
             slackToken = NullIfBlank(seed.SlackToken),
             aiApiKey = NullIfBlank(seed.AiApiKey),
-        });
+        }, DorSecretJsonOptions);
 
         await _repository.SaveAsync(ConnectorType.DorWorkflow, seed.ConfigJson, secret, cancellationToken);
         LogSeeded(ConnectorType.DorWorkflow);

@@ -5,6 +5,7 @@ using System.Text.Json;
 using DBAIAzure.Core.Configuration;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Models.DorWorkflow.Config;
 using DBAIAzure.Web.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -110,6 +111,41 @@ public sealed class DemoConnectorSeederTests
         Assert.DoesNotContain(AdoPat, log);
         Assert.DoesNotContain(Webhook, log);
         Assert.DoesNotContain(McpToken, log);
+    }
+
+    // The resolver reads DoR secrets back with a snake_case, case-insensitive policy — the seeder must write
+    // that exact shape, so this test deserializes the seeded blob the way the running workflow does.
+    private static readonly JsonSerializerOptions ResolverSecretOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true,
+    };
+
+    [Fact]
+    public async Task SeedAsync_DorWorkflow_WritesSnakeCaseSecrets_TheResolverCanRead()
+    {
+        var options = FullOptions();
+        options.DorWorkflow = new DorWorkflowSeed
+        {
+            ConfigJson = """{"jira":{"project_keys":["SBRO"],"ready_transition_id":"31"},"dor":{"source_type":"inline","inline_markdown":"# DoR"}}""",
+            JiraApiToken = "jira-tok",
+            JiraWebhookSecret = "hook-sec",
+            SlackToken = "xoxp-abc",
+            AiApiKey = "ai-key",
+        };
+        var repo = new RecordingRepository();
+
+        await BuildSeeder(repo, options).SeedAsync();
+
+        var dor = repo.SaveFor(ConnectorType.DorWorkflow);
+        var secrets = JsonSerializer.Deserialize<DorWorkflowSecrets>(dor.Secret!, ResolverSecretOptions)!;
+        Assert.Equal("jira-tok", secrets.JiraApiToken);
+        Assert.Equal("hook-sec", secrets.JiraWebhookSecret);
+        Assert.Equal("xoxp-abc", secrets.SlackToken);
+        Assert.Equal("ai-key", secrets.AiApiKey);
+        // The blob must be snake_case (not the old camelCase, which resolved to nulls).
+        Assert.Contains("jira_api_token", dor.Secret);
+        Assert.DoesNotContain("jiraApiToken", dor.Secret);
     }
 
     private static DemoConnectorSeeder BuildSeeder(IConnectorConfigRepository repo, ConnectorSeedOptions options) =>

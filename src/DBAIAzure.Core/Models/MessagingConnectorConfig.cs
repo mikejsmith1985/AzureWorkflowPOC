@@ -26,4 +26,17 @@ public sealed record MessagingConnectorConfig(
 
     /// <summary>Channel id / recipient substituted for <c>{{target}}</c> on the MCP path (the webhook path
     /// encodes its channel in the URL, so this may be empty there).</summary>
-    string? Target = null);
+    string? Target = null,
+
+    /// <summary>
+    /// Name of the MCP thread-read tool (e.g. Slack's <c>conversations.replies</c> / <c>slack_read_thread</c>)
+    /// used to capture human replies in a DoR conversation. Optional: when blank, inbound reply reading is off
+    /// and the DoR reply pump reads nothing (outbound sending is unaffected).
+    /// </summary>
+    string? McpReplyToolName = null,
+
+    /// <summary>
+    /// JSON object describing the reply-read tool's arguments, using <c>{{channel}}</c> and <c>{{thread}}</c>
+    /// placeholders. When null/blank a Slack-shaped default (<c>channel_id</c> + <c>thread_ts</c>) is used.
+    /// </summary>
+    string? McpReplyArgumentTemplate = null);

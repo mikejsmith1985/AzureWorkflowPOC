@@ -96,4 +96,9 @@ internal sealed class FakeMcpMessageGateway : DBAIAzure.Connectors.Messaging.IMc
         LastRequest = request;
         return Task.FromResult(new DBAIAzure.Connectors.Messaging.McpSendResult(_succeeds, _message));
     }
+
+    // The send-path tests don't read threads; return an empty content success so the interface is satisfied.
+    public Task<DBAIAzure.Connectors.Messaging.McpReadResult> ReadAsync(
+        DBAIAzure.Connectors.Messaging.McpReadRequest request, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new DBAIAzure.Connectors.Messaging.McpReadResult(_succeeds, null, _message));
 }
