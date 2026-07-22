@@ -71,6 +71,19 @@ Each step of the DoR workflow now carries its own slice of the configuration, ta
   project keys, ready transition) is marked configured on its own. Dry-run ships ON in the starter, so a
   node-configured workflow logs its intended Jira writes rather than performing them until you turn it off.
 
+### Added — Configure each step by opening it (spec-021, node-config step 4b)
+
+Double-clicking a DoR node now shows **just the settings that step owns**, in plain language — the trigger asks
+which tickets to watch, the review step asks how the AI should judge, the escalation step asks about SLAs and the
+manual label. Ordinary (non-DoR) workflow nodes are untouched and show no DoR fields.
+
+- Each role renders only its own fields, so nothing leaks between steps; list settings (project keys, watch
+  fields, the write whitelist) are edited as simple comma-separated text.
+- Settings and references share the node's config blob and are written together, so saving a node never drops
+  its DoR document.
+- Blank text fields are stored as "unset" and fall back to the connector configuration rather than writing empty
+  values over it.
+
 ### Changed — Workflow Builder UX for the DoR workflow (spec-021)
 
 Completes the builder so the DoR workflow is what you see, read, and configure:
