@@ -17,7 +17,8 @@ public static class DefaultWorkflowProvider
     /// <summary>The default workflow's display name.</summary>
     public const string DefaultName = "Intelligent DoR Validation Workflow";
 
-    private const string DemoOwnerId = "demo";
+    /// <summary>The owner the starter workflow is created under; also how the runtime locates the active DoR workflow.</summary>
+    public const string DemoOwnerId = "demo";
 
     /// <summary>Builds a fresh DoR Validation Workflow definition (new ids each call).</summary>
     public static WorkflowDefinition BuildDorValidationWorkflow()

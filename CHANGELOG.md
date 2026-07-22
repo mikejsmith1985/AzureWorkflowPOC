@@ -32,6 +32,22 @@ the checklist right where the review happens, instead of on a separate connector
 - The node-config assembler (a later step) will resolve the active DoR document by that reference name.
 - Still no runtime change — the engine reads the connector row until the assembler lands.
 
+### Added — Node config now drives the run: the DoR assembler (spec-021, node-config step 3)
+
+**The visual builder is now wired to execution.** A new `NodeAwareDorConfigResolver` decorates the connector-row
+resolver and overlays the configuration that lives on the workflow's nodes, so the Definition-of-Ready document
+you edit on the **AI DoR Review** node is the document the workflow actually reviews against.
+
+- **Precedence**: a non-blank DoR document on a node wins over the connector card — including over a `url`
+  source — because the node is becoming the source of truth. With no node document, the card is used unchanged.
+- **Active workflow**: the most recently modified workflow named for the DoR starter, owner-scoped; the document
+  is the first Document reference named "Definition of Ready" on any of its nodes (so it can be moved between steps).
+- **Safe by construction**: any repository or parse failure falls back to the connector configuration rather than
+  breaking a run, and secrets are never read from nodes (node config is plain text in the graph) — secret
+  resolution still delegates to the encrypted store.
+- Every other namespace (Jira, AI, channels, SLA, audit) still comes from the connector row until later steps
+  move each onto its owning node.
+
 ### Changed — Workflow Builder UX for the DoR workflow (spec-021)
 
 Completes the builder so the DoR workflow is what you see, read, and configure:

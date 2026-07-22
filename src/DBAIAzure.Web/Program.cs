@@ -197,8 +197,15 @@ builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerConfigResolv
 // ── DoR Validation Workflow (spec-021): per-run config resolver + durable instance store ──────
 // Reads the DorWorkflow connector row (six namespaces + secrets) on every call so operator changes apply
 // without a restart; the instance store persists the queryable lifecycle/SLA record the sweeper reads.
-builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IDorConfigResolver,
-    DBAIAzure.Web.Services.Dor.DorConfigResolver>();
+// The connector-row resolver is wrapped by the node-config assembler, so configuration an operator edits ON a
+// workflow node (today: the DoR document) overrides the connector card. Both are singletons, as is the workflow
+// repository the assembler reads, so there is no captive-dependency risk.
+builder.Services.AddSingleton<DBAIAzure.Web.Services.Dor.DorConfigResolver>();
+builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IDorConfigResolver>(sp =>
+    new DBAIAzure.Web.Services.Dor.NodeAwareDorConfigResolver(
+        sp.GetRequiredService<DBAIAzure.Web.Services.Dor.DorConfigResolver>(),
+        sp.GetRequiredService<DBAIAzure.Core.Interfaces.IWorkflowRepository>(),
+        sp.GetRequiredService<ILogger<DBAIAzure.Web.Services.Dor.NodeAwareDorConfigResolver>>()));
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IDorWorkflowInstanceStore,
     DBAIAzure.Storage.Repositories.EfDorWorkflowInstanceStore>();
 builder.Services.AddHttpClient(nameof(DBAIAzure.Web.Services.Dor.DorDocumentSource));
