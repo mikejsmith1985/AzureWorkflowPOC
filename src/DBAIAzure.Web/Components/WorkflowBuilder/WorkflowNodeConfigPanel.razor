@@ -175,6 +175,74 @@
                        aria-label="Output label" />
             </div>
         }
+
+        @* References — typed pointers (document, URL, dashboard, binary) this step consults.
+           Available on every node type; owned by this node so there is no ambiguity about which
+           step uses it. The DoR document, for example, is simply a Document reference on the AI step. *@
+        <div class="flex flex-col gap-2 border-t border-gray-800 pt-4" data-testid="node-references-section">
+            <div class="flex items-center justify-between">
+                <label class="text-xs font-medium text-gray-400">References</label>
+                <button type="button" @onclick="AddReference"
+                        class="text-xs text-cyan-400 hover:text-cyan-300"
+                        data-testid="add-reference">+ Add</button>
+            </div>
+            <p class="text-[11px] text-gray-500">
+                Attach a document (e.g. a Definition-of-Ready), URL, dashboard, or binary this step should use.
+            </p>
+
+            @if (_references.Count == 0)
+            {
+                <p class="text-[11px] text-gray-600 italic">No references attached.</p>
+            }
+
+            @for (var referenceIndex = 0; referenceIndex < _references.Count; referenceIndex++)
+            {
+                var row = _references[referenceIndex];
+                var index = referenceIndex;
+                <div class="flex flex-col gap-1.5 bg-gray-800/60 border border-gray-700 rounded-lg p-2"
+                     data-testid="reference-row">
+                    <div class="flex items-center gap-2">
+                        <select value="@row.Type"
+                                @onchange="@(e => row.Type = ParseRefType(e.Value?.ToString()))"
+                                class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100
+                                       focus:outline-none focus:border-cyan-500"
+                                data-testid="reference-type">
+                            <option value="@NodeReferenceType.Document">Document</option>
+                            <option value="@NodeReferenceType.Url">URL</option>
+                            <option value="@NodeReferenceType.Dashboard">Dashboard</option>
+                            <option value="@NodeReferenceType.Binary">Binary</option>
+                        </select>
+                        <input type="text" value="@row.Name"
+                               @oninput="@(e => row.Name = e.Value?.ToString() ?? string.Empty)"
+                               placeholder="Name"
+                               class="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs
+                                      text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+                               data-testid="reference-name" />
+                        <button type="button" @onclick="@(() => RemoveReference(index))"
+                                class="text-gray-500 hover:text-red-400 text-xs"
+                                data-testid="remove-reference" aria-label="Remove reference">✕</button>
+                    </div>
+                    @if (row.Type == NodeReferenceType.Document)
+                    {
+                        <textarea value="@row.Value"
+                                  @oninput="@(e => row.Value = e.Value?.ToString() ?? string.Empty)"
+                                  rows="4" placeholder="Paste the document (markdown)…"
+                                  class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100
+                                         placeholder-gray-500 resize-none focus:outline-none focus:border-cyan-500"
+                                  data-testid="reference-value"></textarea>
+                    }
+                    else
+                    {
+                        <input type="text" value="@row.Value"
+                               @oninput="@(e => row.Value = e.Value?.ToString() ?? string.Empty)"
+                               placeholder="@GetValuePlaceholder(row.Type)"
+                               class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100
+                                      placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+                               data-testid="reference-value" />
+                    }
+                </div>
+            }
+        </div>
     </div>
 
     @* Done button (T027) *@
@@ -225,6 +293,18 @@
     private string _initialDataDescription  = string.Empty;
     private bool   _showRequiredBanner;
 
+    // Editable rows for the References section. A mutable view-model (the domain NodeReference is
+    // immutable) so per-field two-way binding works; mapped back to NodeReference on save.
+    private List<ReferenceRow> _references = new();
+
+    /// <summary>A single editable reference row bound to the References section inputs.</summary>
+    private sealed class ReferenceRow
+    {
+        public NodeReferenceType Type { get; set; } = NodeReferenceType.Document;
+        public string Name { get; set; } = string.Empty;
+        public string Value { get; set; } = string.Empty;
+    }
+
     // Reference to the first visible input/textarea for focus-on-open (T025).
     private ElementReference _firstFieldRef;
     private System.Threading.CancellationTokenSource? _goalPreviewDebounce;
@@ -253,6 +333,16 @@
         _outputLabel = Node.OutputLabel ?? string.Empty;
         _showRequiredBanner = false;
         _lastInitialisedNodeId = Node.Id;
+
+        // Load any references this node already carries (works for every node type).
+        _references = NodeReferenceConfig.Read(Node.FunctionConfig)
+            .Select(reference => new ReferenceRow
+            {
+                Type = reference.Type,
+                Name = reference.Name,
+                Value = reference.Value,
+            })
+            .ToList();
 
         // Populate the Trigger-specific field from the JSON config blob.
         if (Node.NodeType == WorkflowNodeType.Trigger && !string.IsNullOrWhiteSpace(Node.FunctionConfig))
@@ -325,17 +415,19 @@
 
         _showRequiredBanner = false;
 
+        var references = BuildReferences();
+
         WorkflowNode updatedNode;
         if (Node.NodeType == WorkflowNodeType.Trigger)
         {
-            // Serialize the Trigger-specific fields back into the FunctionConfig JSON blob.
-            var configJson = System.Text.Json.JsonSerializer.Serialize(
+            // Serialize the Trigger-specific field, then merge in the node's references (preserving both).
+            var baseConfig = System.Text.Json.JsonSerializer.Serialize(
                 new { initialDataDescription = _initialDataDescription });
 
             updatedNode = Node with
             {
                 GoalPrompt     = string.IsNullOrWhiteSpace(_goalPrompt) ? null : _goalPrompt,
-                FunctionConfig = configJson,
+                FunctionConfig = NodeReferenceConfig.Write(baseConfig, references),
                 IsConfigured   = !string.IsNullOrWhiteSpace(_goalPrompt),
             };
         }
@@ -354,11 +446,13 @@
 
             updatedNode = Node with
             {
-                GoalPrompt   = string.IsNullOrWhiteSpace(_goalPrompt) ? null : _goalPrompt,
-                InputLabel   = string.IsNullOrWhiteSpace(_inputLabel) ? null : _inputLabel,
-                OutputLabel  = string.IsNullOrWhiteSpace(_outputLabel) ? null : _outputLabel,
-                Label        = updatedLabel,
-                IsConfigured = isConfigured,
+                GoalPrompt     = string.IsNullOrWhiteSpace(_goalPrompt) ? null : _goalPrompt,
+                InputLabel     = string.IsNullOrWhiteSpace(_inputLabel) ? null : _inputLabel,
+                OutputLabel    = string.IsNullOrWhiteSpace(_outputLabel) ? null : _outputLabel,
+                Label          = updatedLabel,
+                // Merge references into any existing config, preserving other keys the node may carry.
+                FunctionConfig = NodeReferenceConfig.Write(Node.FunctionConfig, references),
+                IsConfigured   = isConfigured,
             };
         }
 
@@ -373,6 +467,43 @@
         _showRequiredBanner = false;
         await OnCloseRequested.InvokeAsync();
     }
+
+    // ── References ─────────────────────────────────────────────────────────────────
+
+    /// <summary>Adds a blank reference row for the operator to fill in.</summary>
+    private void AddReference() => _references.Add(new ReferenceRow());
+
+    /// <summary>Removes the reference row at the given index, ignoring out-of-range requests.</summary>
+    private void RemoveReference(int index)
+    {
+        if (index >= 0 && index < _references.Count)
+            _references.RemoveAt(index);
+    }
+
+    /// <summary>Maps the reference type dropdown's string value back to the enum, defaulting to Document.</summary>
+    private static NodeReferenceType ParseRefType(string? value) =>
+        Enum.TryParse<NodeReferenceType>(value, out var parsed) ? parsed : NodeReferenceType.Document;
+
+    /// <summary>Placeholder text guiding what to enter for each non-document reference kind.</summary>
+    private static string GetValuePlaceholder(NodeReferenceType type) => type switch
+    {
+        NodeReferenceType.Url       => "https://…",
+        NodeReferenceType.Dashboard => "Dashboard URL or identifier",
+        NodeReferenceType.Binary    => "Blob URI or artifact identifier",
+        _                           => "Value",
+    };
+
+    /// <summary>Converts the editable rows into domain references, dropping any row with a blank name.</summary>
+    private IReadOnlyList<NodeReference> BuildReferences() =>
+        _references
+            .Where(row => !string.IsNullOrWhiteSpace(row.Name))
+            .Select(row => new NodeReference
+            {
+                Type = row.Type,
+                Name = row.Name.Trim(),
+                Value = row.Value,
+            })
+            .ToList();
 
     // ── Display helpers ──────────────────────────────────────────────────────────
 

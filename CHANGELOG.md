@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Node references: typed attachments on every node (spec-021, node-config step 1)
+
+First step of moving DoR configuration off the global connector card and onto the workflow nodes where it
+belongs. Any node can now carry typed **references** — a document, URL, dashboard, or binary pointer — edited
+in the node's config panel and stored in the node's own `FunctionConfig`, so ownership is unambiguous (the
+DoR document is simply a Document reference on the AI review step, not a floating node).
+
+- **`NodeReference` + `NodeReferenceConfig`**: a small immutable model and a pure split/merge serializer that
+  reads/writes the `references` array inside a node's config blob while preserving every other key.
+- **References editor** in `WorkflowNodeConfigPanel`: add/remove typed references on any node type; a Document
+  reference gets a markdown text area, the others a single-line address box. Existing references pre-populate
+  on open and round-trip through Done.
+- No runtime change yet — the DoR engine still reads the connector row; a later step points it at the nodes.
+
 ### Changed — Workflow Builder UX for the DoR workflow (spec-021)
 
 Completes the builder so the DoR workflow is what you see, read, and configure:
