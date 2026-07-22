@@ -3,6 +3,7 @@
 // escaped JSON) and a raw JSON block for the remaining namespaces, then merges them back on save.
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using DBAIAzure.Core.Models.DorWorkflow;
 
 namespace DBAIAzure.Web.Services.Dor;
 
@@ -173,18 +174,9 @@ public sealed class DorConfigCardForm
         OtherConfigJson = StarterOtherJson,
     };
 
-    /// <summary>A short, editable Definition-of-Ready checklist used as the inline starter document.</summary>
-    public const string SampleDorMarkdown = """
-        # Definition of Ready
-
-        A ticket is Ready to Work when all of the following are true:
-
-        1. **Summary** — clearly states the desired outcome in one sentence.
-        2. **Description** — explains the business context and the "why".
-        3. **Acceptance Criteria** — at least one testable, unambiguous criterion.
-        4. **Estimate** — a story-point or effort estimate is present.
-        5. **Dependencies** — any blocking work or external dependency is named.
-        """;
+    /// <summary>A short, editable Definition-of-Ready checklist used as the inline starter document. Shared with
+    /// the Workflow Builder's AI review node so the card and the node start from one source of truth.</summary>
+    public const string SampleDorMarkdown = DorDocumentDefaults.SampleMarkdown;
 
     /// <summary>The non-DoR namespaces of the starter config, snake_case, with placeholders the operator edits.
     /// Jira auth (base URL / email), the AI provider/model, and Slack/AI/Jira credentials are intentionally

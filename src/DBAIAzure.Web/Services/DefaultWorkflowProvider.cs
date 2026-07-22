@@ -2,6 +2,7 @@
 // Validation Workflow, which replaces the old "Support Request Flow" example. Each node maps to an existing
 // builder node type (the human-conversation node is a HumanApproval, which realizes to a MAF RequestPort).
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Models.DorWorkflow;
 
 namespace DBAIAzure.Web.Services;
 
@@ -43,6 +44,18 @@ public static class DefaultWorkflowProvider
             InputLabel = reviewIn.Label, OutputLabel = reviewOut.Label,
             InputPorts = new[] { reviewIn }.ToList().AsReadOnly(),
             OutputPorts = new[] { reviewOut }.ToList().AsReadOnly(),
+            // The DoR document lives ON this node as a Document reference — open the node to read or edit it.
+            // Stored under the canonical name so the node-config assembler (a later step) resolves it here
+            // instead of from a separate connector card.
+            FunctionConfig = NodeReferenceConfig.Write(null, new[]
+            {
+                new NodeReference
+                {
+                    Type = NodeReferenceType.Document,
+                    Name = DorDocumentDefaults.ReferenceName,
+                    Value = DorDocumentDefaults.SampleMarkdown,
+                },
+            }),
             IsConfigured = true, PositionX = 300, PositionY = 200,
         };
 

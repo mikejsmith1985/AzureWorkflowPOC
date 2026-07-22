@@ -21,6 +21,17 @@ DoR document is simply a Document reference on the AI review step, not a floatin
   on open and round-trip through Done.
 - No runtime change yet — the DoR engine still reads the connector row; a later step points it at the nodes.
 
+### Added — DoR document lives on the AI review node (spec-021, node-config step 2)
+
+The Definition-of-Ready document now ships **on the AI DoR Review node** of the default workflow, attached as a
+Document reference under the canonical name "Definition of Ready" — open the node in the builder to read or edit
+the checklist right where the review happens, instead of on a separate connector card.
+
+- **`DorDocumentDefaults`** (Core): one source of truth for the DoR reference name and the sample checklist,
+  now shared by the review node and the config card (the card's duplicate literal is gone).
+- The node-config assembler (a later step) will resolve the active DoR document by that reference name.
+- Still no runtime change — the engine reads the connector row until the assembler lands.
+
 ### Changed — Workflow Builder UX for the DoR workflow (spec-021)
 
 Completes the builder so the DoR workflow is what you see, read, and configure:
