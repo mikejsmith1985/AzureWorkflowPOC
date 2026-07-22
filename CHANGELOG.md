@@ -84,6 +84,20 @@ manual label. Ordinary (non-DoR) workflow nodes are untouched and show no DoR fi
 - Blank text fields are stored as "unset" and fall back to the connector configuration rather than writing empty
   values over it.
 
+### Removed — The DoR configuration card (spec-021, node-config step 5)
+
+The static "DoR Validation Workflow" card is gone from the Configuration page. Not every workflow has a
+Definition of Ready, so a permanent global card for one workflow's settings was the wrong model — the workflow
+is now configured entirely on its own steps in the Workflow Builder.
+
+- Deleted `DorWorkflowCard.razor` and `DorConfigCardForm` (the DoR document, dry-run, and the six-namespace JSON
+  blob all live on nodes now). `DorDocumentDefaults` is the single remaining source for the starter checklist.
+- Replaced by a minimal **Jira Webhook** credential card holding only the HMAC signing secret — a secret cannot
+  live on a node, since node configuration is stored in plain text with the workflow graph (Article IX). Its
+  **Check Workflow** button reports whether the now node-configured workflow is ready to run.
+- The connector row is still read as a fallback for any namespace a node leaves unset, so existing installs keep
+  working without a migration.
+
 ### Changed — Workflow Builder UX for the DoR workflow (spec-021)
 
 Completes the builder so the DoR workflow is what you see, read, and configure:

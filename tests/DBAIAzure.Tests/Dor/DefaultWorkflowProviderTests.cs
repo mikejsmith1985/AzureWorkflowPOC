@@ -26,10 +26,16 @@ public sealed class DefaultWorkflowProviderTests
     }
 
     [Fact]
-    public void DorSampleDocument_IsSharedBetweenNodeAndConfigCard()
+    public void DorSampleDocument_ComesFromTheSharedDefault()
     {
-        // The card and the review node must start from one source of truth so they never drift.
-        Assert.Equal(DorDocumentDefaults.SampleMarkdown, DorConfigCardForm.SampleDorMarkdown);
+        // The node seeds its document from the one shared default; the config card that used to duplicate it
+        // has been retired, so DorDocumentDefaults is now the only source.
+        var workflow = DefaultWorkflowProvider.BuildDorValidationWorkflow();
+        var review = workflow.Nodes.Single(node => node.NodeType == WorkflowNodeType.AgenticReason);
+        var document = NodeReferenceConfig.Read(review.FunctionConfig)
+            .Single(reference => reference.Name == DorDocumentDefaults.ReferenceName);
+
+        Assert.Equal(DorDocumentDefaults.SampleMarkdown, document.Value);
     }
 
     [Fact]
