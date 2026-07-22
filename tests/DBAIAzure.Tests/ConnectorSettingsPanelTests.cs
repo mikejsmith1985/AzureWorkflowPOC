@@ -41,13 +41,15 @@ public sealed class ConnectorSettingsPanelTests : TestContext
         var cut = RenderComponent<ConnectorSettings>();
         await cut.InvokeAsync(() => Task.CompletedTask);
 
-        // The DoR workflow card (spec-021 US6) is always rendered, separate from the connector loop.
-        Assert.Single(cut.FindAll("[data-testid='dor-workflow-card']"));
+        // The Jira webhook credential card is always rendered, separate from the connector loop. (The old DoR
+        // configuration card is gone — the workflow is configured on its nodes in the Workflow Builder.)
+        Assert.Single(cut.FindAll("[data-testid='jira-webhook-secret-card']"));
 
-        // Three Edit buttons for the connector loop — one per connector card — excluding the DoR card's own
+        // Three Edit buttons for the connector loop — one per connector card — excluding the webhook card's own
         // Edit button. Select by text rather than the colour class, which is now a semantic token (spec-014).
         var editButtons = cut.FindAll("button")
-            .Where(b => b.TextContent.Trim() == "Edit" && b.Closest("[data-testid='dor-workflow-card']") is null)
+            .Where(b => b.TextContent.Trim() == "Edit"
+                        && b.Closest("[data-testid='jira-webhook-secret-card']") is null)
             .ToList();
         Assert.Equal(3, editButtons.Count);
     }

@@ -7,6 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Node references: typed attachments on every node (spec-021, node-config step 1)
+
+First step of moving DoR configuration off the global connector card and onto the workflow nodes where it
+belongs. Any node can now carry typed **references** — a document, URL, dashboard, or binary pointer — edited
+in the node's config panel and stored in the node's own `FunctionConfig`, so ownership is unambiguous (the
+DoR document is simply a Document reference on the AI review step, not a floating node).
+
+- **`NodeReference` + `NodeReferenceConfig`**: a small immutable model and a pure split/merge serializer that
+  reads/writes the `references` array inside a node's config blob while preserving every other key.
+- **References editor** in `WorkflowNodeConfigPanel`: add/remove typed references on any node type; a Document
+  reference gets a markdown text area, the others a single-line address box. Existing references pre-populate
+  on open and round-trip through Done.
+- No runtime change yet — the DoR engine still reads the connector row; a later step points it at the nodes.
+
+### Added — DoR document lives on the AI review node (spec-021, node-config step 2)
+
+The Definition-of-Ready document now ships **on the AI DoR Review node** of the default workflow, attached as a
+Document reference under the canonical name "Definition of Ready" — open the node in the builder to read or edit
+the checklist right where the review happens, instead of on a separate connector card.
+
+- **`DorDocumentDefaults`** (Core): one source of truth for the DoR reference name and the sample checklist,
+  now shared by the review node and the config card (the card's duplicate literal is gone).
+- The node-config assembler (a later step) will resolve the active DoR document by that reference name.
+- Still no runtime change — the engine reads the connector row until the assembler lands.
+
+### Added — Node config now drives the run: the DoR assembler (spec-021, node-config step 3)
+
+**The visual builder is now wired to execution.** A new `NodeAwareDorConfigResolver` decorates the connector-row
+resolver and overlays the configuration that lives on the workflow's nodes, so the Definition-of-Ready document
+you edit on the **AI DoR Review** node is the document the workflow actually reviews against.
+
+- **Precedence**: a non-blank DoR document on a node wins over the connector card — including over a `url`
+  source — because the node is becoming the source of truth. With no node document, the card is used unchanged.
+- **Active workflow**: the most recently modified workflow named for the DoR starter, owner-scoped; the document
+  is the first Document reference named "Definition of Ready" on any of its nodes (so it can be moved between steps).
+- **Safe by construction**: any repository or parse failure falls back to the connector configuration rather than
+  breaking a run, and secrets are never read from nodes (node config is plain text in the graph) — secret
+  resolution still delegates to the encrypted store.
+- Every other namespace (Jira, AI, channels, SLA, audit) still comes from the connector row until later steps
+  move each onto its owning node.
+
+### Added — Every setting now belongs to the node that owns it (spec-021, node-config step 4a)
+
+Each step of the DoR workflow now carries its own slice of the configuration, tagged with a stable
+`DorNodeRole` that travels with the node — so renaming a node on the canvas never breaks the wiring.
+
+| Node | Owns |
+|------|------|
+| Jira Ticket Created | project keys, issue types, watch fields, dry-run |
+| AI DoR Review | DoR document (reference), temperature, max tokens, review prompt |
+| Move to Ready Status | ready transition id, ready status |
+| Resolve Gaps in Chat | channel, reply timeout, max iterations, primary SLA, conversation prompt |
+| Update Ticket & Transition | AI-editable field whitelist, update prompt |
+| Escalate / Manual Handoff | escalation channel, timeout, iterations, escalation SLA, manual label |
+| Audit & Close | audit + Jira-comment toggles |
+
+- **`DorNodeSettings` + `DorNodeSettingsConfig`**: the per-node slice and a pure serializer that stores it under
+  `dor` in the node's config blob, coexisting with the node's `references` — each preserves the other.
+- **The assembler now overlays every namespace**, not just the document. A node value wins when set; blank
+  strings and empty lists count as unset and fall back to the connector row.
+- **The connector card is no longer required**: a workflow whose nodes supply the essentials (DoR document,
+  project keys, ready transition) is marked configured on its own. Dry-run ships ON in the starter, so a
+  node-configured workflow logs its intended Jira writes rather than performing them until you turn it off.
+
+### Added — Configure each step by opening it (spec-021, node-config step 4b)
+
+Double-clicking a DoR node now shows **just the settings that step owns**, in plain language — the trigger asks
+which tickets to watch, the review step asks how the AI should judge, the escalation step asks about SLAs and the
+manual label. Ordinary (non-DoR) workflow nodes are untouched and show no DoR fields.
+
+- Each role renders only its own fields, so nothing leaks between steps; list settings (project keys, watch
+  fields, the write whitelist) are edited as simple comma-separated text.
+- Settings and references share the node's config blob and are written together, so saving a node never drops
+  its DoR document.
+- Blank text fields are stored as "unset" and fall back to the connector configuration rather than writing empty
+  values over it.
+
+### Removed — The DoR configuration card (spec-021, node-config step 5)
+
+The static "DoR Validation Workflow" card is gone from the Configuration page. Not every workflow has a
+Definition of Ready, so a permanent global card for one workflow's settings was the wrong model — the workflow
+is now configured entirely on its own steps in the Workflow Builder.
+
+- Deleted `DorWorkflowCard.razor` and `DorConfigCardForm` (the DoR document, dry-run, and the six-namespace JSON
+  blob all live on nodes now). `DorDocumentDefaults` is the single remaining source for the starter checklist.
+- Replaced by a minimal **Jira Webhook** credential card holding only the HMAC signing secret — a secret cannot
+  live on a node, since node configuration is stored in plain text with the workflow graph (Article IX). Its
+  **Check Workflow** button reports whether the now node-configured workflow is ready to run.
+- The connector row is still read as a fallback for any namespace a node leaves unset, so existing installs keep
+  working without a migration.
+
 ### Changed — Workflow Builder UX for the DoR workflow (spec-021)
 
 Completes the builder so the DoR workflow is what you see, read, and configure:

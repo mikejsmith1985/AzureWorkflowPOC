@@ -3,6 +3,8 @@
    Closes with IsConfigured = true once all required fields are filled.
    Shows amber required-field badge if Goal is empty on close. *@
 
+@using DBAIAzure.Core.Models.DorWorkflow
+
 @if (Node is null || !IsOpen)
 {
     @* Panel is hidden — nothing rendered *@
@@ -175,6 +177,234 @@
                        aria-label="Output label" />
             </div>
         }
+
+        @* Step settings — the slice of the DoR configuration this node owns. Only shown for nodes that carry a
+           DoR role, so ordinary workflow nodes are unaffected. What is edited here is what the workflow runs. *@
+        @if (_dorRole != DorNodeRole.None)
+        {
+            <div class="flex flex-col gap-3 border-t border-gray-800 pt-4" data-testid="dor-node-settings">
+                <div>
+                    <span class="text-xs font-semibold text-gray-300">@GetDorRoleTitle()</span>
+                    <p class="text-[11px] text-gray-500 mt-0.5">@GetDorRoleHint()</p>
+                </div>
+
+                @if (_dorRole == DorNodeRole.Trigger)
+                {
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-medium text-gray-400">Jira project keys</label>
+                        <input type="text" value="@_dor.ProjectKeys" data-testid="dor-project-keys"
+                               @oninput="@(e => _dor.ProjectKeys = e.Value?.ToString() ?? string.Empty)"
+                               placeholder="SBRO, OPS" class="@DorFieldClass" />
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-medium text-gray-400">Issue types (blank = all)</label>
+                        <input type="text" value="@_dor.IssueTypes" data-testid="dor-issue-types"
+                               @oninput="@(e => _dor.IssueTypes = e.Value?.ToString() ?? string.Empty)"
+                               placeholder="Story, Bug" class="@DorFieldClass" />
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-medium text-gray-400">Ticket fields sent for review</label>
+                        <input type="text" value="@_dor.WatchFields" data-testid="dor-watch-fields"
+                               @oninput="@(e => _dor.WatchFields = e.Value?.ToString() ?? string.Empty)"
+                               placeholder="summary, description, acceptance_criteria" class="@DorFieldClass" />
+                    </div>
+                    <label class="flex items-center gap-2 text-xs text-gray-300">
+                        <input type="checkbox" checked="@_dor.DryRun" data-testid="dor-dry-run"
+                               @onchange="@(e => _dor.DryRun = (bool?)e.Value ?? false)" />
+                        Dry run — log intended Jira writes and messages without performing them
+                    </label>
+                }
+                else if (_dorRole == DorNodeRole.Review)
+                {
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-medium text-gray-400">Temperature</label>
+                        <input type="number" step="0.1" min="0" max="2" value="@_dor.Temperature"
+                               data-testid="dor-temperature"
+                               @oninput="@(e => _dor.Temperature = ParseDouble(e.Value?.ToString(), _dor.Temperature))"
+                               class="@DorFieldClass" />
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-medium text-gray-400">Max tokens</label>
+                        <input type="number" min="1" value="@_dor.MaxTokens" data-testid="dor-max-tokens"
+                               @oninput="@(e => _dor.MaxTokens = ParseInt(e.Value?.ToString(), _dor.MaxTokens))"
+                               class="@DorFieldClass" />
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-medium text-gray-400">Review prompt (blank = built-in)</label>
+                        <textarea rows="3" value="@_dor.ReviewPromptTemplate" data-testid="dor-review-prompt"
+                                  @oninput="@(e => _dor.ReviewPromptTemplate = e.Value?.ToString() ?? string.Empty)"
+                                  class="@DorFieldClass resize-none"></textarea>
+                    </div>
+                }
+                else if (_dorRole == DorNodeRole.ReadyTransition)
+                {
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-medium text-gray-400">Ready transition id</label>
+                        <input type="text" value="@_dor.ReadyTransitionId" data-testid="dor-transition-id"
+                               @oninput="@(e => _dor.ReadyTransitionId = e.Value?.ToString() ?? string.Empty)"
+                               placeholder="31" class="@DorFieldClass" />
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-medium text-gray-400">Ready status name</label>
+                        <input type="text" value="@_dor.ReadyStatus" data-testid="dor-ready-status"
+                               @oninput="@(e => _dor.ReadyStatus = e.Value?.ToString() ?? string.Empty)"
+                               placeholder="Ready to Work" class="@DorFieldClass" />
+                    </div>
+                }
+                else if (_dorRole == DorNodeRole.Resolve || _dorRole == DorNodeRole.Escalate)
+                {
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-medium text-gray-400">Channel id</label>
+                        <input type="text" value="@_dor.ChannelId" data-testid="dor-channel-id"
+                               @oninput="@(e => _dor.ChannelId = e.Value?.ToString() ?? string.Empty)"
+                               placeholder="C0123ABCDEF" class="@DorFieldClass" />
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-medium text-gray-400">Reply timeout (minutes)</label>
+                        <input type="number" min="1" value="@_dor.ReplyTimeoutMinutes" data-testid="dor-reply-timeout"
+                               @oninput="@(e => _dor.ReplyTimeoutMinutes = ParseInt(e.Value?.ToString(), _dor.ReplyTimeoutMinutes))"
+                               class="@DorFieldClass" />
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-medium text-gray-400">Max iterations</label>
+                        <input type="number" min="1" value="@_dor.MaxIterations" data-testid="dor-max-iterations"
+                               @oninput="@(e => _dor.MaxIterations = ParseInt(e.Value?.ToString(), _dor.MaxIterations))"
+                               class="@DorFieldClass" />
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-medium text-gray-400">SLA (hours)</label>
+                        <input type="number" step="0.5" min="0" value="@_dor.SlaHours" data-testid="dor-sla-hours"
+                               @oninput="@(e => _dor.SlaHours = ParseDouble(e.Value?.ToString(), _dor.SlaHours))"
+                               class="@DorFieldClass" />
+                    </div>
+                    @if (_dorRole == DorNodeRole.Escalate)
+                    {
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs font-medium text-gray-400">Manual handoff label</label>
+                            <input type="text" value="@_dor.ManualLabel" data-testid="dor-manual-label"
+                                   @oninput="@(e => _dor.ManualLabel = e.Value?.ToString() ?? string.Empty)"
+                                   placeholder="dor-manual-required" class="@DorFieldClass" />
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs font-medium text-gray-400">Conversation prompt (blank = built-in)</label>
+                            <textarea rows="3" value="@_dor.ConversationPromptTemplate" data-testid="dor-conversation-prompt"
+                                      @oninput="@(e => _dor.ConversationPromptTemplate = e.Value?.ToString() ?? string.Empty)"
+                                      class="@DorFieldClass resize-none"></textarea>
+                        </div>
+                    }
+                }
+                else if (_dorRole == DorNodeRole.Update)
+                {
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-medium text-gray-400">Fields the AI may write</label>
+                        <input type="text" value="@_dor.AiEditableFields" data-testid="dor-editable-fields"
+                               @oninput="@(e => _dor.AiEditableFields = e.Value?.ToString() ?? string.Empty)"
+                               placeholder="acceptance_criteria" class="@DorFieldClass" />
+                        <span class="text-[11px] text-gray-500">Enforced in code — anything not listed is never written.</span>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-medium text-gray-400">Update prompt (blank = built-in)</label>
+                        <textarea rows="3" value="@_dor.UpdatePromptTemplate" data-testid="dor-update-prompt"
+                                  @oninput="@(e => _dor.UpdatePromptTemplate = e.Value?.ToString() ?? string.Empty)"
+                                  class="@DorFieldClass resize-none"></textarea>
+                    </div>
+                }
+                else if (_dorRole == DorNodeRole.Audit)
+                {
+                    <label class="flex items-center gap-2 text-xs text-gray-300">
+                        <input type="checkbox" checked="@_dor.LogAiResponses" data-testid="dor-log-ai"
+                               @onchange="@(e => _dor.LogAiResponses = (bool?)e.Value ?? false)" />
+                        Record full AI responses in the audit trail
+                    </label>
+                    <label class="flex items-center gap-2 text-xs text-gray-300">
+                        <input type="checkbox" checked="@_dor.JiraCommentOnPass"
+                               @onchange="@(e => _dor.JiraCommentOnPass = (bool?)e.Value ?? false)" />
+                        Comment on the ticket when the review passes
+                    </label>
+                    <label class="flex items-center gap-2 text-xs text-gray-300">
+                        <input type="checkbox" checked="@_dor.JiraCommentOnFail"
+                               @onchange="@(e => _dor.JiraCommentOnFail = (bool?)e.Value ?? false)" />
+                        Comment on the ticket when the review fails
+                    </label>
+                    <label class="flex items-center gap-2 text-xs text-gray-300">
+                        <input type="checkbox" checked="@_dor.JiraCommentOnEscalation"
+                               @onchange="@(e => _dor.JiraCommentOnEscalation = (bool?)e.Value ?? false)" />
+                        Comment on the ticket when the run escalates
+                    </label>
+                }
+            </div>
+        }
+
+        @* References — typed pointers (document, URL, dashboard, binary) this step consults.
+           Available on every node type; owned by this node so there is no ambiguity about which
+           step uses it. The DoR document, for example, is simply a Document reference on the AI step. *@
+        <div class="flex flex-col gap-2 border-t border-gray-800 pt-4" data-testid="node-references-section">
+            <div class="flex items-center justify-between">
+                <label class="text-xs font-medium text-gray-400">References</label>
+                <button type="button" @onclick="AddReference"
+                        class="text-xs text-cyan-400 hover:text-cyan-300"
+                        data-testid="add-reference">+ Add</button>
+            </div>
+            <p class="text-[11px] text-gray-500">
+                Attach a document (e.g. a Definition-of-Ready), URL, dashboard, or binary this step should use.
+            </p>
+
+            @if (_references.Count == 0)
+            {
+                <p class="text-[11px] text-gray-600 italic">No references attached.</p>
+            }
+
+            @for (var referenceIndex = 0; referenceIndex < _references.Count; referenceIndex++)
+            {
+                var row = _references[referenceIndex];
+                var index = referenceIndex;
+                <div class="flex flex-col gap-1.5 bg-gray-800/60 border border-gray-700 rounded-lg p-2"
+                     data-testid="reference-row">
+                    <div class="flex items-center gap-2">
+                        <select value="@row.Type"
+                                @onchange="@(e => row.Type = ParseRefType(e.Value?.ToString()))"
+                                class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100
+                                       focus:outline-none focus:border-cyan-500"
+                                data-testid="reference-type">
+                            <option value="@NodeReferenceType.Document">Document</option>
+                            <option value="@NodeReferenceType.Url">URL</option>
+                            <option value="@NodeReferenceType.Dashboard">Dashboard</option>
+                            <option value="@NodeReferenceType.Binary">Binary</option>
+                        </select>
+                        <input type="text" value="@row.Name"
+                               @oninput="@(e => row.Name = e.Value?.ToString() ?? string.Empty)"
+                               placeholder="Name"
+                               class="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs
+                                      text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+                               data-testid="reference-name" />
+                        <button type="button" @onclick="@(() => RemoveReference(index))"
+                                class="text-gray-500 hover:text-red-400 text-xs"
+                                data-testid="remove-reference" aria-label="Remove reference">✕</button>
+                    </div>
+                    @if (row.Type == NodeReferenceType.Document)
+                    {
+                        <textarea value="@row.Value"
+                                  @oninput="@(e => row.Value = e.Value?.ToString() ?? string.Empty)"
+                                  rows="4" placeholder="Paste the document (markdown)…"
+                                  class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100
+                                         placeholder-gray-500 resize-none focus:outline-none focus:border-cyan-500"
+                                  data-testid="reference-value"></textarea>
+                    }
+                    else
+                    {
+                        <input type="text" value="@row.Value"
+                               @oninput="@(e => row.Value = e.Value?.ToString() ?? string.Empty)"
+                               placeholder="@GetValuePlaceholder(row.Type)"
+                               class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100
+                                      placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+                               data-testid="reference-value" />
+                    }
+                </div>
+            }
+        </div>
     </div>
 
     @* Done button (T027) *@
@@ -188,6 +418,11 @@
 </aside>
 
 @code {
+    // Shared styling for the DoR step-settings inputs, kept in one place so the section stays visually uniform.
+    private const string DorFieldClass =
+        "bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 " +
+        "placeholder-gray-500 focus:outline-none focus:border-cyan-500";
+
     // ── Parameters ──────────────────────────────────────────────────────────────
 
     /// <summary>The node currently being configured; null = panel not applicable.</summary>
@@ -225,6 +460,52 @@
     private string _initialDataDescription  = string.Empty;
     private bool   _showRequiredBanner;
 
+    // Editable rows for the References section. A mutable view-model (the domain NodeReference is
+    // immutable) so per-field two-way binding works; mapped back to NodeReference on save.
+    private List<ReferenceRow> _references = new();
+
+    /// <summary>A single editable reference row bound to the References section inputs.</summary>
+    private sealed class ReferenceRow
+    {
+        public NodeReferenceType Type { get; set; } = NodeReferenceType.Document;
+        public string Name { get; set; } = string.Empty;
+        public string Value { get; set; } = string.Empty;
+    }
+
+    // The DoR role this node plays (None for ordinary nodes) and the editable draft of its settings slice.
+    private DorNodeRole _dorRole = DorNodeRole.None;
+    private DorSettingsDraft _dor = new();
+
+    /// <summary>
+    /// Mutable draft of the node's DoR settings. The stored record is immutable with nullable fields; this flat
+    /// draft is what the inputs bind to. List fields are edited as comma-separated text, which is the least
+    /// fussy way to type a short list of keys or field names.
+    /// </summary>
+    private sealed class DorSettingsDraft
+    {
+        public string ProjectKeys { get; set; } = string.Empty;
+        public string IssueTypes { get; set; } = string.Empty;
+        public string WatchFields { get; set; } = string.Empty;
+        public bool DryRun { get; set; }
+        public double Temperature { get; set; } = 0.1;
+        public int MaxTokens { get; set; } = 2000;
+        public string ReviewPromptTemplate { get; set; } = string.Empty;
+        public string ConversationPromptTemplate { get; set; } = string.Empty;
+        public string UpdatePromptTemplate { get; set; } = string.Empty;
+        public string ReadyTransitionId { get; set; } = string.Empty;
+        public string ReadyStatus { get; set; } = string.Empty;
+        public string ChannelId { get; set; } = string.Empty;
+        public int ReplyTimeoutMinutes { get; set; } = 240;
+        public int MaxIterations { get; set; } = 3;
+        public double SlaHours { get; set; } = 24;
+        public string AiEditableFields { get; set; } = string.Empty;
+        public string ManualLabel { get; set; } = string.Empty;
+        public bool LogAiResponses { get; set; } = true;
+        public bool JiraCommentOnPass { get; set; } = true;
+        public bool JiraCommentOnFail { get; set; } = true;
+        public bool JiraCommentOnEscalation { get; set; } = true;
+    }
+
     // Reference to the first visible input/textarea for focus-on-open (T025).
     private ElementReference _firstFieldRef;
     private System.Threading.CancellationTokenSource? _goalPreviewDebounce;
@@ -253,6 +534,19 @@
         _outputLabel = Node.OutputLabel ?? string.Empty;
         _showRequiredBanner = false;
         _lastInitialisedNodeId = Node.Id;
+
+        // Load the DoR settings slice this node owns, if it is a DoR-workflow node.
+        LoadDorSettings(Node.FunctionConfig);
+
+        // Load any references this node already carries (works for every node type).
+        _references = NodeReferenceConfig.Read(Node.FunctionConfig)
+            .Select(reference => new ReferenceRow
+            {
+                Type = reference.Type,
+                Name = reference.Name,
+                Value = reference.Value,
+            })
+            .ToList();
 
         // Populate the Trigger-specific field from the JSON config blob.
         if (Node.NodeType == WorkflowNodeType.Trigger && !string.IsNullOrWhiteSpace(Node.FunctionConfig))
@@ -328,14 +622,14 @@
         WorkflowNode updatedNode;
         if (Node.NodeType == WorkflowNodeType.Trigger)
         {
-            // Serialize the Trigger-specific fields back into the FunctionConfig JSON blob.
-            var configJson = System.Text.Json.JsonSerializer.Serialize(
+            // Serialize the Trigger-specific field, then merge in this node's references and DoR settings.
+            var baseConfig = System.Text.Json.JsonSerializer.Serialize(
                 new { initialDataDescription = _initialDataDescription });
 
             updatedNode = Node with
             {
                 GoalPrompt     = string.IsNullOrWhiteSpace(_goalPrompt) ? null : _goalPrompt,
-                FunctionConfig = configJson,
+                FunctionConfig = BuildFunctionConfig(baseConfig),
                 IsConfigured   = !string.IsNullOrWhiteSpace(_goalPrompt),
             };
         }
@@ -354,11 +648,13 @@
 
             updatedNode = Node with
             {
-                GoalPrompt   = string.IsNullOrWhiteSpace(_goalPrompt) ? null : _goalPrompt,
-                InputLabel   = string.IsNullOrWhiteSpace(_inputLabel) ? null : _inputLabel,
-                OutputLabel  = string.IsNullOrWhiteSpace(_outputLabel) ? null : _outputLabel,
-                Label        = updatedLabel,
-                IsConfigured = isConfigured,
+                GoalPrompt     = string.IsNullOrWhiteSpace(_goalPrompt) ? null : _goalPrompt,
+                InputLabel     = string.IsNullOrWhiteSpace(_inputLabel) ? null : _inputLabel,
+                OutputLabel    = string.IsNullOrWhiteSpace(_outputLabel) ? null : _outputLabel,
+                Label          = updatedLabel,
+                // Merge references + DoR settings into any existing config, preserving other keys.
+                FunctionConfig = BuildFunctionConfig(Node.FunctionConfig),
+                IsConfigured   = isConfigured,
             };
         }
 
@@ -373,6 +669,188 @@
         _showRequiredBanner = false;
         await OnCloseRequested.InvokeAsync();
     }
+
+    // ── DoR step settings ──────────────────────────────────────────────────────────
+
+    /// <summary>Reads this node's DoR role and settings into the editable draft; no role means nothing is shown.</summary>
+    private void LoadDorSettings(string? functionConfig)
+    {
+        var settings = DorNodeSettingsConfig.Read(functionConfig);
+        _dorRole = settings?.Role ?? DorNodeRole.None;
+        if (settings is null)
+        {
+            _dor = new DorSettingsDraft();
+            return;
+        }
+
+        var draft = new DorSettingsDraft
+        {
+            ProjectKeys = JoinList(settings.ProjectKeys),
+            IssueTypes = JoinList(settings.IssueTypes),
+            WatchFields = JoinList(settings.WatchFields),
+            AiEditableFields = JoinList(settings.AiEditableFields),
+            ReviewPromptTemplate = settings.ReviewPromptTemplate ?? string.Empty,
+            ConversationPromptTemplate = settings.ConversationPromptTemplate ?? string.Empty,
+            UpdatePromptTemplate = settings.UpdatePromptTemplate ?? string.Empty,
+            ReadyTransitionId = settings.ReadyTransitionId ?? string.Empty,
+            ReadyStatus = settings.ReadyStatus ?? string.Empty,
+            ChannelId = settings.ChannelId ?? string.Empty,
+            ManualLabel = settings.ManualLabel ?? string.Empty,
+        };
+
+        // Numeric and boolean fields keep their sensible default when the node has not set them.
+        if (settings.DryRun is { } dryRun) draft.DryRun = dryRun;
+        if (settings.Temperature is { } temperature) draft.Temperature = temperature;
+        if (settings.MaxTokens is { } maxTokens) draft.MaxTokens = maxTokens;
+        if (settings.ReplyTimeoutMinutes is { } replyTimeout) draft.ReplyTimeoutMinutes = replyTimeout;
+        if (settings.MaxIterations is { } maxIterations) draft.MaxIterations = maxIterations;
+        if (settings.SlaHours is { } slaHours) draft.SlaHours = slaHours;
+        if (settings.LogAiResponses is { } logAi) draft.LogAiResponses = logAi;
+        if (settings.JiraCommentOnPass is { } onPass) draft.JiraCommentOnPass = onPass;
+        if (settings.JiraCommentOnFail is { } onFail) draft.JiraCommentOnFail = onFail;
+        if (settings.JiraCommentOnEscalation is { } onEscalation) draft.JiraCommentOnEscalation = onEscalation;
+
+        _dor = draft;
+    }
+
+    /// <summary>Builds the settings record for this node's role, writing only the fields that role owns.</summary>
+    private DorNodeSettings? BuildDorSettings() => _dorRole switch
+    {
+        DorNodeRole.Trigger => new DorNodeSettings
+        {
+            Role = _dorRole,
+            ProjectKeys = SplitList(_dor.ProjectKeys),
+            IssueTypes = SplitList(_dor.IssueTypes),
+            WatchFields = SplitList(_dor.WatchFields),
+            DryRun = _dor.DryRun,
+        },
+        DorNodeRole.Review => new DorNodeSettings
+        {
+            Role = _dorRole,
+            Temperature = _dor.Temperature,
+            MaxTokens = _dor.MaxTokens,
+            ReviewPromptTemplate = NullIfBlank(_dor.ReviewPromptTemplate),
+        },
+        DorNodeRole.ReadyTransition => new DorNodeSettings
+        {
+            Role = _dorRole,
+            ReadyTransitionId = NullIfBlank(_dor.ReadyTransitionId),
+            ReadyStatus = NullIfBlank(_dor.ReadyStatus),
+        },
+        DorNodeRole.Resolve => new DorNodeSettings
+        {
+            Role = _dorRole,
+            ChannelId = NullIfBlank(_dor.ChannelId),
+            ReplyTimeoutMinutes = _dor.ReplyTimeoutMinutes,
+            MaxIterations = _dor.MaxIterations,
+            SlaHours = _dor.SlaHours,
+            ConversationPromptTemplate = NullIfBlank(_dor.ConversationPromptTemplate),
+        },
+        DorNodeRole.Update => new DorNodeSettings
+        {
+            Role = _dorRole,
+            AiEditableFields = SplitList(_dor.AiEditableFields),
+            UpdatePromptTemplate = NullIfBlank(_dor.UpdatePromptTemplate),
+        },
+        DorNodeRole.Escalate => new DorNodeSettings
+        {
+            Role = _dorRole,
+            ChannelId = NullIfBlank(_dor.ChannelId),
+            ReplyTimeoutMinutes = _dor.ReplyTimeoutMinutes,
+            MaxIterations = _dor.MaxIterations,
+            SlaHours = _dor.SlaHours,
+            ManualLabel = NullIfBlank(_dor.ManualLabel),
+        },
+        DorNodeRole.Audit => new DorNodeSettings
+        {
+            Role = _dorRole,
+            LogAiResponses = _dor.LogAiResponses,
+            JiraCommentOnPass = _dor.JiraCommentOnPass,
+            JiraCommentOnFail = _dor.JiraCommentOnFail,
+            JiraCommentOnEscalation = _dor.JiraCommentOnEscalation,
+        },
+        _ => null,
+    };
+
+    /// <summary>Merges this node's references and DoR settings into the given base config blob.</summary>
+    private string BuildFunctionConfig(string? baseConfig) =>
+        DorNodeSettingsConfig.Write(NodeReferenceConfig.Write(baseConfig, BuildReferences()), BuildDorSettings());
+
+    private static string JoinList(IReadOnlyList<string>? values) =>
+        values is null ? string.Empty : string.Join(", ", values);
+
+    private static IReadOnlyList<string>? SplitList(string? text) =>
+        string.IsNullOrWhiteSpace(text)
+            ? null
+            : text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static string? NullIfBlank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+    private static int ParseInt(string? text, int fallback) => int.TryParse(text, out var value) ? value : fallback;
+
+    private static double ParseDouble(string? text, double fallback) =>
+        double.TryParse(text, out var value) ? value : fallback;
+
+    private string GetDorRoleTitle() => _dorRole switch
+    {
+        DorNodeRole.Trigger         => "Which tickets start this workflow",
+        DorNodeRole.Review          => "How the AI reviews the ticket",
+        DorNodeRole.ReadyTransition => "Where a passing ticket goes",
+        DorNodeRole.Resolve         => "How the conversation runs",
+        DorNodeRole.Update          => "What the AI may change",
+        DorNodeRole.Escalate        => "How escalation and handoff work",
+        DorNodeRole.Audit           => "What gets recorded",
+        _                           => "Step settings",
+    };
+
+    private string GetDorRoleHint() => _dorRole switch
+    {
+        DorNodeRole.Trigger         => "Anything left blank falls back to the connector configuration.",
+        DorNodeRole.Review          => "The Definition-of-Ready document itself is a reference below.",
+        DorNodeRole.ReadyTransition => "The transition id comes from your Jira workflow.",
+        DorNodeRole.Resolve         => "How long to wait for a person, and how many times to follow up.",
+        DorNodeRole.Update          => "A strict whitelist — the model can never write anything else.",
+        DorNodeRole.Escalate        => "Used once the primary SLA or iteration budget is exhausted.",
+        DorNodeRole.Audit           => "Applies to the append-only audit trail and ticket comments.",
+        _                           => string.Empty,
+    };
+
+    // ── References ─────────────────────────────────────────────────────────────────
+
+    /// <summary>Adds a blank reference row for the operator to fill in.</summary>
+    private void AddReference() => _references.Add(new ReferenceRow());
+
+    /// <summary>Removes the reference row at the given index, ignoring out-of-range requests.</summary>
+    private void RemoveReference(int index)
+    {
+        if (index >= 0 && index < _references.Count)
+            _references.RemoveAt(index);
+    }
+
+    /// <summary>Maps the reference type dropdown's string value back to the enum, defaulting to Document.</summary>
+    private static NodeReferenceType ParseRefType(string? value) =>
+        Enum.TryParse<NodeReferenceType>(value, out var parsed) ? parsed : NodeReferenceType.Document;
+
+    /// <summary>Placeholder text guiding what to enter for each non-document reference kind.</summary>
+    private static string GetValuePlaceholder(NodeReferenceType type) => type switch
+    {
+        NodeReferenceType.Url       => "https://…",
+        NodeReferenceType.Dashboard => "Dashboard URL or identifier",
+        NodeReferenceType.Binary    => "Blob URI or artifact identifier",
+        _                           => "Value",
+    };
+
+    /// <summary>Converts the editable rows into domain references, dropping any row with a blank name.</summary>
+    private IReadOnlyList<NodeReference> BuildReferences() =>
+        _references
+            .Where(row => !string.IsNullOrWhiteSpace(row.Name))
+            .Select(row => new NodeReference
+            {
+                Type = row.Type,
+                Name = row.Name.Trim(),
+                Value = row.Value,
+            })
+            .ToList();
 
     // ── Display helpers ──────────────────────────────────────────────────────────
 

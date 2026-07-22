@@ -336,9 +336,10 @@ else
             </div>
         }
 
-        <!-- DoR Validation Workflow (spec-021 US6): a dedicated card, rendered outside the connector loop
-             because DorWorkflow is intentionally excluded from GetAllAsync. Purely additive. -->
-        <DorWorkflowCard />
+        <!-- Jira webhook signing secret for the DoR trigger. Rendered outside the connector loop because
+             DorWorkflow is intentionally excluded from GetAllAsync. The workflow's behaviour is configured on
+             its nodes in the Workflow Builder; only this credential lives on the credentials page. -->
+        <JiraWebhookSecretCard />
     </div>
 }
 

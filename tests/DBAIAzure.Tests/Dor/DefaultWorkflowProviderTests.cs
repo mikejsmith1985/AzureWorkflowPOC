@@ -1,13 +1,43 @@
 // Unit tests for the default builder workflow (spec-021 US5 / T060/T063): the Workflow Builder's starter is the
 // Intelligent DoR Validation Workflow (not the old Support Request example), and its graph is valid + runnable.
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Models.DorWorkflow;
 using DBAIAzure.Web.Services;
+using DBAIAzure.Web.Services.Dor;
 using Xunit;
 
 namespace DBAIAzure.Tests.Dor;
 
 public sealed class DefaultWorkflowProviderTests
 {
+    [Fact]
+    public void Default_AiReviewNode_CarriesDorDocumentReference()
+    {
+        var workflow = DefaultWorkflowProvider.BuildDorValidationWorkflow();
+
+        var review = workflow.Nodes.Single(node => node.NodeType == WorkflowNodeType.AgenticReason);
+        var references = NodeReferenceConfig.Read(review.FunctionConfig);
+
+        // The DoR document now lives on the AI review node itself, under the canonical name the assembler uses.
+        var dorDocument = Assert.Single(references, reference => reference.Name == DorDocumentDefaults.ReferenceName);
+        Assert.Equal(NodeReferenceType.Document, dorDocument.Type);
+        Assert.False(string.IsNullOrWhiteSpace(dorDocument.Value));
+        Assert.Contains("Definition of Ready", dorDocument.Value);
+    }
+
+    [Fact]
+    public void DorSampleDocument_ComesFromTheSharedDefault()
+    {
+        // The node seeds its document from the one shared default; the config card that used to duplicate it
+        // has been retired, so DorDocumentDefaults is now the only source.
+        var workflow = DefaultWorkflowProvider.BuildDorValidationWorkflow();
+        var review = workflow.Nodes.Single(node => node.NodeType == WorkflowNodeType.AgenticReason);
+        var document = NodeReferenceConfig.Read(review.FunctionConfig)
+            .Single(reference => reference.Name == DorDocumentDefaults.ReferenceName);
+
+        Assert.Equal(DorDocumentDefaults.SampleMarkdown, document.Value);
+    }
+
     [Fact]
     public void Default_IsTheDorWorkflow_NotTheSupportExample()
     {
