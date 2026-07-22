@@ -48,6 +48,29 @@ you edit on the **AI DoR Review** node is the document the workflow actually rev
 - Every other namespace (Jira, AI, channels, SLA, audit) still comes from the connector row until later steps
   move each onto its owning node.
 
+### Added — Every setting now belongs to the node that owns it (spec-021, node-config step 4a)
+
+Each step of the DoR workflow now carries its own slice of the configuration, tagged with a stable
+`DorNodeRole` that travels with the node — so renaming a node on the canvas never breaks the wiring.
+
+| Node | Owns |
+|------|------|
+| Jira Ticket Created | project keys, issue types, watch fields, dry-run |
+| AI DoR Review | DoR document (reference), temperature, max tokens, review prompt |
+| Move to Ready Status | ready transition id, ready status |
+| Resolve Gaps in Chat | channel, reply timeout, max iterations, primary SLA, conversation prompt |
+| Update Ticket & Transition | AI-editable field whitelist, update prompt |
+| Escalate / Manual Handoff | escalation channel, timeout, iterations, escalation SLA, manual label |
+| Audit & Close | audit + Jira-comment toggles |
+
+- **`DorNodeSettings` + `DorNodeSettingsConfig`**: the per-node slice and a pure serializer that stores it under
+  `dor` in the node's config blob, coexisting with the node's `references` — each preserves the other.
+- **The assembler now overlays every namespace**, not just the document. A node value wins when set; blank
+  strings and empty lists count as unset and fall back to the connector row.
+- **The connector card is no longer required**: a workflow whose nodes supply the essentials (DoR document,
+  project keys, ready transition) is marked configured on its own. Dry-run ships ON in the starter, so a
+  node-configured workflow logs its intended Jira writes rather than performing them until you turn it off.
+
 ### Changed — Workflow Builder UX for the DoR workflow (spec-021)
 
 Completes the builder so the DoR workflow is what you see, read, and configure:

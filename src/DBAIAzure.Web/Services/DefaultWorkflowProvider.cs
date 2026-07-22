@@ -35,6 +35,18 @@ public static class DefaultWorkflowProvider
             OutputPorts = new[] { triggerOut }.ToList().AsReadOnly(),
             IsConfigured = true, PositionX = 60, PositionY = 200,
         };
+        // Which tickets start this workflow, plus the global dry-run safety switch — owned by the entry point.
+        trigger = trigger with
+        {
+            FunctionConfig = DorNodeSettingsConfig.Write(trigger.FunctionConfig, new DorNodeSettings
+            {
+                Role = DorNodeRole.Trigger,
+                ProjectKeys = new[] { "SBRO" },
+                IssueTypes = new[] { "Story" },
+                WatchFields = new[] { "summary", "description", "acceptance_criteria" },
+                DryRun = true,
+            }),
+        };
 
         // 2. AI DoR review.
         var reviewIn = Port("Ticket", PortDirection.Input);
@@ -58,6 +70,16 @@ public static class DefaultWorkflowProvider
                 },
             }),
             IsConfigured = true, PositionX = 300, PositionY = 200,
+        };
+        // Review model settings sit alongside the DoR document reference in the same node config blob.
+        review = review with
+        {
+            FunctionConfig = DorNodeSettingsConfig.Write(review.FunctionConfig, new DorNodeSettings
+            {
+                Role = DorNodeRole.Review,
+                Temperature = 0.1,
+                MaxTokens = 2000,
+            }),
         };
 
         // 3. Route on the verdict.
@@ -84,6 +106,16 @@ public static class DefaultWorkflowProvider
             OutputPorts = new[] { transitionOut }.ToList().AsReadOnly(),
             IsConfigured = true, PositionX = 800, PositionY = 90,
         };
+        // The ready path owns where a passing ticket lands.
+        transition = transition with
+        {
+            FunctionConfig = DorNodeSettingsConfig.Write(transition.FunctionConfig, new DorNodeSettings
+            {
+                Role = DorNodeRole.ReadyTransition,
+                ReadyTransitionId = "31",
+                ReadyStatus = "Ready to Work",
+            }),
+        };
 
         // 5. Not-ready path — resolve the gaps with a human (the HITL conversation → RequestPort).
         var resolveIn = Port("Gaps", PortDirection.Input);
@@ -97,6 +129,18 @@ public static class DefaultWorkflowProvider
             OutputPorts = new[] { resolveResolved, resolveEscalate }.ToList().AsReadOnly(),
             IsConfigured = true, PositionX = 800, PositionY = 300,
         };
+        // The human conversation owns its channel, patience, and primary SLA. Channel is left unset so the
+        // operator picks it on the node (until then the connector configuration supplies it).
+        resolve = resolve with
+        {
+            FunctionConfig = DorNodeSettingsConfig.Write(resolve.FunctionConfig, new DorNodeSettings
+            {
+                Role = DorNodeRole.Resolve,
+                ReplyTimeoutMinutes = 240,
+                MaxIterations = 3,
+                SlaHours = 24,
+            }),
+        };
 
         // 6. Apply the resolution — update whitelisted fields + transition.
         var updateIn = Port("Resolution", PortDirection.Input);
@@ -108,6 +152,15 @@ public static class DefaultWorkflowProvider
             InputPorts = new[] { updateIn }.ToList().AsReadOnly(),
             OutputPorts = new[] { updateOut }.ToList().AsReadOnly(),
             IsConfigured = true, PositionX = 1060, PositionY = 230,
+        };
+        // The write step owns the strict whitelist of fields the agent may change (FR-021).
+        update = update with
+        {
+            FunctionConfig = DorNodeSettingsConfig.Write(update.FunctionConfig, new DorNodeSettings
+            {
+                Role = DorNodeRole.Update,
+                AiEditableFields = new[] { "acceptance_criteria" },
+            }),
         };
 
         // 7. Escalation / manual handoff.
@@ -121,6 +174,18 @@ public static class DefaultWorkflowProvider
             OutputPorts = new[] { escalateOut }.ToList().AsReadOnly(),
             IsConfigured = true, PositionX = 1060, PositionY = 380,
         };
+        // Escalation owns its own channel, tighter SLA/iteration budget, and the manual-handoff label.
+        escalate = escalate with
+        {
+            FunctionConfig = DorNodeSettingsConfig.Write(escalate.FunctionConfig, new DorNodeSettings
+            {
+                Role = DorNodeRole.Escalate,
+                ReplyTimeoutMinutes = 120,
+                MaxIterations = 2,
+                SlaHours = 8,
+                ManualLabel = "dor-manual-required",
+            }),
+        };
 
         // 8. Audit & close (terminal).
         var auditIn = Port("Outcome", PortDirection.Input);
@@ -130,6 +195,18 @@ public static class DefaultWorkflowProvider
             InputLabel = auditIn.Label,
             InputPorts = new[] { auditIn }.ToList().AsReadOnly(),
             IsConfigured = true, PositionX = 1320, PositionY = 300,
+        };
+        // The terminal step owns what gets recorded and commented back to the ticket.
+        audit = audit with
+        {
+            FunctionConfig = DorNodeSettingsConfig.Write(audit.FunctionConfig, new DorNodeSettings
+            {
+                Role = DorNodeRole.Audit,
+                LogAiResponses = true,
+                JiraCommentOnPass = true,
+                JiraCommentOnFail = true,
+                JiraCommentOnEscalation = true,
+            }),
         };
 
         var edges = new[]

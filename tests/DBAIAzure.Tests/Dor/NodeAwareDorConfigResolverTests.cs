@@ -123,6 +123,97 @@ public sealed class NodeAwareDorConfigResolverTests
         Assert.Equal("hook-secret", secrets.JiraWebhookSecret);
     }
 
+    // ── Step 4: every namespace now comes from the nodes that own it ────────────
+
+    [Fact]
+    public async Task ResolveActive_StarterWorkflow_SuppliesEveryNamespaceFromItsNodes()
+    {
+        // Nothing configured on the card at all — the whole configuration comes from the node graph.
+        var resolver = Build(DorWorkflowConfig.Unconfigured, DorWorkflowWithDocument(NodeDocument));
+
+        var config = await resolver.ResolveActiveAsync();
+
+        // Trigger node
+        Assert.Equal(new[] { "SBRO" }, config.Jira.ProjectKeys);
+        Assert.Equal(new[] { "Story" }, config.Jira.IssueTypes);
+        Assert.Contains("acceptance_criteria", config.Jira.WatchFields);
+        Assert.True(config.Run.DryRun);
+        // Ready-transition node
+        Assert.Equal("31", config.Jira.ReadyTransitionId);
+        Assert.Equal("Ready to Work", config.Jira.ReadyStatus);
+        // Update node
+        Assert.Equal(new[] { "acceptance_criteria" }, config.Jira.AiEditableFields);
+        // Escalate node
+        Assert.Equal("dor-manual-required", config.Jira.ManualLabel);
+        Assert.Equal(2, config.Comms.Escalation.MaxIterations);
+        Assert.Equal(8, config.Sla.EscalationSlaHours);
+        // Resolve node
+        Assert.Equal(240, config.Comms.Primary.ReplyTimeoutMinutes);
+        Assert.Equal(3, config.Comms.Primary.MaxIterations);
+        Assert.Equal(24, config.Sla.PrimarySlaHours);
+        // Review node
+        Assert.Equal(0.1, config.Ai.Temperature);
+        Assert.Equal(2000, config.Ai.MaxTokens);
+    }
+
+    [Fact]
+    public async Task ResolveActive_NodeGraphSuppliesEssentials_MarksConfiguredWithoutTheCard()
+    {
+        // The whole point of step 4: the connector card is no longer required to run the workflow.
+        var resolver = Build(DorWorkflowConfig.Unconfigured, DorWorkflowWithDocument(NodeDocument));
+
+        var config = await resolver.ResolveActiveAsync();
+
+        Assert.True(config.IsConfigured);
+    }
+
+    [Fact]
+    public async Task ResolveActive_NodeGraphMissingDocument_StaysUnconfigured()
+    {
+        // Without a DoR document there is nothing to review against, so it must not claim to be configured.
+        var resolver = Build(DorWorkflowConfig.Unconfigured, DorWorkflowWithDocument("   "));
+
+        var config = await resolver.ResolveActiveAsync();
+
+        Assert.False(config.IsConfigured);
+    }
+
+    [Fact]
+    public async Task ResolveActive_BlankNodeValue_FallsBackToConnectorValue()
+    {
+        // A node field left empty is "not set here" — the connector value must survive.
+        var connector = ConfiguredConfig() with
+        {
+            Jira = new DorJiraConfig { ReadyTransitionId = "99", ProjectKeys = new[] { "FROMCARD" } },
+        };
+        var workflow = DorWorkflowWithDocument(NodeDocument);
+        var workflowWithBlankTransition = ClearReadyTransitionOnNode(workflow);
+
+        var config = await Build(connector, workflowWithBlankTransition).ResolveActiveAsync();
+
+        Assert.Equal("99", config.Jira.ReadyTransitionId);
+        // The trigger node still supplies its own project keys, so those come from the node.
+        Assert.Equal(new[] { "SBRO" }, config.Jira.ProjectKeys);
+    }
+
+    /// <summary>Blanks the ready-transition node's settings to simulate an operator clearing that field.</summary>
+    private static WorkflowDefinition ClearReadyTransitionOnNode(WorkflowDefinition workflow)
+    {
+        var nodes = workflow.Nodes
+            .Select(node => DorNodeSettingsConfig.ReadRole(node.FunctionConfig) != DorNodeRole.ReadyTransition
+                ? node
+                : node with
+                {
+                    FunctionConfig = DorNodeSettingsConfig.Write(
+                        node.FunctionConfig,
+                        new DorNodeSettings { Role = DorNodeRole.ReadyTransition, ReadyTransitionId = "  " }),
+                })
+            .ToList()
+            .AsReadOnly();
+
+        return workflow with { Nodes = nodes };
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
     private static NodeAwareDorConfigResolver Build(DorWorkflowConfig connectorConfig, WorkflowDefinition? workflow) =>
@@ -145,7 +236,8 @@ public sealed class NodeAwareDorConfigResolverTests
                 ? node
                 : node with
                 {
-                    FunctionConfig = NodeReferenceConfig.Write(null, new[]
+                    // Merge into the node's existing config so its seeded DoR role/settings survive.
+                    FunctionConfig = NodeReferenceConfig.Write(node.FunctionConfig, new[]
                     {
                         new NodeReference
                         {
