@@ -59,7 +59,9 @@ public sealed class JiraAdapterTests
     {
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://x.atlassian.net") };
         var connection = new JiraConnection(http, "https://x.atlassian.net", "PROJ");
-        return new JiraWorkTrackerAdapter(new StubConnectionFactory(connection), new StubBindingMap(), NullLogger<JiraWorkTrackerAdapter>.Instance);
+        return new JiraWorkTrackerAdapter(
+            new StubConnectionFactory(connection), new StubJiraMcpClient(), new StubBindingMap(),
+            NullLogger<JiraWorkTrackerAdapter>.Instance);
     }
 
     private sealed class StubConnectionFactory : IJiraConnectionFactory

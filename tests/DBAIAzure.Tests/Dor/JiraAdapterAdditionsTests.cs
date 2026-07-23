@@ -67,7 +67,9 @@ public sealed class JiraAdapterAdditionsTests
     {
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://x.atlassian.net") };
         var connection = new JiraConnection(http, "https://x.atlassian.net", "SBRO");
-        return new JiraWorkTrackerAdapter(new StubConnectionFactory(connection), new StubBindingMap(), NullLogger<JiraWorkTrackerAdapter>.Instance);
+        return new JiraWorkTrackerAdapter(
+            new StubConnectionFactory(connection), new StubJiraMcpClient(), new StubBindingMap(),
+            NullLogger<JiraWorkTrackerAdapter>.Instance);
     }
 
     private static HttpResponseMessage Json(string body, HttpStatusCode status = HttpStatusCode.OK) =>

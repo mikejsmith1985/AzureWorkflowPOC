@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Jira is reached MCP-first, and every Jira credential lives in one place
+
+Jira was the last integration still hard-wired to a vendor REST API while Slack had been MCP-first for a while,
+and the DoR trigger's webhook secret had been stranded on its own settings card. Both are fixed: the Work
+Tracking System connector now owns the MCP transport, the trigger, and all three Jira credentials.
+
+- **MCP transport for Jira** (`JiraMcpClient`): reading a ticket, transitioning it, and searching by JQL now go
+  through the connector's configured MCP tools. Reuses the existing MCP gateway — a tool call is a tool call, so
+  no new plumbing. Tool names and argument shapes are configurable, so any server's naming is expressible without
+  a code change.
+- **REST is the documented fallback**, not the default. `JiraWorkTrackerAdapter` tries MCP for reads and
+  transitions and drops to the Jira REST API when MCP is not configured or a call fails. Issue creation and
+  comments remain REST-only — no MCP path was added for them.
+- **MCP-first trigger** (`JiraMcpTriggerPoller`): a background sweep asks the search tool for tickets created
+  since the last pass and starts a DoR run for each. MCP is request/response and cannot push, so the MCP trigger
+  polls; the inbound HMAC webhook stays available as the lower-latency alternative. Dormant unless a search tool
+  and a positive interval are configured, and every sweep re-reads config so changes need no restart.
+- **One place for Jira credentials**: the standalone "Jira Webhook" card is gone. The API token, the MCP auth
+  token, and the webhook signing secret are all entered on the Work Tracking System connector's Jira form,
+  alongside the MCP and trigger settings.
+- **`SecretBlobMerge`**: a connector row holds all its credentials in one blob, so saving one credential used to
+  risk erasing its neighbours. Typed values are now merged over the stored ones; blanks mean "unchanged".
+- **Backward compatible**: connector rows written before this change parse unchanged (REST-only, no polling), and
+  a webhook secret still stored on the old DoR row keeps working until it is re-entered on the connector.
+- Shared `JiraFieldFlattener` so a ticket reads identically to the AI whichever transport fetched it.
+
 ### Added — Node references: typed attachments on every node (spec-021, node-config step 1)
 
 First step of moving DoR configuration off the global connector card and onto the workflow nodes where it

@@ -54,13 +54,15 @@ public sealed class DorConfigResolver : IDorConfigResolver
     /// <inheritdoc/>
     public async Task<DorWorkflowSecrets> ResolveSecretsAsync(CancellationToken ct = default)
     {
+        var secrets = new DorWorkflowSecrets(null, null, null, null);
+
         try
         {
             var json = await _configRepo.GetDecryptedSecretsAsync(ConnectorType.DorWorkflow, ct);
             if (json is not null
-                && JsonSerializer.Deserialize<DorWorkflowSecrets>(json, JsonOptions) is { } secrets)
+                && JsonSerializer.Deserialize<DorWorkflowSecrets>(json, JsonOptions) is { } stored)
             {
-                return secrets;
+                secrets = stored;
             }
         }
         catch (Exception ex)
@@ -68,6 +70,34 @@ public sealed class DorConfigResolver : IDorConfigResolver
             _logger.LogWarning(ex, "Resolving DoR workflow secrets failed; treating as none stored.");
         }
 
-        return new DorWorkflowSecrets(null, null, null, null);
+        // The Jira webhook signing secret belongs with the rest of the Jira credentials on the Work Tracking
+        // System connector. Prefer it there; the legacy DoR row above is the fallback for installs configured
+        // before the move, so an upgrade keeps working until the operator re-enters the secret.
+        var fromWorkTracker = await ReadJiraWebhookSecretAsync(ct);
+        if (!string.IsNullOrWhiteSpace(fromWorkTracker))
+            secrets = secrets with { JiraWebhookSecret = fromWorkTracker };
+
+        return secrets;
+    }
+
+    /// <summary>Reads <c>jiraWebhookSecret</c> from the Work Tracking System connector's encrypted secrets blob.</summary>
+    private async Task<string?> ReadJiraWebhookSecretAsync(CancellationToken ct)
+    {
+        try
+        {
+            var json = await _configRepo.GetDecryptedSecretsAsync(ConnectorType.WorkTracker, ct);
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.TryGetProperty("jiraWebhookSecret", out var value)
+                ? value.GetString()
+                : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Reading the Jira webhook secret from the work-tracker connector failed.");
+            return null;
+        }
     }
 }
