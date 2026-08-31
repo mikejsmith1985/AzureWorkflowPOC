@@ -9,15 +9,17 @@ using Microsoft.Playwright;
 namespace DBAIAzure.E2ETests.Tests;
 
 /// <summary>
-/// Scenario A: a plain-language workflow is turned into a runnable one. Navigates to the 4-node example
-/// (Trigger → AI → Approval → Notify), runs "Make it real", accepts the proposals, and asserts the
+/// Scenario A: a plain-language workflow is turned into a runnable one. Navigates to the builder's default
+/// starter — since spec-021 that is the 8-node Intelligent DoR Validation Workflow, not the retired 4-node
+/// "Support Request Flow" — runs "Make it real", accepts the proposals, and asserts the
 /// readiness verdict surfaces and the workflow is runnable. The Notify node binds a messaging connector,
 /// so the verdict may be "Not ready" when that connector is unconfigured in the test environment — the
 /// test asserts a verdict was produced, not a specific value, to stay independent of connector health.
 /// </summary>
 public sealed class NodeRealizationTests : E2ETestBase
 {
-    // "new" is not a valid GUID, so the page loads the 4-node example without the entry-choice modal.
+    // "new" is not a valid GUID, so the page loads the default starter without the entry-choice modal.
+    // That starter is the DoR Validation Workflow (spec-021 US5), so this also covers quickstart Scenario E.
     private const string BuilderUrl = "/workflow-builder/new";
 
     // Realization runs one LLM call per node in sequence, so allow generous time for the panel to fill.

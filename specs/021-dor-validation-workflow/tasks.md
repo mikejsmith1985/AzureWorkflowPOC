@@ -1,5 +1,36 @@
 # Tasks: Intelligent DoR Validation Workflow
 
+
+## Status (reconciled 2026-08-31)
+
+
+
+**83/84 — shipped and verified; one live-verification task remains.**
+
+
+
+The engine, builder UX and config path are merged to `main` (#60-#66). Gates are green: `dotnet test` **836
+
+passed / 0 failed**, `run-e2e.ps1` **81/81** (T078), and the `/speckit-analyze` consistency gate passed with
+
+**0 critical / 0 high** (T079).
+
+
+
+- **T066/T067 are superseded, not outstanding** — #64 moved DoR configuration onto the workflow's own nodes
+
+  (`DorNodeRole` / `DorNodeSettings`), so the global config card those tasks describe would now be a second
+
+  source of truth.
+
+- **T077 is the only open item**, and only partly: quickstart **Scenario E is verified**; **A-D need a real
+
+  Jira project and Slack workspace**, which this environment does not have configured. See the note on T077.
+
+
+
+---
+
 **Feature**: `specs/021-dor-validation-workflow/` | **Branch**: `feature/dor-validation-workflow`
 **Inputs**: plan.md, spec.md (US1–US7), research.md (D1–D10), data-model.md, contracts/ (6), quickstart.md
 **Testing**: TDD per Constitution Article V — failing test before implementation (Red → Green → Refactor).
@@ -183,9 +214,28 @@ Paths are repo-relative. Reuse-first (Article VII): only the five documented gap
 - [x] T075 [P] Confirm dry-run gate covers every write executor (pass/update/outreach/escalation/manual) via a single test matrix in tests/DBAIAzure.Tests/Dor/DryRunGateTests.cs
 - [x] T076 [P] Update CHANGELOG.md with the spec-021 feature summary (Article VI)
 - [ ] T077 Run full quickstart.md scenarios A–E against real Jira + Slack (dry-run then live); capture evidence (Article X)
-- [ ] T078 Run `scripts/run-e2e.ps1` (Playwright) and full `dotnet test`; all green before PR
+  > **Partially done 2026-08-31. Scenario E: VERIFIED. Scenarios A-D: BLOCKED on live systems.**
+  >
+  > **E (builder default)** — verified against the running app at `localhost:5099`: `/workflow-builder/new`
+  > renders the *Intelligent DoR Validation Workflow* with all eight seeded nodes (Jira Ticket Created, AI DoR
+  > Review, Ready to Work?, Move to Ready Status, Resolve Gaps in Chat, Update Ticket & Transition, Escalate /
+  > Manual Handoff, Audit & Close). "Support Request Flow" survives only in `LegacyExampleWorkflowPurger`, which
+  > deletes saved copies at startup. Step 2 (Make it real) is covered by the E2E
+  > `MakeItReal_ProposeAcceptAll_ProducesReadinessVerdict`, which drives this same graph and now passes. Step 3
+  > (per-node panels + incomplete config blocks the run) is covered by `WorkflowNodeConfigPanel` (32 role
+  > branches) and `DorNodesConfiguredRuleTests`.
+  >
+  > **A-D blocked**, and not by code. The environment has no target: the Work Tracking connector points at
+  > `dev.azure.com/e2e-org` / `E2EProject` (placeholders an E2E test wrote — now fixed to restore, same defect
+  > class as #69), and there is **no `DorWorkflow` connector row at all** (0 rows). Running A-D needs the
+  > connector repointed at a real Jira project with a vault token, a DoR Workflow row (channels, SLAs, DoR
+  > document), and creates real side effects — Jira tickets and Slack messages in a live workspace — so it
+  > needs an explicit go-ahead and a known-good Jira/Slack state rather than being run unattended.
+- [x] T078 Run `scripts/run-e2e.ps1` (Playwright) and full `dotnet test`; all green before PR  
+  > Green 2026-08-31 on `main`: `dotnet test` **836 passed / 0 failed / 1 skipped**, and `run-e2e.ps1` **81/81, 0 failed** (4m44s). The four `NodeRealizationTests` that had blocked this gate were fixed in #69 — a shared-state defect where `LlmKeyEntryTests` saved a dummy API key over the LLM connector row every run.
 - [x] T079a Set the DoR deployment to **`min-replicas ≥ 1`** (analyze A1) in deploy/aca/deploy.ps1 params/docs so the SLA/reply-poll BackgroundService keeps running (scale-to-zero would stall SLA timers)
-- [ ] T079 Run `/speckit-analyze` consistency gate, then open the PR to `main`
+- [x] T079 Run `/speckit-analyze` consistency gate, then open the PR to `main`  
+  > Analyze gate run 2026-08-31: **PASS — 0 critical, 0 high.** 3 LOW findings (two "fast-follow" deferrals and one "robust" adjective, all deliberate) and 2 MEDIUM traceability findings: only 3 of 32 FR-ids and 0 of 9 SC-ids are cited in tasks.md, because coverage is tagged by user story (`[US1]`-`[US7]`, 60 tasks) rather than by requirement id. Coverage was therefore verified against source instead — every sampled FR has implementing code (FR-002 JiraWebhookParser, FR-006 DorDocumentSource, FR-010 RequestPort/CheckpointManager, FR-011 SlackMcpReplyReader, FR-016 BusinessHoursSlaCalculator, FR-021 FieldWhitelist, FR-023/024 AuditExecutor/DorMetrics, FR-027 DefaultWorkflowProvider, FR-029 DorNodeSettings, FR-031 DorRunState, FR-032 DryRun). Constitution clean: no prerelease packages, no SK residue, no hardcoded secrets, CHANGELOG current. The "open the PR to main" half is moot — spec-021 shipped incrementally through #60-#66.
 
 ---
 

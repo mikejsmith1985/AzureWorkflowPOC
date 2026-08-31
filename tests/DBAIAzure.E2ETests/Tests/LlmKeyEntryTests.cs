@@ -55,10 +55,15 @@ public sealed class LlmKeyEntryTests : E2ETestBase
 
         await LlmCard.Locator("button:has-text('Edit')").First.ClickAsync();
 
-        // Choose a provider, type a model (no live "Fetch Models" call), and enter a dummy key.
+        // Wait for the edit form itself before touching its fields — the key input is the element under test,
+        // and its presence is what proves the form expanded.
+        var keyField = LlmCard.Locator("input[type='password']").First;
+        await keyField.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
+
+        // Choose a provider, set a model (no live "Fetch Models" call), and enter a dummy key.
         await LlmCard.Locator("select").First.SelectOptionAsync(new SelectOptionValue { Value = "anthropic" });
-        await LlmCard.Locator("input[type='text']").First.FillAsync("claude-sonnet-4-6");
-        await LlmCard.Locator("input[type='password']").First.FillAsync("sk-ant-e2e-dummy-not-a-real-key");
+        await SetModelAsync("claude-sonnet-4-6");
+        await keyField.FillAsync("sk-ant-e2e-dummy-not-a-real-key");
 
         await LlmCard.Locator("button:has-text('Save')").First.ClickAsync();
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
@@ -72,6 +77,26 @@ public sealed class LlmKeyEntryTests : E2ETestBase
         // Put the working key back. The LLM connector row is shared by every test in the collection, so
         // leaving the dummy in place breaks any later test that needs a real model call.
         await RestoreWorkingKeyAsync();
+    }
+
+
+    /// <summary>
+    /// Sets the model on the LLM card. The card renders the model as a free-text box until "Fetch Models" has
+    /// populated a list, and as a dropdown afterwards — so a test that assumes one shape breaks whenever the
+    /// connector's state differs. This handles both.
+    /// </summary>
+    private async Task SetModelAsync(string model)
+    {
+        var modelTextBox = LlmCard.Locator("input[type='text']").First;
+        if (await modelTextBox.CountAsync() > 0 && await modelTextBox.IsVisibleAsync())
+        {
+            await modelTextBox.FillAsync(model);
+            return;
+        }
+
+        // Fetched-models state: the second select on the card is the model list (the first is the provider).
+        var modelSelect = LlmCard.Locator("select").Nth(1);
+        await modelSelect.SelectOptionAsync(new SelectOptionValue { Value = model });
     }
 
     /// <summary>
