@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.DataProtection;
+﻿using Microsoft.AspNetCore.DataProtection;
 using System.Text.Json;
 using DBAIAzure.Connectors;
 using DBAIAzure.Core.Configuration;
@@ -424,6 +424,7 @@ builder.Services.AddSingleton<IWorkflowReadinessRule, TriggerNodePresentRule>();
 builder.Services.AddSingleton<IWorkflowReadinessRule, AllNodesRealizedRule>();
 builder.Services.AddSingleton<IWorkflowReadinessRule, ConnectorsHealthyRule>();
 builder.Services.AddSingleton<IWorkflowReadinessRule, ApprovalNodesConfiguredRule>();
+builder.Services.AddSingleton<IWorkflowReadinessRule, DorNodesConfiguredRule>();
 builder.Services.AddSingleton<IWorkflowPreRunValidator, WorkflowPreRunValidator>();
 
 // ── Run retention background service (FR-18.4) ────────────────────────────────

@@ -4,6 +4,7 @@
 using DBAIAzure.Core.Configuration;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
+using DBAIAzure.Core.Models.DorWorkflow;
 using DBAIAzure.Core.Models.NodeConfig;
 using DBAIAzure.Web.Rules;
 using DBAIAzure.Web.Services;
@@ -188,6 +189,128 @@ public sealed class ApprovalNodesConfiguredRuleTests
     }
 }
 
+// ── T071: DorNodesConfiguredRule ───────────────────────────────────
+
+public sealed class DorNodesConfiguredRuleTests
+{
+    private static readonly DorNodesConfiguredRule Rule = new();
+    private static readonly IReadOnlyList<ConnectorConfig> NoConnectors = Array.Empty<ConnectorConfig>();
+
+    [Fact]
+    public async Task CheckAsync_NoDorNodes_Passes()
+    {
+        var workflow = DorTestHelpers.WorkflowWith(WorkflowNode.CreateNew(WorkflowNodeType.Trigger, "Start"));
+        var result   = await Rule.CheckAsync(workflow, NoConnectors);
+        Assert.True(result.Passed);
+    }
+
+    [Fact]
+    public async Task CheckAsync_EveryRoleCarriesWhatItNeeds_Passes()
+    {
+        var workflow = DorTestHelpers.WorkflowWith(
+            DorTestHelpers.DorNodeWith(new DorNodeSettings
+                { Role = DorNodeRole.Update, AiEditableFields = new[] { "description" } }),
+            DorTestHelpers.DorNodeWith(new DorNodeSettings
+                { Role = DorNodeRole.ReadyTransition, ReadyTransitionId = "31" }),
+            DorTestHelpers.DorNodeWith(new DorNodeSettings { Role = DorNodeRole.Resolve,  ChannelId = "C123" }),
+            DorTestHelpers.DorNodeWith(new DorNodeSettings { Role = DorNodeRole.Escalate, ChannelId = "C456" }));
+
+        var result = await Rule.CheckAsync(workflow, NoConnectors);
+        Assert.True(result.Passed);
+    }
+
+    [Fact]
+    public async Task CheckAsync_UpdateNodeWithEmptyWhitelist_Fails()
+    {
+        // An Update node with no whitelist may write nothing, so applying a resolution would silently no-op.
+        var node = DorTestHelpers.DorNodeWith(
+            new DorNodeSettings { Role = DorNodeRole.Update, AiEditableFields = Array.Empty<string>() },
+            label: "Apply resolution");
+
+        var result = await Rule.CheckAsync(DorTestHelpers.WorkflowWith(node), NoConnectors);
+        Assert.False(result.Passed);
+        Assert.Contains("Apply resolution", result.FailureReason);
+        Assert.Equal("dor-nodes-configured", result.RuleName);
+    }
+
+    [Fact]
+    public async Task CheckAsync_ReadyTransitionNodeWithBlankTransitionId_Fails()
+    {
+        var node = DorTestHelpers.DorNodeWith(
+            new DorNodeSettings { Role = DorNodeRole.ReadyTransition, ReadyTransitionId = "  " },
+            label: "Mark ready");
+
+        var result = await Rule.CheckAsync(DorTestHelpers.WorkflowWith(node), NoConnectors);
+        Assert.False(result.Passed);
+        Assert.Contains("Mark ready", result.FailureReason);
+    }
+
+    [Theory]
+    [InlineData(DorNodeRole.Resolve)]
+    [InlineData(DorNodeRole.Escalate)]
+    public async Task CheckAsync_ConversationNodeWithNoChannel_Fails(DorNodeRole role)
+    {
+        var node   = DorTestHelpers.DorNodeWith(new DorNodeSettings { Role = role }, label: "Talk to human");
+        var result = await Rule.CheckAsync(DorTestHelpers.WorkflowWith(node), NoConnectors);
+        Assert.False(result.Passed);
+        Assert.Contains("Talk to human", result.FailureReason);
+    }
+
+    [Fact]
+    public async Task CheckAsync_SeveralUnconfiguredNodes_NamesEveryOne()
+    {
+        var workflow = DorTestHelpers.WorkflowWith(
+            DorTestHelpers.DorNodeWith(new DorNodeSettings { Role = DorNodeRole.Update },  label: "Apply resolution"),
+            DorTestHelpers.DorNodeWith(new DorNodeSettings { Role = DorNodeRole.Resolve }, label: "Ask the reporter"));
+
+        var result = await Rule.CheckAsync(workflow, NoConnectors);
+        Assert.False(result.Passed);
+        Assert.Contains("Apply resolution", result.FailureReason);
+        Assert.Contains("Ask the reporter", result.FailureReason);
+    }
+
+    [Fact]
+    public async Task CheckAsync_ConfiguredDorConnectorSuppliesTheGaps_Passes()
+    {
+        // NodeAwareDorConfigResolver treats a blank node field as "not set on the node" and inherits the DoR row,
+        // so a step left empty is only a real problem when there is no row to inherit from. The shipped starter
+        // workflow depends on this: it seeds no channel on its Resolve/Escalate steps.
+        var workflow = DorTestHelpers.WorkflowWith(
+            DorTestHelpers.DorNodeWith(new DorNodeSettings { Role = DorNodeRole.Update },  label: "Apply resolution"),
+            DorTestHelpers.DorNodeWith(new DorNodeSettings { Role = DorNodeRole.Resolve }, label: "Ask the reporter"));
+
+        var connectors = new[] { DorTestHelpers.ConnectorWithResult(ConnectorType.DorWorkflow, isSuccess: true) };
+
+        var result = await Rule.CheckAsync(workflow, connectors);
+        Assert.True(result.Passed);
+    }
+
+    [Fact]
+    public async Task CheckAsync_UnrelatedConnectorConfigured_StillBlocks()
+    {
+        // Only a DoR row supplies these fallbacks; a healthy Messaging or WorkTracker row says nothing about them.
+        var workflow   = DorTestHelpers.WorkflowWith(
+            DorTestHelpers.DorNodeWith(new DorNodeSettings { Role = DorNodeRole.Resolve }, label: "Ask the reporter"));
+        var connectors = new[] { DorTestHelpers.ConnectorWithResult(ConnectorType.Messaging, isSuccess: true) };
+
+        var result = await Rule.CheckAsync(workflow, connectors);
+        Assert.False(result.Passed);
+        Assert.Contains("Ask the reporter", result.FailureReason);
+    }
+    [Fact]
+    public async Task CheckAsync_RolesThatFallBackToConnectorConfig_Pass()
+    {
+        // Trigger, Review and Audit all fall back to the connector configuration, so an unset field is not a block.
+        var workflow = DorTestHelpers.WorkflowWith(
+            DorTestHelpers.DorNodeWith(new DorNodeSettings { Role = DorNodeRole.Trigger }),
+            DorTestHelpers.DorNodeWith(new DorNodeSettings { Role = DorNodeRole.Review }),
+            DorTestHelpers.DorNodeWith(new DorNodeSettings { Role = DorNodeRole.Audit }));
+
+        var result = await Rule.CheckAsync(workflow, NoConnectors);
+        Assert.True(result.Passed);
+    }
+}
+
 // ── T077: WorkflowPreRunValidator ─────────────────────────────────────────────
 
 public sealed class WorkflowPreRunValidatorTests
@@ -294,6 +417,13 @@ file static class DorTestHelpers
         {
             // NodeConfigSerializer wraps the config in an envelope; ReadConfig expects that format.
             FunctionConfig = NodeConfigSerializer.ToFunctionConfig(WorkflowNodeType.HumanApproval, config),
+        };
+
+    public static WorkflowNode DorNodeWith(DorNodeSettings settings, string label = "DoR Step") =>
+        WorkflowNode.CreateNew(WorkflowNodeType.AgenticReason, label) with
+        {
+            // DoR settings live under their own "dor" key in the node's config blob, written by DorNodeSettingsConfig.
+            FunctionConfig = DorNodeSettingsConfig.Write(null, settings),
         };
 
     public static IOptions<DorRuleSettings> SettingsOf(DorRuleSettings s) =>
