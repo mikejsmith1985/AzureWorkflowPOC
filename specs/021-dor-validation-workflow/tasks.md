@@ -12,8 +12,8 @@ Paths are repo-relative. Reuse-first (Article VII): only the five documented gap
 ## Phase 1: Setup
 
 - [x] T001 Create branch `feature/dor-validation-workflow` from `main` (Article III) and add a CHANGELOG.md "Unreleased" entry for spec-021
-- [ ] T002 [P] Create source folders: `src/DBAIAzure.Core/Models/DorWorkflow/`, `.../DorWorkflow/Config/`, `src/DBAIAzure.Processes/Executors/Dor/`, `src/DBAIAzure.Web/Services/Dor/`, `src/DBAIAzure.Web/Integrations/Jira/` (existing), and test folder `tests/DBAIAzure.Tests/Dor/Integration/`
-- [ ] T003 [P] Add `WorkTracker` reuse note + spec-021 pointer to `.github/copilot-instructions.md` active-work section (docs only)
+- [x] T002 [P] Create source folders: `src/DBAIAzure.Core/Models/DorWorkflow/`, `.../DorWorkflow/Config/`, `src/DBAIAzure.Processes/Executors/Dor/`, `src/DBAIAzure.Web/Services/Dor/`, `src/DBAIAzure.Web/Integrations/Jira/` (existing), and test folder `tests/DBAIAzure.Tests/Dor/Integration/`
+- [x] T003 [P] Add `WorkTracker` reuse note + spec-021 pointer to `.github/copilot-instructions.md` active-work section (docs only)
 
 ---
 
@@ -146,8 +146,12 @@ Paths are repo-relative. Reuse-first (Article VII): only the five documented gap
 
 - [x] T064 [P] [US6] Unit test `DorWorkflowTester` health (Jira reachable + transition id exists, Slack channel, DoR loads, AI key) in tests/DBAIAzure.Tests/Dor/DorWorkflowTesterTests.cs
 - [x] T065 [US6] Implement `DorWorkflowTester` on `IConnectorHealthChecker` seam in src/DBAIAzure.Connectors/DorWorkflow/DorWorkflowTester.cs and register in src/DBAIAzure.Connectors/ConnectorHealthChecker.cs
-- [ ] T066 [US6] Add "DoR Workflow" config card (six namespaces, secret-by-reference inputs, Check Health) to src/DBAIAzure.Web/Pages/ConnectorSettings.razor
-- [ ] T067 [P] [US6] bUnit test the DoR config card renders/saves/validates (inline-vs-url, business-hours) in tests/DBAIAzure.Tests/Dor/DorConfigCardTests.cs
+- [x] T066 [US6] Add "DoR Workflow" config card (six namespaces, secret-by-reference inputs, Check Health) to src/DBAIAzure.Web/Pages/ConnectorSettings.razor
+  
+  > **Superseded by #64.** The global DoR card was replaced by per-node configuration — settings now live on the node that owns them (`DorNodeSettings` / `DorNodeRole`), so a single global card would be a second source of truth.
+- [x] T067 [P] [US6] bUnit test the DoR config card renders/saves/validates (inline-vs-url, business-hours) in tests/DBAIAzure.Tests/Dor/DorConfigCardTests.cs
+  
+  > **Superseded by #64** along with T066; the card it tested no longer exists. Its coverage moved to `DorNodeSettingsPanelTests.cs` and `DorNodeSettingsConfigTests.cs`.
 - [x] T068 [US6] Add DoR seed to `DemoConnectorSeeder` (first-run seed from env; UI/DB authoritative) in src/DBAIAzure.Web/Services/DemoConnectorSeeder.cs and `ConnectorSeedOptions`
 - [x] T069 [US6] Integration test config hot-reload: change ready-status/DoR-doc between runs, next run uses new value; assert no secret in serialized config/logs in tests/DBAIAzure.Tests/Dor/Integration/DorConfigHotReloadTests.cs
 
@@ -160,9 +164,15 @@ Paths are repo-relative. Reuse-first (Article VII): only the five documented gap
 **Goal**: Node-appropriate, validated config panels for the DoR node kinds; incomplete config blocks the run.
 **Independent test**: open each DoR node config → relevant validated settings; incomplete config flagged before make-it-real.
 
-- [ ] T070 [US7] Enrich config panels for DoR node kinds (review: DoR source/prompt; conversation: channel/timeout/iterations; update: whitelist/transition; notify) in src/DBAIAzure.Web/Components/WorkflowBuilder/WorkflowNodeConfigPanel.razor
-- [ ] T071 [P] [US7] Add readiness rules (whitelist set, transition id set, channels set) following `ApprovalNodesConfiguredRule` in src/DBAIAzure.Web/Rules/DorNodesConfiguredRule.cs + register
-- [ ] T072 [P] [US7] bUnit test each DoR node panel validation + incomplete-config blocks run in tests/DBAIAzure.Tests/Dor/DorNodeConfigPanelTests.cs
+- [x] T070 [US7] Enrich config panels for DoR node kinds (review: DoR source/prompt; conversation: channel/timeout/iterations; update: whitelist/transition; notify) in src/DBAIAzure.Web/Components/WorkflowBuilder/WorkflowNodeConfigPanel.razor
+  
+  > Delivered by #64: `WorkflowNodeConfigPanel.razor` branches on all seven `DorNodeRole` values across 18 fields.
+- [x] T071 [P] [US7] Add readiness rules (whitelist set, transition id set, channels set) following `ApprovalNodesConfiguredRule` in src/DBAIAzure.Web/Rules/DorNodesConfiguredRule.cs + register
+  
+  > `src/DBAIAzure.Web/Rules/DorNodesConfiguredRule.cs`, registered in `Program.cs`. Blocks the three settings with no fallback: Update whitelist, ReadyTransition id, Resolve/Escalate channel.
+- [x] T072 [P] [US7] bUnit test each DoR node panel validation + incomplete-config blocks run in tests/DBAIAzure.Tests/Dor/DorNodeConfigPanelTests.cs
+  
+  > Delivered by #64 (`DorNodeSettingsPanelTests.cs`) plus `DorNodesConfiguredRuleTests` in `WorkflowPreRunValidatorTests.cs` for the blocks-run half.
 
 ---
 

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — A DoR step cannot start a run without the settings it needs (spec-021, T071)
+
+Three DoR node settings have no safe default, and a run that starts without them fails part-way through against
+a real ticket rather than up front. `DorNodesConfiguredRule` now blocks the run before it starts and names every
+offending step in one message, so the failure arrives in the builder instead of in Jira.
+
+- **Update step with an empty field whitelist** — the whitelist is enforced in code (FR-021), so an empty one
+  means the step may write nothing and applying a resolution would silently no-op.
+- **Ready-transition step with no transition id** — a passing ticket would have nowhere to move.
+- **Resolve or Escalate step with no channel** — the conversation would have nobody to talk to.
+- **A blank field on a step is not by itself a problem.** Node settings overlay the DoR connector row, so an empty
+  step inherits the row's value — the shipped starter workflow relies on exactly that for its channels. The rule
+  therefore blocks only when there is no configured DoR Workflow row to inherit from, which is the one case where
+  a blank field really does mean the value is nowhere to be found.
+- **Trigger, Review and Audit are exempt in every case**: each of their fields has a working default, so leaving
+  one unset is a deliberate "use the default" rather than an incomplete step.
+- Reports every unconfigured step in one message rather than stopping at the first, and is disable-able by name
+  (`dor-nodes-configured`) through `DorRuleSettings` like every other readiness rule.
+
 ### Changed — Jira is reached MCP-first, and every Jira credential lives in one place
 
 Jira was the last integration still hard-wired to a vendor REST API while Slack had been MCP-first for a while,
