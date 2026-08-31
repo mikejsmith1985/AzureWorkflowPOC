@@ -1,5 +1,15 @@
 # Tasks: Admin Console UX Polish — Configuration & Visual Parity
 
+## Status (reconciled 2026-08-31)
+
+**Superseded by spec-014 (`014-admin-console-ui-redesign`).** None of this spec's deliverables were ever
+built — `SecretSentinel.cs`, `ConnectorFieldSchema.cs` and `ConnectorFormState.cs` do not exist anywhere in the
+tree — and the admin console was instead rebuilt under spec-014, which is 40/42 complete.
+
+**Do not implement from this file.** It is retained as history; the live surface is `ConnectorSettings.razor`.
+
+---
+
 > **Implementation status (2026-06-26):** This spec predated work that already shipped. Re-baselined
 > against current `main` before implementing:
 > - **Already shipped (no-op):** US1 typed connector forms (no JSON textarea; `ConnectorSettings.razor`

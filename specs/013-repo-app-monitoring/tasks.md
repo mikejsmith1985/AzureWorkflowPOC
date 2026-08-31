@@ -4,6 +4,13 @@ description: "Task list for feature 013 — Point at a Repo, Run Its App in a Th
 
 # Tasks: Point at a Repo, Run Its App in a Throwaway Container, Monitor It
 
+## Status (reconciled 2026-08-31)
+
+**Shipped.** The only open item is **T055**, a `quickstart.md` scenarios 1–4 run capturing behavioral
+evidence (Article X) — verification, not development.
+
+---
+
 **Input**: Design documents from `specs/013-repo-app-monitoring/`
 
 **Prerequisites**: plan.md ✅, spec.md ✅ (FR-001…FR-018), research.md ✅, data-model.md ✅, contracts/ ✅

@@ -1,5 +1,16 @@
 # Tasks: ADO Telemetry Field Bootstrap
 
+## Status (reconciled 2026-08-31)
+
+**Shipped** across PRs #42–#45 (ADO telemetry bootstrap, preflight, cost ledger). The deliverables exist:
+`IAdoTelemetryPreflightService`, `ICostLedger`, `AdoTelemetryPreflightService`, `AdoTelemetryManifestReader`
+and the `Models/AdoTelemetry/` record set.
+
+Checkboxes below are unreliable — many name paths that were renamed by later specs. The one genuinely open
+item is the **live ADO round-trip**, which needs a real organization and is tracked alongside spec-016 T036.
+
+---
+
 **Input**: Design documents from `specs/008-ado-telemetry-bootstrap/`
 
 **Prerequisites**: plan.md ✅ spec.md ✅ research.md ✅ data-model.md ✅ contracts/ ✅

@@ -1,5 +1,13 @@
 # Tasks: Pipeline Connector Configuration Modal
 
+## Status (reconciled 2026-08-31)
+
+**Shipped.** The only open item is **T039**, a manual audit confirming no secret value appears in the browser
+Network tab or unencrypted in `pipeline.db` — verification, not development. Article IX makes this worth actually
+doing before the next release.
+
+---
+
 **Input**: Design documents from `specs/002-pipeline-connector-config/`
 
 **Prerequisites**: [plan.md](plan.md) · [spec.md](spec.md) · [research.md](research.md) · [data-model.md](data-model.md) · [contracts/](contracts/)
