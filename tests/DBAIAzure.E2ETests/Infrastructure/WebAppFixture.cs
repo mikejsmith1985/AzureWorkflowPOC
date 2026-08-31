@@ -62,6 +62,9 @@ public sealed class WebAppFixture : IAsyncLifetime
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
+    /// <summary>The repository root, so tests can reach files the app is configured from.</summary>
+    public static string RepoRoot => FindRepoRoot();
+
     private static string FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

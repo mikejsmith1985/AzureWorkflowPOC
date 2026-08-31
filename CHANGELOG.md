@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — One E2E test was disabling four others by saving a dummy API key
+
+Every E2E class shares a single web app and a single `pipeline.db`. `LlmKeyEntryTests` saves
+`sk-ant-e2e-dummy-not-a-real-key` into the LLM connector row to prove the key field persists — and that row
+**overrides** `appsettings.Development.json` for the whole app. Every later test needing a real model call
+then got a 401.
+
+That is what had been failing the four `NodeRealizationTests`: their proposals rendered but each one came back
+`NeedsInput` with no config, so `AcceptableCount` stayed 0 and "Accept all" was never enabled. The symptom —
+`Locator expected to be enabled` after a two-minute wait — reads like a UI timing bug and reproduces on every
+commit, which is exactly why it looked pre-existing and unrelated rather than self-inflicted.
+
+- `LlmKeyEntryTests` now **restores the key it overwrote**, reading it from the same two places the app does:
+  the `Anthropic__ApiKey` environment variable, else `appsettings.Development.json`. A placeholder or the
+  class's own dummy is never saved back over a real key.
+- `WebAppFixture.RepoRoot` is exposed so a test can reach the settings file the app is configured from.
+- No production code changed — this was a test-isolation defect, not a product bug.
+
 ### Added — The two AI-cost rules that shipped untested now have tests (spec-017 T010/T018)
 
 Both rules protect money, and neither had a test. They do now.
