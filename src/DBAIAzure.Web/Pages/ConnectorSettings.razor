@@ -152,9 +152,84 @@ else
                                 </div>
                                 <div>
                                     <label class="text-xs text-muted mb-1 flex items-center gap-1.5">API Token
-                                        <InfoTip Content="A Jira Cloud API token (id.atlassian.com → Security → API tokens). Stored encrypted; leave blank to keep the existing one." /></label>
+                                        <InfoTip Content="A Jira Cloud API token (id.atlassian.com → Security → API tokens). Used by the REST fallback path. Stored encrypted; leave blank to keep the existing one." /></label>
                                     <input type="password" @bind="entry.DraftSecret" placeholder="Leave blank to keep existing"
                                            autocomplete="new-password" class="@InputClass" />
+                                </div>
+
+                                <!-- ── MCP transport (preferred) ───────────────────────────────
+                                     Jira is reached MCP-first, the same way Slack is. Leave the server URL blank
+                                     to use the Jira REST API only. -->
+                                <div class="border-t border-line pt-3 mt-1" data-testid="jira-mcp-section">
+                                    <p class="text-xs font-semibold text-fg mb-1">MCP access</p>
+                                    <p class="text-[11px] text-muted mb-3">
+                                        Preferred path for reading tickets, moving their status, and detecting new
+                                        tickets. Leave blank to use the Jira REST API directly.
+                                    </p>
+
+                                    <div class="space-y-3">
+                                        <div>
+                                            <label class="text-xs text-muted mb-1 flex items-center gap-1.5">MCP Server URL
+                                                <InfoTip Content="Remote MCP server endpoint exposing Jira tools. When set, MCP is tried before the REST API." Example="https://mcp.atlassian.com/v1/sse" /></label>
+                                            <input type="url" @bind="entry.DraftMcpServerUrl" placeholder="https://mcp.example.com/sse"
+                                                   data-testid="jira-mcp-server-url" class="@InputClass" />
+                                        </div>
+                                        <div>
+                                            <label class="text-xs text-muted mb-1 flex items-center gap-1.5">MCP Auth Token
+                                                <InfoTip Content="Bearer token sent to the MCP server. Stored encrypted; leave blank to keep the existing one." /></label>
+                                            <input type="password" @bind="entry.DraftMcpAuthToken" placeholder="Leave blank to keep existing"
+                                                   autocomplete="new-password" data-testid="jira-mcp-auth-token" class="@InputClass" />
+                                        </div>
+                                        <div>
+                                            <label class="text-xs text-muted mb-1 flex items-center gap-1.5">Read-Issue Tool
+                                                <InfoTip Content="MCP tool that returns one issue. Blank means ticket reads use the REST API." Example="getJiraIssue" /></label>
+                                            <input type="text" @bind="entry.DraftMcpReadToolName" placeholder="getJiraIssue"
+                                                   data-testid="jira-mcp-read-tool" class="@InputClass" />
+                                        </div>
+                                        <div>
+                                            <label class="text-xs text-muted mb-1 flex items-center gap-1.5">Transition Tool
+                                                <InfoTip Content="MCP tool that moves an issue to a new status. Blank means transitions use the REST API." Example="transitionJiraIssue" /></label>
+                                            <input type="text" @bind="entry.DraftMcpTransitionToolName" placeholder="transitionJiraIssue"
+                                                   data-testid="jira-mcp-transition-tool" class="@InputClass" />
+                                        </div>
+                                        <div>
+                                            <label class="text-xs text-muted mb-1 flex items-center gap-1.5">Search (JQL) Tool
+                                                <InfoTip Content="MCP tool that runs a JQL search. Required for the MCP trigger below." Example="searchJiraIssuesUsingJql" /></label>
+                                            <input type="text" @bind="entry.DraftMcpSearchToolName" placeholder="searchJiraIssuesUsingJql"
+                                                   data-testid="jira-mcp-search-tool" class="@InputClass" />
+                                        </div>
+                                        <div>
+                                            <label class="text-xs text-muted mb-1 flex items-center gap-1.5">Argument Overrides (JSON)
+                                                <InfoTip Content="Optional per-tool argument shapes, for servers needing extra arguments such as a cloud id. A JSON object keyed by role: {&quot;read&quot;:{…},&quot;transition&quot;:{…},&quot;search&quot;:{…}}. Placeholders: {{issueKey}}, {{fields}}, {{transitionId}}, {{jql}}, {{maxResults}}." /></label>
+                                            <textarea @bind="entry.DraftMcpArgumentOverrides" rows="3"
+                                                      placeholder="Leave blank to use the default argument shapes"
+                                                      data-testid="jira-mcp-arg-overrides" class="@InputClass font-mono text-xs"></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- ── Ticket-created trigger ──────────────────────────────── -->
+                                <div class="border-t border-line pt-3 mt-1" data-testid="jira-trigger-section">
+                                    <p class="text-xs font-semibold text-fg mb-1">New-ticket trigger</p>
+                                    <p class="text-[11px] text-muted mb-3">
+                                        How the DoR workflow learns a ticket was created. MCP cannot push, so the
+                                        MCP path polls; the webhook is the lower-latency alternative.
+                                    </p>
+
+                                    <div class="space-y-3">
+                                        <div>
+                                            <label class="text-xs text-muted mb-1 flex items-center gap-1.5">MCP Poll Interval (seconds)
+                                                <InfoTip Content="How often to ask the search tool for new tickets. 0 turns polling off and leaves the webhook as the only trigger. Needs a Search (JQL) tool above." /></label>
+                                            <input type="number" min="0" @bind="entry.DraftTriggerPollSeconds"
+                                                   data-testid="jira-trigger-poll-seconds" class="@InputClass" />
+                                        </div>
+                                        <div>
+                                            <label class="text-xs text-muted mb-1 flex items-center gap-1.5">Webhook Signing Secret (HMAC)
+                                                <InfoTip Content="Shared secret for the inbound Jira webhook at /webhooks/jira, used as the fallback trigger. Stored encrypted; leave blank to keep the existing one." /></label>
+                                            <input type="password" @bind="entry.DraftWebhookSecret" placeholder="Leave blank to keep existing"
+                                                   autocomplete="new-password" data-testid="jira-webhook-secret" class="@InputClass" />
+                                        </div>
+                                    </div>
                                 </div>
                             }
                             else
@@ -336,10 +411,6 @@ else
             </div>
         }
 
-        <!-- Jira webhook signing secret for the DoR trigger. Rendered outside the connector loop because
-             DorWorkflow is intentionally excluded from GetAllAsync. The workflow's behaviour is configured on
-             its nodes in the Workflow Builder; only this credential lives on the credentials page. -->
-        <JiraWebhookSecretCard />
     </div>
 }
 
@@ -464,6 +535,14 @@ else
         {
             var (nonSecretJson, secretJson) = entry.SerializeToJson();
 
+            // Jira keeps three credentials in one blob (API token, MCP auth token, webhook signing secret), so
+            // whichever the operator just typed is merged over the stored ones rather than replacing them.
+            if (entry.ConnectorType == ConnectorType.WorkTracker && entry.DraftProvider == ProviderJira)
+            {
+                var storedSecrets = await ConfigRepository.GetDecryptedSecretsAsync(ConnectorType.WorkTracker);
+                secretJson = SecretBlobMerge.Merge(storedSecrets, entry.CollectJiraSecrets());
+            }
+
             // null secretJson leaves the existing encrypted blob intact (Article IX).
             await ConfigRepository.SaveAsync(entry.ConnectorType, nonSecretJson, secretJson);
 
@@ -577,6 +656,15 @@ else
         public string DraftEmail      { get; set; } = string.Empty;
         public string DraftProjectKey { get; set; } = string.Empty;
 
+        // Jira MCP transport + trigger. DraftWebhookSecret is the HMAC secret for the fallback webhook trigger;
+        // it lives here so every Jira credential is entered in one place.
+        public string DraftMcpReadToolName       { get; set; } = string.Empty;
+        public string DraftMcpTransitionToolName { get; set; } = string.Empty;
+        public string DraftMcpSearchToolName     { get; set; } = string.Empty;
+        public string DraftMcpArgumentOverrides  { get; set; } = string.Empty;
+        public int    DraftTriggerPollSeconds    { get; set; }
+        public string DraftWebhookSecret         { get; set; } = string.Empty;
+
         // Messaging-only draft fields (MCP path). DraftMcpAuthToken is a secret.
         public string DraftMcpServerUrl  { get; set; } = string.Empty;
         public string DraftMcpToolName   { get; set; } = string.Empty;
@@ -644,6 +732,9 @@ else
             DraftProvider = DraftEmail = DraftProjectKey = string.Empty;
             DraftMcpServerUrl = DraftMcpToolName = DraftMcpArgTemplate = DraftTarget = string.Empty;
             DraftMcpReplyToolName = DraftMcpReplyArgTemplate = string.Empty;
+            DraftMcpReadToolName = DraftMcpTransitionToolName = DraftMcpSearchToolName = string.Empty;
+            DraftMcpArgumentOverrides = DraftWebhookSecret = string.Empty;
+            DraftTriggerPollSeconds = 0;
             AvailableModels = [];
 
             // Messaging defaults to the Teams platform when no config is stored yet.
@@ -666,6 +757,16 @@ else
                         DraftUrl        = Str(root, "siteUrl");
                         DraftEmail      = Str(root, "email");
                         DraftProjectKey = Str(root, "projectKey");
+
+                        DraftMcpServerUrl            = Str(root, "mcpServerUrl");
+                        DraftMcpReadToolName         = Str(root, "mcpReadToolName");
+                        DraftMcpTransitionToolName   = Str(root, "mcpTransitionToolName");
+                        DraftMcpSearchToolName       = Str(root, "mcpSearchToolName");
+                        DraftTriggerPollSeconds      = Int(root, "triggerPollSeconds");
+                        DraftMcpArgumentOverrides    = JiraMcpArgumentOverrides.Format(new JiraMcpArgumentTemplates(
+                            NullIfBlank(Str(root, "mcpReadArgumentTemplate")),
+                            NullIfBlank(Str(root, "mcpTransitionArgumentTemplate")),
+                            NullIfBlank(Str(root, "mcpSearchArgumentTemplate"))));
                     }
                     else
                     {
@@ -696,6 +797,9 @@ else
 
                 static string Str(JsonElement el, string key) =>
                     el.TryGetProperty(key, out var p) ? (p.GetString() ?? string.Empty) : string.Empty;
+
+                static int Int(JsonElement el, string key) =>
+                    el.TryGetProperty(key, out var p) && p.TryGetInt32(out var value) ? value : 0;
             }
             catch { /* malformed — start blank */ }
         }
@@ -710,7 +814,7 @@ else
             {
                 // Work Tracking System: discriminated by provider — ADO fields or Jira fields.
                 ConnectorType.WorkTracker => DraftProvider == ProviderJira
-                    ? JsonSerializer.Serialize(new { provider = ProviderJira, siteUrl = DraftUrl, email = DraftEmail, projectKey = DraftProjectKey })
+                    ? SerializeJiraNonSecret()
                     : JsonSerializer.Serialize(new { provider = ProviderAzureDevOps, organizationUrl = DraftUrl, projectName = DraftUsername }),
                 ConnectorType.LLM =>
                     JsonSerializer.Serialize(new { provider = DraftUrl, modelName = DraftUsername }),
@@ -730,7 +834,8 @@ else
                 _ => null,
             };
 
-            // Messaging carries two secrets (webhook URL + MCP auth token) in one blob; the others have one.
+            // Messaging carries two secrets (webhook URL + MCP auth token) in one blob; Jira now carries three
+            // and is merged against the stored blob by the save path, so the others have one.
             string? secret = ConnectorType == ConnectorType.Messaging
                 ? SerializeMessagingSecret()
                 : string.IsNullOrWhiteSpace(DraftSecret) ? null : ConnectorType switch
@@ -746,6 +851,44 @@ else
 
             return (nonSecret, secret);
         }
+
+        /// <summary>
+        /// Serializes the Jira provider's non-secret fields, including the MCP transport settings and the
+        /// trigger poll interval. The single operator-facing overrides box is split back into the three
+        /// per-tool argument templates the MCP client reads.
+        /// </summary>
+        private string SerializeJiraNonSecret()
+        {
+            var templates = JiraMcpArgumentOverrides.Parse(DraftMcpArgumentOverrides);
+
+            return JsonSerializer.Serialize(new
+            {
+                provider   = ProviderJira,
+                siteUrl    = DraftUrl,
+                email      = DraftEmail,
+                projectKey = DraftProjectKey,
+
+                mcpServerUrl                  = NullIfBlank(DraftMcpServerUrl),
+                mcpReadToolName               = NullIfBlank(DraftMcpReadToolName),
+                mcpReadArgumentTemplate       = templates.Read,
+                mcpTransitionToolName         = NullIfBlank(DraftMcpTransitionToolName),
+                mcpTransitionArgumentTemplate = templates.Transition,
+                mcpSearchToolName             = NullIfBlank(DraftMcpSearchToolName),
+                mcpSearchArgumentTemplate     = templates.Search,
+                triggerPollSeconds            = Math.Max(0, DraftTriggerPollSeconds),
+            });
+        }
+
+        /// <summary>
+        /// The Jira credentials typed on this form, keyed by their name in the encrypted blob. Blank entries mean
+        /// "unchanged" and are merged away, so saving one credential never erases the other two.
+        /// </summary>
+        public IReadOnlyDictionary<string, string?> CollectJiraSecrets() => new Dictionary<string, string?>
+        {
+            ["apiToken"]          = DraftSecret,
+            ["mcpAuthToken"]      = DraftMcpAuthToken,
+            ["jiraWebhookSecret"] = DraftWebhookSecret,
+        };
 
         // Returns null (preserve existing) only when BOTH messaging secrets are blank; otherwise writes the
         // blob with whichever secrets were entered. MCP and webhook are alternative paths, so operators

@@ -243,11 +243,22 @@ builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter,
 // authed client only when they change (hot-reload — FR-005), replacing the former startup-baked HttpClient.
 builder.Services.AddSingleton<DBAIAzure.Web.Integrations.Jira.IJiraConnectionFactory,
     DBAIAzure.Web.Integrations.Jira.JiraConnectionFactory>();
+
+// MCP-first Jira transport: reads, transitions, and the new-ticket search go through the connector's configured
+// MCP tools when one is set, with the REST client above as the fallback. Singleton so it shares the same
+// hot-reloading config resolver as everything else on this path.
+builder.Services.AddSingleton<DBAIAzure.Web.Integrations.Jira.IJiraMcpClient,
+    DBAIAzure.Web.Integrations.Jira.JiraMcpClient>();
+
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapter>(sp =>
     new DBAIAzure.Web.Integrations.Jira.JiraWorkTrackerAdapter(
         sp.GetRequiredService<DBAIAzure.Web.Integrations.Jira.IJiraConnectionFactory>(),
+        sp.GetRequiredService<DBAIAzure.Web.Integrations.Jira.IJiraMcpClient>(),
         sp.GetRequiredService<DBAIAzure.Core.Interfaces.IBindingWorkItemMap>(),
         sp.GetRequiredService<ILogger<DBAIAzure.Web.Integrations.Jira.JiraWorkTrackerAdapter>>()));
+
+// The MCP trigger poll — dormant until the operator sets a search tool and a positive interval on the connector.
+builder.Services.AddHostedService<DBAIAzure.Web.Services.Dor.JiraMcpTriggerPoller>();
 
 builder.Services.AddSingleton<DBAIAzure.Core.Interfaces.IWorkTrackerAdapterProvider,
     DBAIAzure.Web.Services.WorkTrackerAdapterProvider>();

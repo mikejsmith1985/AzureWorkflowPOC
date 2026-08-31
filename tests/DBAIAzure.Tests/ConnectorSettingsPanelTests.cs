@@ -41,17 +41,76 @@ public sealed class ConnectorSettingsPanelTests : TestContext
         var cut = RenderComponent<ConnectorSettings>();
         await cut.InvokeAsync(() => Task.CompletedTask);
 
-        // The Jira webhook credential card is always rendered, separate from the connector loop. (The old DoR
-        // configuration card is gone — the workflow is configured on its nodes in the Workflow Builder.)
-        Assert.Single(cut.FindAll("[data-testid='jira-webhook-secret-card']"));
+        // Every Jira credential — including the webhook signing secret — now lives on the Work Tracking System
+        // connector, so no standalone webhook card is rendered any more.
+        Assert.Empty(cut.FindAll("[data-testid='jira-webhook-secret-card']"));
 
-        // Three Edit buttons for the connector loop — one per connector card — excluding the webhook card's own
-        // Edit button. Select by text rather than the colour class, which is now a semantic token (spec-014).
+        // Three Edit buttons — one per connector card. Select by text rather than the colour class, which is
+        // now a semantic token (spec-014).
         var editButtons = cut.FindAll("button")
-            .Where(b => b.TextContent.Trim() == "Edit"
-                        && b.Closest("[data-testid='jira-webhook-secret-card']") is null)
+            .Where(b => b.TextContent.Trim() == "Edit")
             .ToList();
         Assert.Equal(3, editButtons.Count);
+    }
+
+    // ── Jira: MCP transport, trigger, and credentials all on one card ────────
+
+    [Fact]
+    public async Task WorkTrackerCard_WhenJiraIsSelected_OffersMcpTransportAndBothTriggerPaths()
+    {
+        var repo = new FakeConfigRepo([JiraWorkTracker()]);
+        RegisterServices(repo, new NullHealthChecker());
+
+        var cut = RenderComponent<ConnectorSettings>();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Edit").Click();
+        await cut.InvokeAsync(() => Task.CompletedTask);
+
+        // MCP is offered first — server, token, and one tool name per operation the workflow needs.
+        Assert.Single(cut.FindAll("[data-testid='jira-mcp-server-url']"));
+        Assert.Single(cut.FindAll("[data-testid='jira-mcp-auth-token']"));
+        Assert.Single(cut.FindAll("[data-testid='jira-mcp-read-tool']"));
+        Assert.Single(cut.FindAll("[data-testid='jira-mcp-transition-tool']"));
+        Assert.Single(cut.FindAll("[data-testid='jira-mcp-search-tool']"));
+
+        // Both trigger paths are configured here: the MCP poll and the fallback webhook's signing secret.
+        Assert.Single(cut.FindAll("[data-testid='jira-trigger-poll-seconds']"));
+        Assert.Single(cut.FindAll("[data-testid='jira-webhook-secret']"));
+    }
+
+    [Fact]
+    public async Task WorkTrackerCard_WhenAzureDevOpsIsSelected_HidesTheJiraOnlyMcpFields()
+    {
+        var repo = new FakeConfigRepo([AdoWorkTracker()]);
+        RegisterServices(repo, new NullHealthChecker());
+
+        var cut = RenderComponent<ConnectorSettings>();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Edit").Click();
+        await cut.InvokeAsync(() => Task.CompletedTask);
+
+        Assert.Empty(cut.FindAll("[data-testid='jira-mcp-section']"));
+        Assert.Empty(cut.FindAll("[data-testid='jira-webhook-secret']"));
+    }
+
+    [Fact]
+    public async Task WorkTrackerCard_PrefillsTheStoredMcpSettingsWhenReopened()
+    {
+        var stored = """
+            {"provider":"Jira","siteUrl":"https://acme.atlassian.net","email":"you@acme.com","projectKey":"SBRO",
+             "mcpServerUrl":"https://mcp.example.com/sse","mcpSearchToolName":"searchJiraIssuesUsingJql",
+             "triggerPollSeconds":60}
+            """;
+        var repo = new FakeConfigRepo([JiraWorkTracker(stored)]);
+        RegisterServices(repo, new NullHealthChecker());
+
+        var cut = RenderComponent<ConnectorSettings>();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Edit").Click();
+        await cut.InvokeAsync(() => Task.CompletedTask);
+
+        Assert.Equal("https://mcp.example.com/sse",
+            cut.Find("[data-testid='jira-mcp-server-url']").GetAttribute("value"));
+        Assert.Equal("searchJiraIssuesUsingJql",
+            cut.Find("[data-testid='jira-mcp-search-tool']").GetAttribute("value"));
+        Assert.Equal("60", cut.Find("[data-testid='jira-trigger-poll-seconds']").GetAttribute("value"));
     }
 
     [Fact]
@@ -107,6 +166,18 @@ public sealed class ConnectorSettingsPanelTests : TestContext
         Services.AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<ConnectorSettings>),
             NullLogger<ConnectorSettings>.Instance);
     }
+
+    /// <summary>A Work Tracking System row whose active provider is Jira, so the Jira form branch renders.</summary>
+    private static ConnectorConfig JiraWorkTracker(string? nonSecretJson = null) =>
+        new(ConnectorType.WorkTracker,
+            nonSecretJson ?? """{"provider":"Jira","siteUrl":"https://acme.atlassian.net","email":"you@acme.com","projectKey":"SBRO"}""",
+            HasSecrets: true, IsConfigured: true, LastUpdatedAt: DateTimeOffset.UtcNow, LastTestResult: null);
+
+    /// <summary>A Work Tracking System row on Azure DevOps — the Jira-only fields must stay hidden.</summary>
+    private static ConnectorConfig AdoWorkTracker() =>
+        new(ConnectorType.WorkTracker,
+            """{"provider":"AzureDevOps","organizationUrl":"https://dev.azure.com/acme","projectName":"Demo"}""",
+            HasSecrets: true, IsConfigured: true, LastUpdatedAt: DateTimeOffset.UtcNow, LastTestResult: null);
 
     private static ConnectorConfig MakeConfig(ConnectorType type, bool isConfigured) =>
         new ConnectorConfig(

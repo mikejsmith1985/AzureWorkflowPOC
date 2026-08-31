@@ -1,7 +1,6 @@
 // Jira Cloud implementation of IWorkTrackerAdapter (spec-018, increment 3; spec-020 per-run credentials).
 // Net-new code behind the contract proven by the ADO adapter — the pipeline/cost layers are unchanged.
 using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using DBAIAzure.Core.Interfaces;
 using DBAIAzure.Core.Models;
@@ -21,6 +20,7 @@ namespace DBAIAzure.Web.Integrations.Jira;
 public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
 {
     private readonly IJiraConnectionFactory _connectionFactory;
+    private readonly IJiraMcpClient _mcpClient;
     private readonly IBindingWorkItemMap _bindingMap;
     private readonly ILogger<JiraWorkTrackerAdapter> _logger;
 
@@ -28,9 +28,11 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
     private Dictionary<string, string>? _fieldIdByName;   // Jira field display name → customfield id
 
     public JiraWorkTrackerAdapter(
-        IJiraConnectionFactory connectionFactory, IBindingWorkItemMap bindingMap, ILogger<JiraWorkTrackerAdapter> logger)
+        IJiraConnectionFactory connectionFactory, IJiraMcpClient mcpClient,
+        IBindingWorkItemMap bindingMap, ILogger<JiraWorkTrackerAdapter> logger)
     {
         _connectionFactory = connectionFactory;
+        _mcpClient = mcpClient;
         _bindingMap = bindingMap;
         _logger = logger;
     }
@@ -145,6 +147,11 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
     public async Task<WorkItemFields> ReadWorkItemAsync(
         WorkItemRef item, IReadOnlyCollection<string> watchFields, CancellationToken ct = default)
     {
+        // MCP first: when the connector names an MCP read tool, the ticket is hydrated through it. A null result
+        // means MCP is not configured for reads or the call failed, and we fall through to the REST API.
+        if (await _mcpClient.TryReadIssueAsync(item.Value, watchFields, ct) is { } fromMcp)
+            return fromMcp;
+
         var connection = await _connectionFactory.GetConnectionAsync(ct);
 
         // Request only the watched fields when specified; otherwise let Jira return its default field set.
@@ -157,23 +164,9 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
         var root = doc.RootElement;
 
         var key = root.TryGetProperty("key", out var k) ? k.GetString() ?? item.Value : item.Value;
-        var flattened = new Dictionary<string, string?>();
-        if (root.TryGetProperty("fields", out var fieldsEl) && fieldsEl.ValueKind == JsonValueKind.Object)
-        {
-            // When specific watch fields were requested, project exactly those (so the review payload is stable
-            // and the field_labels mapping lines up); otherwise include everything Jira returned.
-            if (watchFields.Count > 0)
-            {
-                foreach (var name in watchFields)
-                    if (fieldsEl.TryGetProperty(name, out var value))
-                        flattened[name] = FlattenJiraFieldValue(value);
-            }
-            else
-            {
-                foreach (var prop in fieldsEl.EnumerateObject())
-                    flattened[prop.Name] = FlattenJiraFieldValue(prop.Value);
-            }
-        }
+        var flattened = root.TryGetProperty("fields", out var fieldsEl)
+            ? JiraFieldFlattener.FlattenFields(fieldsEl, watchFields)
+            : new Dictionary<string, string?>();
 
         return new WorkItemFields(key, $"{connection.SiteUrl.TrimEnd('/')}/browse/{key}", flattened);
     }
@@ -181,6 +174,11 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
     /// <inheritdoc/>
     public async Task<string> TransitionAsync(WorkItemRef item, string transitionId, CancellationToken ct = default)
     {
+        // MCP first, same as reads. A false result means MCP could not do it — either it is not configured for
+        // transitions or the tool call failed — so the status has not moved and the REST path is safe to try.
+        if (await _mcpClient.TryTransitionAsync(item.Value, transitionId, ct))
+            return transitionId;
+
         var connection = await _connectionFactory.GetConnectionAsync(ct);
         using var response = await connection.Client.PostAsync(
             $"/rest/api/3/issue/{item.Value}/transitions",
@@ -194,49 +192,6 @@ public sealed class JiraWorkTrackerAdapter : IWorkTrackerAdapter
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    /// <summary>Flattens a Jira field value (string, number, option object, array, or ADF doc) to plain text.</summary>
-    private static string? FlattenJiraFieldValue(JsonElement value) => value.ValueKind switch
-    {
-        JsonValueKind.Null or JsonValueKind.Undefined => null,
-        JsonValueKind.String => value.GetString(),
-        JsonValueKind.Number => value.ToString(),
-        JsonValueKind.True => "true",
-        JsonValueKind.False => "false",
-        JsonValueKind.Array => string.Join(", ",
-            value.EnumerateArray().Select(FlattenJiraFieldValue).Where(s => !string.IsNullOrEmpty(s))),
-        JsonValueKind.Object => FlattenJiraObject(value),
-        _ => value.ToString(),
-    };
-
-    /// <summary>Renders an object field: ADF document → text; option/user object → its display label.</summary>
-    private static string? FlattenJiraObject(JsonElement obj)
-    {
-        if (obj.TryGetProperty("type", out var typeEl) && typeEl.GetString() == "doc")
-            return RenderAdf(obj).Trim();
-        foreach (var labelKey in new[] { "displayName", "name", "value" })
-            if (obj.TryGetProperty(labelKey, out var label) && label.ValueKind == JsonValueKind.String)
-                return label.GetString();
-        return obj.ToString();
-    }
-
-    /// <summary>Walks an Atlassian Document Format node tree collecting its text, paragraph by paragraph.</summary>
-    private static string RenderAdf(JsonElement node)
-    {
-        var builder = new StringBuilder();
-        if (node.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
-            builder.Append(text.GetString());
-        if (node.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var child in content.EnumerateArray())
-            {
-                builder.Append(RenderAdf(child));
-                if (child.TryGetProperty("type", out var childType) && childType.GetString() == "paragraph")
-                    builder.Append('\n');
-            }
-        }
-        return builder.ToString();
-    }
 
     /// <summary>Resolves a logical field name to its <c>customfield_*</c> id (cached after the first call).</summary>
     private async Task<string?> ResolveFieldIdAsync(HttpClient client, string logicalName, CancellationToken ct)
