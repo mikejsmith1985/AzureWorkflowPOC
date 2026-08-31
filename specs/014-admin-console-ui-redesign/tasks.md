@@ -4,6 +4,17 @@ description: "Task list for Admin Console UI redesign + graph folded into the Wo
 
 # Tasks: Admin Console Look-and-Feel Redesign + Graph Folded Into the Workflow Builder
 
+## Status (reconciled 2026-08-31)
+
+**Shipped (40/42), and this spec carries the only outstanding *development* work in the repository.**
+
+- **T015** — make `ShellNavigationTests` pass, adding `data-testid`s as needed.
+- **T019** — confirm/expose the Builder's loaded-workflow graph view and add an in-Builder graph affordance.
+
+This spec also **supersedes `009-admin-console-ux-polish`**, whose deliverables were never built.
+
+---
+
 **Input**: Design documents from `specs/014-admin-console-ui-redesign/`
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/, quickstart.md (all present)
 

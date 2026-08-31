@@ -4,6 +4,13 @@ description: "Task list for Spec Kit Phase Handler implementation"
 
 # Tasks: Spec Kit Phase Handler
 
+## Status (reconciled 2026-08-31)
+
+**Shipped.** The only open item is **T048**, a `quickstart.md` Scenarios A–C run — verification, not
+development. Nothing here is waiting on code.
+
+---
+
 **Input**: Design documents from `specs/001-speckit-phase-handler/`
 
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/

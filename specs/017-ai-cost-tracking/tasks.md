@@ -1,5 +1,18 @@
 # Tasks: Two-Dimensional AI Cost Tracking on the Work Hierarchy
 
+## Status (reconciled 2026-08-31)
+
+**Shipped** via PR #45 (two-dimensional AI cost: runtime + dev, binding key, ledger, ingest, ADO Analytics
+rollup). Three items remain, and two of them are real:
+
+- **T010** — unit test: `PhaseValidationStep` fails DoR when the binding key is missing/invalid.
+- **T018** — unit test: one run yields one runtime entry on the anchor; a multi-item run is not duplicated.
+- **T034** — `quickstart` Scenarios A–D, needing a live ADO/agent round-trip (verification).
+
+The two unit tests are genuine outstanding work: the behaviour ships untested.
+
+---
+
 **Feature**: `specs/017-ai-cost-tracking` · **Branch**: `feature/017-ai-cost-tracking`
 **Inputs**: [plan.md](./plan.md), [spec.md](./spec.md), [data-model.md](./data-model.md),
 [contracts/cost-tracking.md](./contracts/cost-tracking.md), [research.md](./research.md)

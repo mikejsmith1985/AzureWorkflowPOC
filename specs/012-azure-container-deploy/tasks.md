@@ -4,6 +4,16 @@ description: "Task list for One-URL Azure Container Demo Deployment"
 
 # Tasks: One-URL Azure Container Demo Deployment
 
+## Status (reconciled 2026-08-31)
+
+**Blocked, not unfinished.** All nine open items are validation runs against a deployed app
+(`quickstart` §3–§7). The deployment scripts and the app itself shipped; the Azure subscription went billing
+read-only and the Container App is in a Failed state, so none of these can be executed until it is re-enabled.
+
+**No code is owed here.** Re-run T015–T023 + T027 once the subscription is live.
+
+---
+
 **Input**: Design documents from `specs/012-azure-container-deploy/`
 
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/, quickstart.md

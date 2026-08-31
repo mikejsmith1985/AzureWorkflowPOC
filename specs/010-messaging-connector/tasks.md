@@ -1,5 +1,22 @@
 # Tasks: Multi-Platform Messaging Connector
 
+## Status (reconciled 2026-08-31)
+
+**Shipped, with one real leftover.** The Messaging connector is live: `Connectors/Messaging/` holds the MCP
+gateway (`McpMessageGateway`, `IMcpMessageGateway`, `McpArgumentTemplate`), the delivery selector
+(`MessageDelivery`) and the Slack / Discord / Teams webhook profiles; `Web/Integrations/Messaging/` holds
+`MessagingHitlNotifier` and `SlackMcpReplyReader`.
+
+**Genuinely open: T042**, and it is not the trivial delete it reads as.
+`src/DBAIAzure.Web/Integrations/Teams/TeamsWorkflowApprovalNotifier.cs` is still the **live**
+`IWorkflowApprovalNotifier` — registered at `src/DBAIAzure.Web/Program.cs:419` and covered by
+`tests/DBAIAzure.Tests/TeamsApprovalNotifierTests.cs`. Removing it means first moving approval notification onto
+`MessagingHitlNotifier`, which is a design change, not a cleanup. Left open deliberately.
+
+Every other unchecked box names a path that later specs renamed.
+
+---
+
 **Feature**: 010-messaging-connector · **Branch**: `feature/messaging-connector`
 **Spec**: [spec.md](./spec.md) · **Plan**: [plan.md](./plan.md)
 

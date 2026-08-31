@@ -4,6 +4,21 @@ description: "Task list for modernizing the agent stack onto Microsoft Agent Fra
 
 # Tasks: Modernize the Agent Stack onto Microsoft Agent Framework (MAF)
 
+## Status (reconciled 2026-08-31)
+
+**Shipped — checkboxes below are unreliable.** The MAF cutover is complete and verified against the tree:
+
+- **Zero** `SemanticKernel` package references remain in any `.csproj`.
+- `Microsoft.Agents.AI.Workflows` **1.13.0** and `Microsoft.Extensions.AI.Abstractions` **10.7.0** are referenced.
+- The legacy HITL types the list asks to replace — `HitlPauseStep`, `HitlExternalChannel`, `ApprovalPauseStep`,
+  `HumanApprovalStep`, `ApprovalExternalChannel` — **no longer exist**.
+- `RequestPort` is in live use across `Executors/` and `Pipeline/`.
+
+The cutover landed on `feature/019-maf-cutover` ("remove Semantic Kernel, MAF Workflows only"), which closed
+T050/T051/T056 without ticking the earlier boxes. **Treat this file as history, not as a work queue.**
+
+---
+
 **Input**: Design documents from `specs/019-maf-modernization/`
 **Prerequisites**: plan.md, spec.md, research.md (D1–D10), data-model.md, contracts/ (5), quickstart.md
 

@@ -1,5 +1,13 @@
 # Tasks: Accurate AI Usage Telemetry Capture
 
+## Status (reconciled 2026-08-31)
+
+**Shipped.** The only open item is **T036**, a live ADO write-back round-trip (telemetry → work-item fields on
+a real organization) — verification, and it needs a live ADO target. Tracked alongside spec-009-ado and
+spec-017 T034.
+
+---
+
 **Feature**: `specs/016-llm-telemetry-capture` · **Branch**: `feature/016-llm-telemetry-capture`
 **Inputs**: [plan.md](./plan.md), [spec.md](./spec.md), [data-model.md](./data-model.md),
 [contracts/llm-telemetry-capture.md](./contracts/llm-telemetry-capture.md), [research.md](./research.md)

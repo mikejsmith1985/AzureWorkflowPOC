@@ -4,6 +4,20 @@ description: "Task list for Node Realization implementation"
 
 # Tasks: Node Realization — Convert Plain-Language Nodes into Production-Ready Agentic & Function Nodes
 
+## Status (reconciled 2026-08-31)
+
+**Shipped — checkboxes below are unreliable.** The feature is live (node realization, `Make it real`,
+per-node config, readiness gating), but the task list was written against the pre-MAF *Step* architecture and
+spec-019 renamed every one of those files. `src/DBAIAzure.Processes/Pipeline/AgenticNodeStep.cs` is now
+`src/DBAIAzure.Processes/Executors/AgenticNodeExecutor.cs`, and the same holds for Notify, Route, Data and
+Transform. The per-node config records the list asks for all exist under
+`src/DBAIAzure.Core/Models/NodeConfig/` (10 files).
+
+Because the paths can never match again, these boxes are left as written rather than ticked against files that
+no longer exist. **Treat this file as history, not as a work queue.**
+
+---
+
 **Input**: Design documents from `specs/007-node-realization/`
 
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/realization-service.md, quickstart.md

@@ -1,5 +1,14 @@
 # Tasks: Fix Node Text Editing in Workflow Builder
 
+## Status (reconciled 2026-08-31)
+
+**Shipped.** The only open item is **T018**, the full Playwright E2E run. That is the *same gate* as
+spec-021 T078: as of this reconciliation E2E stands at **77/81**, with four `NodeRealizationTests` failing on a
+shared precondition (`accept-all` never enables after the "Make it real" pass). Whatever closes that gate closes
+both tasks.
+
+---
+
 **Input**: Design documents from `specs/006-fix-node-text-editing/`
 
 **Prerequisites**: plan.md ✓ | spec.md ✓ | research.md ✓ | data-model.md ✓ | contracts/ ✓ | quickstart.md ✓
