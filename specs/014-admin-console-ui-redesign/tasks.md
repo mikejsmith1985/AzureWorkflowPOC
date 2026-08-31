@@ -6,10 +6,10 @@ description: "Task list for Admin Console UI redesign + graph folded into the Wo
 
 ## Status (reconciled 2026-08-31)
 
-**Shipped (40/42), and this spec carries the only outstanding *development* work in the repository.**
-
-- **T015** — make `ShellNavigationTests` pass, adding `data-testid`s as needed.
-- **T019** — confirm/expose the Builder's loaded-workflow graph view and add an in-Builder graph affordance.
+**Complete (42/42).** T015 and T019 were closed on 2026-08-31 by verification rather than new code: all eight
+`ShellNavigationTests` and both `GraphRedirectTests` already pass, and the Builder canvas already *is* the
+loaded-workflow graph (Z.Blazor.Diagrams in `WorkflowCanvas.razor`, with `/graph` redirecting to
+`/workflow-builder`). T019's "if not already obvious" condition was met, so no extra affordance was added.
 
 This spec also **supersedes `009-admin-console-ux-polish`**, whose deliverables were never built.
 
@@ -70,7 +70,8 @@ xUnit unit tests. No new NuGet packages, no DB changes.
 - [X] T012 [US1] Implement a minimal `src/DBAIAzure.Web/Shared/AssistantPanel.razor` rail placeholder (header + collapsed/expanded container; full behaviour in US4) so the shell has its third region.
 - [X] T013 [US1] Compose `AppShell.razor` (sidebar + top bar + `@Body` content + rail; responsive sidebar collapse; `prefers-reduced-motion` handling; visible focus ring) and set `DefaultLayout="typeof(AppShell)"` in `src/DBAIAzure.Web/App.razor`; move the `OnboardingBanner` + field-tooltip portal out of `MainLayout` into `AppShell` and retire `MainLayout.razor`.
 - [X] T014 [US1] Reconcile `src/DBAIAzure.Web/Shared/WorkflowBuilderLayout.razor` / `Pages/WorkflowBuilder.razor` so the Builder renders inside the `AppShell` content region (full-width canvas) instead of bypassing the shell (C-SHELL-6).
-- [ ] T015 [US1] Run `scripts/run-e2e.ps1`; make `ShellNavigationTests` pass (add `data-testid`s as needed).
+- [x] T015 [US1] Run `scripts/run-e2e.ps1`; make `ShellNavigationTests` pass (add `data-testid`s as needed).  
+  > Verified passing 2026-08-31: all 8 `ShellNavigationTests` are green in the Playwright run (persistence across 3 destinations, no horizontal scroll at 768/1024/1280, active-section highlight, assistant rail).
 
 **Checkpoint**: The new shell is live on every screen — MVP demoable.
 
@@ -85,7 +86,8 @@ xUnit unit tests. No new NuGet packages, no DB changes.
 - [X] T016 [P] [US2] Write FAILING E2E `tests/DBAIAzure.E2ETests/Tests/GraphRedirectTests.cs`: sidebar has no "Graph" entry; visiting `/graph` ends on `/workflow-builder`; loading a saved workflow shows its own nodes/edges; the old fixed intake diagram is absent. (C-NAV-3/4)
 - [X] T017 [US2] Create `src/DBAIAzure.Web/Pages/GraphRedirect.razor` at route `/graph` that navigates to `/workflow-builder` (FR-009).
 - [X] T018 [US2] Delete `src/DBAIAzure.Web/Pages/Graph.razor` and remove its `NavModel`/sidebar reference; confirm the Mermaid CDN include and `window.mermaidRender` in `_Host.cshtml` REMAIN (still used by `Pages/RunDetail.razor`).
-- [ ] T019 [US2] Confirm/expose the Builder's loaded-workflow graph view (Z.Blazor.Diagrams already renders it); add an in-Builder graph affordance if not already obvious. Make `GraphRedirectTests` pass.
+- [x] T019 [US2] Confirm/expose the Builder's loaded-workflow graph view (Z.Blazor.Diagrams already renders it); add an in-Builder graph affordance if not already obvious. Make `GraphRedirectTests` pass.  
+  > Verified 2026-08-31: the Builder canvas *is* the loaded-workflow graph (Z.Blazor.Diagrams in `WorkflowCanvas.razor`), `Pages/GraphRedirect.razor` keeps `/graph` alive by redirecting to `/workflow-builder`, and both `GraphRedirectTests` pass. The task's "if not already obvious" condition is met, so no extra affordance was added.
 
 **Checkpoint**: Graph folded in; old route safe.
 

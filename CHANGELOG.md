@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — The two AI-cost rules that shipped untested now have tests (spec-017 T010/T018)
+
+Both rules protect money, and neither had a test. They do now.
+
+- **The cost binding key is a Definition-of-Ready condition** (`CostBindingDorGateTests`, 7 cases). A run whose
+  binding key is missing, blank or malformed fails the gate as a terminal state — and fails it *before* the
+  model is called, so an unattributable run never spends money proving it is unattributable. A deployment with
+  no minter configured is unaffected.
+- **One run bills once** (`RuntimeCostSingleEntryTests`, 6 cases). A Plan run that creates ten Tasks appends
+  exactly one runtime ledger entry, on the anchor — per-child appends would multiply a single spend by the
+  number of planned tasks and corrupt every rollup above it. Also pins that the ledger entry and the projected
+  rollup agree on the same anchor, and that a run with no binding key appends nothing at all.
+- **`RecordingWorkflowContext`** — a recording `IWorkflowContext` test double. MAF executors previously could
+  not be unit-tested at all without standing up a workflow run; their branch logic does not need one. This
+  keeps such tests in the 100%-mocked unit layer (Article V) and unlocks the same approach for every executor.
+
 ### Added — A DoR step cannot start a run without the settings it needs (spec-021, T071)
 
 Three DoR node settings have no safe default, and a run that starts without them fails part-way through against
