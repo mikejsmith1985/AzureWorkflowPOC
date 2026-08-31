@@ -5,11 +5,12 @@
 **Shipped** via PR #45 (two-dimensional AI cost: runtime + dev, binding key, ledger, ingest, ADO Analytics
 rollup). Three items remain, and two of them are real:
 
-- **T010** — unit test: `PhaseValidationStep` fails DoR when the binding key is missing/invalid.
-- **T018** — unit test: one run yields one runtime entry on the anchor; a multi-item run is not duplicated.
-- **T034** — `quickstart` Scenarios A–D, needing a live ADO/agent round-trip (verification).
+- **T010** — done 2026-08-31: `CostTracking/CostBindingDorGateTests.cs` (7 cases). Note the executor is now
+  `PhaseValidationExecutor`, not the `PhaseValidationStep` this list names — spec-019 renamed it.
+- **T018** — done 2026-08-31: `CostTracking/RuntimeCostSingleEntryTests.cs` (6 cases).
+- **T034** — still open: `quickstart` Scenarios A–D need a live ADO/agent round-trip (verification).
 
-The two unit tests are genuine outstanding work: the behaviour ships untested.
+Both unit tests were genuinely missing — the DoR gate and the one-entry-per-run rule shipped untested.
 
 ---
 
@@ -64,7 +65,8 @@ work item has `Custom.CostBindingKey` and the SNow ticket carries the same key.
 ### Tests (write first)
 - [x] T009 [P] [US1] Unit test: `BindingKeyMinter.Mint` is branch-safe + unique; `IsValid` rejects
   blank/whitespace/slashes, in `tests/DBAIAzure.Tests/BindingKeyMinterTests.cs`.
-- [ ] T010 [P] [US1] Unit test: `PhaseValidationStep` fails DoR when binding key is missing/invalid.
+- [x] T010 [P] [US1] Unit test: `PhaseValidationStep` fails DoR when binding key is missing/invalid.  
+  > `tests/DBAIAzure.Tests/CostTracking/CostBindingDorGateTests.cs` — 7 cases: null/blank/malformed keys fail the gate, the model is never called, a valid key forwards for approval, and a deployment with no minter is unaffected.
   **Deferred** — `KernelProcessStepContext` is sealed (can't capture the emitted event in a unit test);
   the guard logic is `IBindingKeyMinter.IsValid` (covered by `BindingKeyMinterTests`) + quickstart A.
   Implementation (T015) is done.
@@ -94,7 +96,8 @@ cost reflects the ledger; multi-item runs are not duplicated.
 ### Tests (write first)
 - [x] T017 [P] [US2] Unit test: `SqlCostLedger.GetTotalsAsync` sums runtime cost by binding key,
   cumulative across appends (no overwrite), in `tests/DBAIAzure.Tests/CostTracking/CostLedgerTests.cs`.
-- [ ] T018 [P] [US2] Unit test: one run → one runtime entry on the anchor; multi-item run not duplicated.
+- [x] T018 [P] [US2] Unit test: one run → one runtime entry on the anchor; multi-item run not duplicated.  
+  > `tests/DBAIAzure.Tests/CostTracking/RuntimeCostSingleEntryTests.cs` — 6 cases: exactly one runtime entry for 1, 3 and 10 planned tasks; entry carries the run's binding key and source id; ledger and projection agree on one anchor; no binding key appends nothing.
   **Deferred** — exercises `CreateWorkItemStep` (sealed `KernelProcessStepContext`); the append-once-on-anchor
   logic is implemented (T020) and the cumulative/no-overwrite ledger behaviour is covered by `CostLedgerTests`
   + quickstart Scenario B.
