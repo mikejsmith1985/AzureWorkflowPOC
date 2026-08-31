@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — A second E2E test was permanently repointing the Work Tracking connector
+
+Same defect class as the LLM key, found while checking why quickstart Scenarios A-D had no target:
+`ConnectorSettingsTests.WorkTrackerCard_AdoProvider_ShowsPreflightButton` saves
+`https://dev.azure.com/e2e-org` / `E2EProject` into the one Work Tracking connector row the whole app reads —
+and never puts it back. Any real Jira or Azure DevOps target configured in that environment is silently
+replaced by the test's placeholders on the next run.
+
+- The test now **captures the card's existing provider, URL and project before editing and restores them
+  afterwards**. A blank original means there was nothing configured, and nothing is written back.
+- No production code changed; this is test isolation, like the LLM-key fix above.
+- `LlmKeyEntryTests` also stopped assuming the model field is always a text box. The LLM card renders it as
+  free text until "Fetch Models" populates a list and as a dropdown afterwards, so the test now waits for the
+  API key field (the element actually under test) to prove the form expanded, and sets the model through
+  whichever control is rendered.
+
 ### Fixed — One E2E test was disabling four others by saving a dummy API key
 
 Every E2E class shares a single web app and a single `pipeline.db`. `LlmKeyEntryTests` saves

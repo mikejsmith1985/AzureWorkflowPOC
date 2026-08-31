@@ -147,6 +147,14 @@ public sealed class ConnectorSettingsTests : E2ETestBase
         // Configure the connector as Azure DevOps (non-secret fields are enough to persist a provider).
         var card = WorkTrackerCard();
         await card.Locator("button:has-text('Edit')").First.ClickAsync();
+
+        // Remember what was there. This card is the one Work Tracking row the whole app reads, and every E2E
+        // class shares one database — overwriting it permanently would repoint a real Jira/ADO target at this
+        // test's placeholders, exactly as a dummy LLM key once disabled the realization tests (#69).
+        var originalProvider = await card.Locator("[data-testid='worktracker-provider']").InputValueAsync();
+        var originalUrl      = await card.Locator("input[type='url']").InputValueAsync();
+        var originalProject  = await card.Locator("input[type='text']").First.InputValueAsync();
+
         await card.Locator("[data-testid='worktracker-provider']")
             .SelectOptionAsync(new SelectOptionValue { Value = "AzureDevOps" });
         await card.Locator("input[type='url']").FillAsync("https://dev.azure.com/e2e-org");
@@ -160,6 +168,32 @@ public sealed class ConnectorSettingsTests : E2ETestBase
 
         var bodyText = await Page.InnerTextAsync("body");
         Assert.DoesNotContain("An unhandled error has occurred", bodyText, StringComparison.OrdinalIgnoreCase);
+
+        await RestoreWorkTrackerAsync(originalProvider, originalUrl, originalProject);
+    }
+
+    /// <summary>
+    /// Puts the Work Tracking connector back as it was found, so this test does not leave the shared row
+    /// pointing at its own placeholder org. A blank original means there was nothing configured to restore.
+    /// </summary>
+    private async Task RestoreWorkTrackerAsync(string provider, string url, string project)
+    {
+        if (string.IsNullOrWhiteSpace(url) && string.IsNullOrWhiteSpace(project))
+            return;
+
+        var card = WorkTrackerCard();
+        await card.Locator("button:has-text('Edit')").First.ClickAsync();
+
+        if (!string.IsNullOrWhiteSpace(provider))
+        {
+            await card.Locator("[data-testid='worktracker-provider']")
+                .SelectOptionAsync(new SelectOptionValue { Value = provider });
+        }
+
+        await card.Locator("input[type='url']").FillAsync(url);
+        await card.Locator("input[type='text']").First.FillAsync(project);
+        await card.Locator("button:has-text('Save')").ClickAsync();
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
     }
 
     /// <summary>The generic Work Tracking System connector card, located by its heading text.</summary>
